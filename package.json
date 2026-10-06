@@ -8,6 +8,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test",
     "test:browser": "node scripts/browser-smoke.mjs",
-    "check": "node --check app.js && node --check renderer.js && node --check model.js && node --check server.mjs && node --check scripts/build.mjs"
+    "check": "node --check app.js && node --check renderer.js && node --check model.js && node --check presets.js && node --check storage.js && node --check server.mjs && node --check scripts/build.mjs && node --check scripts/fetch-font.mjs",
+    "fonts": "node scripts/fetch-font.mjs"
   }
 }

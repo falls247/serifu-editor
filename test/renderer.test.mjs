@@ -50,3 +50,14 @@ test('copying to a different image scales positions without sharing mutable laye
   target.layers[0].text = '変更'; assert.equal(source.layers[0].text, '続き');
   restore(target, 'undo'); assert.equal(target.layers.length, 0);
 });
+
+test('new dialogue and effects default to vertical writing',()=>{
+  assert.equal(newLayer('dialogue',1000,750).vertical,true);
+  assert.equal(newLayer('sfx',1000,750).vertical,true);
+});
+test('blur and distortion survive project restoration with range validation',()=>{
+  const l={...newLayer('sfx',1000,750),blur:7,motionBlur:60,warp:'wave',distortion:80,skew:-25,stretchX:140};
+  const restored=normalizeLayer(JSON.parse(JSON.stringify(l)),3);
+  for(const key of ['blur','motionBlur','warp','distortion','skew','stretchX'])assert.equal(restored[key],l[key]);
+  assert.throws(()=>normalizeLayer({...l,blur:100}));
+});

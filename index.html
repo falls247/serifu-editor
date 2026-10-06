@@ -20,6 +20,13 @@
     <nav aria-label="画像間の移動"><button id="previous" title="前の画像">←</button><select id="jump" aria-label="編集する画像"></select><button id="next" title="次の画像">→</button></nav>
     <div class="project-actions"><button id="projectLoad">編集データを読込</button><button id="projectSave">編集データを保存</button></div>
   </div>
+  <div class="settings-bar">
+    <div class="preset-group"><label>セリフの既定<select id="defaultDialogue" aria-label="セリフの既定プリセット"></select></label><button data-delete-preset="dialogue" title="この既定プリセットを削除">×</button></div>
+    <div class="preset-group"><label>効果音の既定<select id="defaultSfx" aria-label="効果音の既定プリセット"></select></label><button data-delete-preset="sfx" title="この既定プリセットを削除">×</button></div>
+    <button id="savePreset">選択中の設定を記憶</button>
+    <div class="draft-controls"><button id="temporarySave">一時保存</button><label class="autosave-toggle"><input id="autosaveEnabled" type="checkbox" checked>自動保存</label><label class="interval-label"><input id="autosaveMinutes" type="number" min="0.1" max="1440" step="0.1" value="2" aria-label="自動保存の周期（分）">分ごと</label><span id="draftStatus" role="status">まだ一時保存なし</span></div>
+  </div>
+  <div id="draftNotice" class="draft-notice" hidden><span id="draftSummary"></span><button id="restoreDraft">保存した編集を復元</button><button id="clearDraft">一時保存を消去</button></div>
   <main>
     <div class="column-headings" aria-hidden="true"><span><b>01</b> 元画像</span><span><b>02</b> セリフ・効果音</span><span><b>03</b> プレビュー・位置調整</span></div>
     <section id="empty" class="empty">
@@ -62,7 +69,8 @@
             <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
             <label>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>
             <label>配置幅<input data-field="w" type="number" min="30" max="30000"></label><label>配置高さ<input data-field="h" type="number" min="30" max="30000"></label>
-            <label>白い縁の太さ<input data-field="outline" type="number" min="1" max="80"></label><label>文字方向<select data-field="vertical"><option value="false">横書き</option><option value="true">縦書き</option></select></label>
+            <label>白い縁の太さ<input data-field="outline" type="number" min="1" max="80"></label><label>文字方向<select data-field="vertical"><option value="true">縦書き</option><option value="false">横書き</option></select></label>
+            <label>書体<select data-field="font"><option value="comic">漫画・極太</option><option value="sans">ゴシック</option><option value="serif">明朝</option></select></label>
           </div><div class="layer-actions"><button data-action="backward">背面へ</button><button data-action="forward">前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
         </section>
       </div>

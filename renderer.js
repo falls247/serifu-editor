@@ -7,10 +7,12 @@ export function newLayer(kind, width, height, speaker = 'male') {
     id: crypto.randomUUID(), kind, speaker,
     text: kind === 'sfx' ? 'ドーン！' : '',
     x: width * .5, y: height * .4,
-    w: clamp(width * (kind === 'sfx' ? .55 : .42), 30, 30000), h: clamp(height * .25, 30, 30000),
+    w: clamp(width * (kind === 'sfx' ? .34 : .36), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .46), 30, 30000),
     size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .04)), 16, 500),
     rotation: kind === 'sfx' ? -12 : 0, outline: clamp(Math.round(width * .006), 2, 80),
-    vertical: false, color: '#111111', effect: 'impact',
+    vertical: true, color: '#111111', effect: 'burst',
+    font: kind === 'sfx' ? 'comic' : 'sans', blur: 0, motionBlur: 0, blurAngle: 90,
+    distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
   };
 }
 
@@ -81,52 +83,88 @@ function ornament(ctx, l) {
   ctx.restore();
 }
 
+export const FONT_CHOICES = Object.freeze({ comic: '漫画・極太', sans: 'ゴシック', serif: '明朝' });
+export const WARP_CHOICES = Object.freeze({ wave: '波打ち', bulge: '膨張', taper: '先細り' });
+const glyphCache = new Map();
+let cachePixels = 0;
+export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; }
+function createSurface(ctx, width, height) {
+  if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(width, height);
+  if (typeof document !== 'undefined') { const c = document.createElement('canvas'); c.width = width; c.height = height; return c; }
+  return new ctx.canvas.constructor(width, height);
+}
+function fontFamily(l) {
+  if (l.font === 'comic') return '"MangaBold", "Noto Sans CJK JP", "Yu Gothic", sans-serif';
+  return l.font === 'serif' ? '"Yu Mincho", "Hiragino Mincho ProN", serif' : '"Noto Sans JP", "Yu Gothic", sans-serif';
+}
+function drawInk(ctx, l, char, x, y) {
+  if (l.kind === 'sfx') {
+    const depth = l.size * (l.effect === 'impact' || l.effect === 'burst' ? .13 : .05);
+    ctx.strokeStyle = '#111111'; ctx.fillStyle = '#111111'; ctx.lineWidth = l.outline * 2 + l.size * .05;
+    ctx.strokeText(char, x + depth, y + depth); ctx.fillText(char, x + depth, y + depth);
+  }
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = l.outline * 2; ctx.strokeText(char, x, y);
+  ctx.fillStyle = l.kind === 'sfx' ? l.color : DIALOGUE_COLORS[l.speaker]; ctx.fillText(char, x, y);
+}
+function warpedGlyph(ctx, l, char) {
+  const key = [char,l.size,l.outline,l.color,l.effect,l.font,l.distortion,l.warp].join('|');
+  if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
+  const width = Math.ceil(l.size * 3 + l.outline * 8), height = Math.ceil(l.size * 3 + l.outline * 8);
+  const ink = createSurface(ctx, width, height), c = ink.getContext('2d');
+  c.font = `900 ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+  drawInk(c, l, char, width/2, height/2);
+  let result = ink;
+  if (l.distortion > 0) {
+    result = createSurface(ctx, width, height); const out = result.getContext('2d'), amount = l.distortion / 100;
+    for (let y = 0; y < height; y += 2) {
+      const t = clamp((y-height/2)/(l.size*.8),-1,1), slice = Math.min(2,height-y);
+      let offset=0, stretch=1;
+      if (l.warp === 'wave') offset = Math.sin(t*Math.PI*2) * l.size * .2 * amount;
+      if (l.warp === 'bulge') stretch = 1 + (1-t*t) * .6 * amount;
+      if (l.warp === 'taper') { stretch = 1 + t * .5 * amount; offset = t * l.size * .06 * amount; }
+      out.drawImage(ink,0,y,width,slice,(width-width*stretch)/2+offset,y,width*stretch,slice);
+    }
+  }
+  glyphCache.set(key,result); cachePixels += width*height;
+  while (cachePixels > 5000000 && glyphCache.size > 1) { const first= glyphCache.keys().next().value, old=glyphCache.get(first); cachePixels-=old.width*old.height; glyphCache.delete(first); }
+  return result;
+}
 function paintText(ctx, l) {
-  const sfx = l.kind === 'sfx', color = sfx ? l.color : DIALOGUE_COLORS[l.speaker];
-  const family = sfx && l.effect === 'rumble'
-    ? '"Yu Mincho", "Hiragino Mincho ProN", serif'
-    : '"Noto Sans JP", "Yu Gothic", "Hiragino Kaku Gothic ProN", sans-serif';
-  ctx.font = `${sfx ? 'italic 900' : '700'} ${l.size}px ${family}`;
+  const sfx = l.kind === 'sfx';
+  ctx.font = `${sfx ? '900' : '700'} ${l.size}px ${fontFamily(l)}`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-  const outline = l.outline;
-  const paint = (text, x, y) => {
-    if (sfx) {
-      // Extruded black offset and a white keyline give Japanese glyphs a comic silhouette.
-      const depth = l.effect === 'impact' || l.effect === 'burst' ? l.size * .07 : l.size * .025;
-      ctx.strokeStyle = '#111111'; ctx.fillStyle = '#111111'; ctx.lineWidth = outline * 2 + l.size * .04;
-      ctx.strokeText(text, x + depth, y + depth); ctx.fillText(text, x + depth, y + depth);
+  let sequence=0;
+  const paint = (char,x,y) => {
+    if (!sfx) { drawInk(ctx,l,char,x,y); return; }
+    const i=sequence++, image=warpedGlyph(ctx,l,char);
+    ctx.save(); ctx.translate(x,y);
+    if (l.effect === 'rumble') { ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04); ctx.rotate((i%2?1:-1)*.07); }
+    ctx.transform(1,0,Math.tan(l.skew*Math.PI/180),1,0,0); ctx.scale(l.stretchX/100,l.stretchY/100);
+    const matrix=ctx.getTransform(), pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
+    ctx.filter=l.blur>0 ? `blur(${l.blur*pixelScale}px)` : 'none';
+    if (l.motionBlur>0) {
+      const angle=l.blurAngle*Math.PI/180;
+      for (let step=12;step>0;step--) { const distance=l.motionBlur*step/12; ctx.globalAlpha=.035+(1-step/12)*.12; ctx.drawImage(image,-image.width/2-Math.cos(angle)*distance,-image.height/2-Math.sin(angle)*distance); }
     }
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = outline * 2; ctx.strokeText(text, x, y);
-    ctx.fillStyle = color; ctx.fillText(text, x, y);
+    ctx.globalAlpha=1; ctx.drawImage(image,-image.width/2,-image.height/2); ctx.restore();
   };
-  ctx.save();
-  if (sfx && !l.vertical) ctx.transform(1, 0, l.effect === 'speed' ? -.22 : -.12, 1, 0, 0);
   if (l.vertical) {
-    const columns = [], count = Math.max(1, Math.floor(l.h * .82 / (l.size * 1.15)));
-    for (const line of l.text.split('\n')) {
-      const chars = Array.from(line);
-      if (!chars.length) columns.push([]);
-      for (let i = 0; i < chars.length; i += count) columns.push(chars.slice(i, i + count));
-    }
-    columns.forEach((col, i) => col.forEach((char, j) => paint(char, ((columns.length - 1) / 2 - i) * l.size * 1.2, (j - (col.length - 1) / 2) * l.size * 1.15)));
+    const columns=[], advance=l.size*1.12*(sfx?l.stretchY/100:1), count=Math.max(1,Math.floor(l.h*.88/advance));
+    for (const line of l.text.split('\n')) { const chars=Array.from(line); if(!chars.length)columns.push([]); for(let i=0;i<chars.length;i+=count)columns.push(chars.slice(i,i+count)); }
+    const columnWidth=l.size*1.3*(sfx?l.stretchX/100:1);
+    columns.forEach((col,i)=>col.forEach((char,j)=>{
+      ctx.save(); ctx.translate(((columns.length-1)/2-i)*columnWidth,(j-(col.length-1)/2)*advance);
+      if ('ー―…‥'.includes(char)) ctx.rotate(Math.PI/2);
+      paint(char,0,0); ctx.restore();
+    }));
   } else {
-    const rows = textRows(ctx, l.text, l.w * (sfx ? .8 : .94));
-    rows.forEach((text, row) => {
-      const y = (row - (rows.length - 1) / 2) * l.size * 1.28;
-      if (!sfx || l.effect === 'speed') { paint(text, 0, y); return; }
-      const chars = Array.from(text), widths = chars.map(char => ctx.measureText(char).width);
-      let x = -widths.reduce((a, b) => a + b, 0) / 2;
-      chars.forEach((char, i) => {
-        ctx.save();
-        const bump = l.effect === 'rumble' ? Math.sin(i * 2.2) * l.size * .045 : (i % 2 ? 1 : -1) * l.size * .02;
-        ctx.translate(x + widths[i] / 2, y + bump);
-        ctx.rotate((l.effect === 'rumble' ? (i % 2 ? 3 : -3) : (i % 2 ? -2 : 2)) * Math.PI / 180);
-        if (l.effect === 'impact' || l.effect === 'burst') ctx.scale(1, 1 + (i % 2) * .09);
-        paint(char, 0, 0); ctx.restore(); x += widths[i];
-      });
+    const rows=textRows(ctx,l.text,l.w/(sfx?l.stretchX/100:1)*.88);
+    rows.forEach((text,row)=>{
+      const chars=Array.from(text), widths=chars.map(char=>ctx.measureText(char).width*(sfx?l.stretchX/100:1));
+      let x=-widths.reduce((a,b)=>a+b,0)/2;
+      chars.forEach((char,i)=>{ paint(char,x+widths[i]/2,(row-(rows.length-1)/2)*l.size*1.3*(sfx?l.stretchY/100:1)); x+=widths[i]; });
     });
   }
-  ctx.restore();
 }
 
 export function draw(ctx, img, layers, selected = null, scale = 1, selectionScale = scale) {
