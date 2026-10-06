@@ -2,6 +2,20 @@
 
 複数画像に吹き出し・効果音を配置するローカルWebアプリ。依存パッケージ不要。画像は外部送信せず、ブラウザ内で編集する。
 
+## GitHub Pages
+
+公開URL: https://falls247.github.io/serifu-editor/
+
+Pages公開を有効にすると、インストールなしでブラウザから利用できる。フォルダの読込・保存・元画像削除は公開版でもPC版Chrome / Edgeが対象。画像はブラウザ内で処理し、GitHubへアップロードしない。
+
+初回はリポジトリの **Settings → Pages → Build and deployment → Source** を **GitHub Actions** に設定する。その後はmainへのpushで、チェック・テスト・静的ファイル生成を通過した版を自動公開する。Actionsの **Deploy GitHub Pages → Run workflow** からも実行可能。
+
+```bash
+npm run build
+```
+
+公開用ファイルを `_site/` に出力する。公開対象は `index.html`、`app.js`、`renderer.js`、`style.css` のみ。Node.jsサーバーは公開先では不要。
+
 ## 起動
 
 Node.js 22以降を用意し、リポジトリ内で実行。

@@ -1,1 +1,12 @@
-{"name":"serifu-editor","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node server.mjs","test":"node --test","check":"node --check app.js && node --check renderer.js && node --check server.mjs"}}
+{
+  "name": "serifu-editor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test",
+    "check": "node --check app.js && node --check renderer.js && node --check server.mjs && node --check scripts/build.mjs"
+  }
+}
