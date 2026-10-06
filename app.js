@@ -177,7 +177,11 @@ $('deck').addEventListener('focusin', event => {
   const id = event.target.closest('.layer-card')?.dataset.layerId;
   activate(p, id || p.selectedId);
 });
-$('deck').addEventListener('focusout', event => editing.delete(event.target));
+$('deck').addEventListener('focusout', event => {
+  editing.delete(event.target);
+  const p = pageFrom(event.target);
+  if (p) queueMicrotask(() => updateControls(p));
+});
 $('deck').addEventListener('input', event => {
   if (busy) return;
   const input = event.target, field = input.dataset.field;
@@ -260,20 +264,24 @@ function connectCanvas(p) {
     const l = handle ? current : [...p.layers].reverse().find(item => hit(item, pos.x, pos.y));
     activate(p, l?.id || null); p.canvas.focus({ preventScroll: true });
     if (!l) return;
-    checkpoint(p); drag = { page: p, id: event.pointerId, mode: handle || 'move', dx: pos.x - l.x, dy: pos.y - l.y, start: { ...l } };
+    drag = { page: p, id: event.pointerId, mode: handle || 'move', dx: pos.x - l.x, dy: pos.y - l.y, start: { ...l }, checkpointed: false };
     p.canvas.setPointerCapture(event.pointerId);
   });
   p.canvas.addEventListener('pointermove', event => {
     if (!drag || drag.page !== p || drag.id !== event.pointerId) return;
     const l = selected(p), pos = coords(event, p); if (!l) return;
-    if (drag.mode === 'move') { l.x = Math.round(pos.x - drag.dx); l.y = Math.round(pos.y - drag.dy); }
+    let updates;
+    if (drag.mode === 'move') { updates = { x: Math.round(pos.x - drag.dx), y: Math.round(pos.y - drag.dy) }; }
     else if (drag.mode === 'resize') {
-      const local = localPoint(l, pos.x, pos.y); l.w = clamp(Math.round(local.x * 2), 30, 30000); l.h = clamp(Math.round(local.y * 2), 30, 30000);
-      l.size = clamp(Math.round(drag.start.size * Math.min(l.w / drag.start.w, l.h / drag.start.h)), 8, 500);
+      const local = localPoint(l, pos.x, pos.y), w = clamp(Math.round(local.x * 2), 30, 30000), h = clamp(Math.round(local.y * 2), 30, 30000);
+      updates = { w, h, size: clamp(Math.round(drag.start.size * Math.min(w / drag.start.w, h / drag.start.h)), 8, 500) };
     } else {
       const angle = Math.atan2(pos.y - l.y, pos.x - l.x) * 180 / Math.PI + 90;
-      l.rotation = Math.round(((angle + 180) % 360 + 360) % 360 - 180);
+      updates = { rotation: Math.round(((angle + 180) % 360 + 360) % 360 - 180) };
     }
+    if (Object.entries(updates).every(([key, value]) => l[key] === value)) return;
+    if (!drag.checkpointed) { checkpoint(p); drag.checkpointed = true; }
+    Object.assign(l, updates);
     changed = true; p.done = false; drawPage(p); updateControls(p); updateGlobal();
   });
   const end = () => { if (drag?.page === p) { drag = null; updateControls(p); } };

@@ -31,6 +31,10 @@ try {
   await first.locator('[data-action=undo]').click();
   assert.equal(await first.locator('textarea').nth(0).inputValue(), '男性の編集テスト');
   assert.equal(await second.locator('textarea').nth(0).inputValue(), '二枚目の編集');
+  await first.locator('.layer-card').first().click();
+  const selectionRect = await first.locator('canvas').boundingBox();
+  await page.mouse.click(selectionRect.x + selectionRect.width * .3, selectionRect.y + selectionRect.height * 170 / 750);
+  assert.equal(await first.locator('[data-action=redo]').isEnabled(), true, 'selecting text must preserve redo history');
   await first.locator('[data-action=speaker-female]').first().click();
   assert.equal(await first.locator('.layer-card').first().getAttribute('data-speaker'), 'female');
   await first.locator('[data-action=speaker-male]').first().click();
@@ -55,6 +59,16 @@ try {
   await page.mouse.move(rect.x + rect.width * .3, rect.y + rect.height * 170 / 750);
   await page.mouse.down(); await page.mouse.move(rect.x + rect.width * .35, rect.y + rect.height * 190 / 750, { steps: 6 }); await page.mouse.up();
   assert.ok(Number(await xInput.inputValue()) > initialX + 35, 'drag must update original-pixel coordinates');
+  await xInput.fill('350'); await yInput.fill('350'); await yInput.blur();
+  const wInput = first.locator('.position-controls [data-field=w]'), hInput = first.locator('.position-controls [data-field=h]');
+  const handleRect = await canvas.boundingBox(), width = Number(await wInput.inputValue()), height = Number(await hInput.inputValue());
+  const resizeX = handleRect.x + handleRect.width * (350 + width / 2) / 1000, resizeY = handleRect.y + handleRect.height * (350 + height / 2) / 750;
+  await page.mouse.move(resizeX, resizeY); await page.mouse.down(); await page.mouse.move(resizeX + 15, resizeY + 15, { steps: 5 }); await page.mouse.up();
+  assert.ok(Number(await wInput.inputValue()) > width, 'resize handle must update the layout width');
+  const updatedHeight = Number(await hInput.inputValue()), centerX = handleRect.x + handleRect.width * .35, centerY = handleRect.y + handleRect.height * 350 / 750;
+  const rotateY = centerY - handleRect.height * updatedHeight / 1500 - 24;
+  await page.mouse.move(centerX, rotateY); await page.mouse.down(); await page.mouse.move(centerX + 35, rotateY + 10, { steps: 5 }); await page.mouse.up();
+  assert.ok(Math.abs(Number(await first.locator('.position-controls [data-field=rotation]').inputValue())) > 5, 'rotation handle must update the angle');
   for (const effect of ['impact', 'burst', 'speed', 'rumble']) await first.locator('[data-field=effect]').selectOption(effect);
   await first.locator('[data-action=complete]').click();
   assert.ok((await page.locator('#progress').textContent()).includes('1 / 3'));
