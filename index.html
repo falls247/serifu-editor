@@ -1,6 +1,73 @@
-<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Serifu — 画像に、声を。</title><link rel="stylesheet" href="style.css"></head><body>
-<header><div class="brand">Serifu<span>画像に、声を。</span></div><div class="actions"><button id="open">フォルダを開く</button><button id="files">画像を追加</button><button id="save" class="primary">一括保存 ↗</button></div></header>
-<main><aside class="library"><div class="section">IMAGES <span id="count">0 枚</span></div><div id="images"></div><div class="library-bottom"><button id="remove">一覧から外す</button><button id="delete" class="danger">元画像を削除</button><p>元画像の削除は確認後に実行。<br>編集による元画像の上書きなし。</p></div></aside>
-<section class="workspace"><div class="toolbar"><div><button id="bubble">＋ 吹き出し</button><button id="sfx">＋ 効果音</button></div><div><button id="undo">↶ 戻す</button><button id="redo">↷ やり直す</button></div></div><div id="stage"><div id="empty"><div class="empty-icon">あ</div><h1>一枚に、物語を。</h1><p>フォルダを開いて、吹き出しや効果音を追加。<br>文字をつかんで、好きな場所へ。</p><button id="demo">サンプルで試す</button></div><canvas id="canvas" hidden aria-label="画像編集プレビュー"></canvas></div><footer><span id="filename">画像を選択</span><span>ドラッグで移動 · 矢印キーで微調整</span></footer></section>
-<aside class="inspector"><div class="section">LAYERS <span>文字・吹き出し</span></div><div id="layers"></div><div id="properties" hidden><label>テキスト<textarea id="text" rows="3"></textarea></label><div class="grid"><label>種類<select id="kind"><option value="bubble">吹き出し</option><option value="sfx">効果音</option></select></label><label>形<select id="shape"><option value="ellipse">楕円</option><option value="rect">角丸</option></select></label></div><div class="grid"><label>X 座標<input id="x" type="number"></label><label>Y 座標<input id="y" type="number"></label><label>幅<input id="w" type="number" min="30"></label><label>高さ<input id="h" type="number" min="30"></label><label>文字サイズ<input id="size" type="number" min="8" max="500"></label><label>回転 °<input id="rotation" type="number" min="-180" max="180"></label></div><label>文字方向<select id="vertical"><option value="false">横書き</option><option value="true">縦書き（右から左）</option></select></label><div class="grid"><label>文字色<input id="color" type="color"></label><label>背景・縁色<input id="fill" type="color"></label><label>しっぽ X<input id="tailX" type="number"></label><label>しっぽ Y<input id="tailY" type="number"></label></div><p class="hint">座標・サイズは元画像のピクセル単位。しっぽは吹き出し中心からの相対位置。</p><div class="grid"><button id="duplicate">複製</button><button id="dropLayer" class="danger">文字を削除</button><button id="backward">背面へ</button><button id="forward">前面へ</button></div><label>セリフを入れ替え<select id="swapTarget"></select></label><button id="swap">選択した文字と交換</button></div><div class="project"><button id="projectSave">編集データを保存</button><button id="projectLoad">編集データを読込</button><p class="hint">編集データには画像も含む。再読込後も文字・位置を修正可能。</p></div></aside></main>
-<div id="status" role="status" aria-live="polite">ローカル編集 · 画像の外部送信なし</div><input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden><input id="projectInput" type="file" accept="application/json,.json" hidden><script type="module" src="app.js"></script></body></html>
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Serifu — 画像とセリフを、続けて編集。</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="./">Serifu<span>画像に、声を。</span></a>
+    <div class="header-actions">
+      <button id="open">フォルダを開く</button>
+      <button id="files">画像を追加</button>
+      <button id="save" class="primary">一括保存 ↗</button>
+    </div>
+  </header>
+  <div class="collection-bar">
+    <div class="collection-info"><strong id="count">0 枚</strong><span id="progress">画像ごとに編集内容を保持</span></div>
+    <nav aria-label="画像間の移動"><button id="previous" title="前の画像">←</button><select id="jump" aria-label="編集する画像"></select><button id="next" title="次の画像">→</button></nav>
+    <div class="project-actions"><button id="projectLoad">編集データを読込</button><button id="projectSave">編集データを保存</button></div>
+  </div>
+  <main>
+    <div class="column-headings" aria-hidden="true"><span><b>01</b> 元画像</span><span><b>02</b> セリフ・効果音</span><span><b>03</b> プレビュー・位置調整</span></div>
+    <section id="empty" class="empty">
+      <div class="empty-symbol">Aa<span>✦</span></div>
+      <p class="eyebrow">IMAGE → WORDS → STORY</p>
+      <h1>何枚でも、物語をつなごう。</h1>
+      <p>元画像を見ながらセリフを書いて、右のプレビューで位置を調整。<br>次の画像も、そのまま下へスクロール。</p>
+      <div class="speaker-legend"><span class="male-dot"></span>男性：黒文字<span class="female-dot"></span>女性：ピンク文字<span class="outline-dot"></span>白い縁取り</div>
+      <button id="demo">3枚のサンプルで試す ↗</button>
+    </section>
+    <div id="deck"></div>
+  </main>
+  <footer><span id="status" role="status" aria-live="polite">画像の外部送信なし · ブラウザ内で編集</span><span class="shortcut-hint">ドラッグ：移動／角：サイズ／丸：回転　矢印：1px　Shift：10px</span></footer>
+  <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
+  <input id="folderInput" type="file" accept="image/*" webkitdirectory multiple hidden>
+  <input id="projectInput" type="file" accept="application/json,.json" hidden>
+
+  <template id="pageTemplate">
+    <article class="image-row">
+      <div class="row-header">
+        <div><span class="page-number"></span><strong class="page-name"></strong><span class="dimensions"></span></div>
+        <button data-action="complete" class="complete-button">編集完了・次へ ↓</button>
+      </div>
+      <div class="row-columns">
+        <section class="original-pane" aria-label="元画像">
+          <div class="original-frame"><img class="original" alt=""></div>
+          <div class="original-actions"><button data-action="remove">一覧から外す</button><button data-action="delete" class="danger">元画像を削除</button></div>
+          <p class="source-note"></p>
+        </section>
+        <section class="dialogue-pane" aria-label="セリフと効果音の編集">
+          <div class="add-actions"><button data-action="add-male"><span class="male-dot"></span>＋ 男性</button><button data-action="add-female"><span class="female-dot"></span>＋ 女性</button><button data-action="add-sfx">✦ 効果音</button></div>
+          <div class="layer-cards"></div>
+          <p class="no-layers">セリフか効果音を追加して、<br>この画像の物語を書こう。</p>
+        </section>
+        <section class="preview-pane" aria-label="編集結果と位置調整">
+          <div class="preview-toolbar"><span class="preview-label">LIVE PREVIEW</span><div><button data-action="undo" title="この画像の編集を戻す">↶ 戻す</button><button data-action="redo" title="この画像の編集をやり直す">↷</button></div></div>
+          <div class="preview-frame"><canvas class="preview" aria-label="文字をドラッグして位置調整"></canvas></div>
+          <p class="preview-hint">文字をドラッグで移動。右下の角でサイズ調整、上の丸で回転。</p>
+          <fieldset class="position-controls"><legend class="selected-name">文字を選択して位置調整</legend><div class="control-grid">
+            <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
+            <label>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>
+            <label>配置幅<input data-field="w" type="number" min="30" max="30000"></label><label>配置高さ<input data-field="h" type="number" min="30" max="30000"></label>
+            <label>白い縁の太さ<input data-field="outline" type="number" min="1" max="80"></label><label>文字方向<select data-field="vertical"><option value="false">横書き</option><option value="true">縦書き</option></select></label>
+          </div><div class="layer-actions"><button data-action="backward">背面へ</button><button data-action="forward">前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
+        </section>
+      </div>
+    </article>
+  </template>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -29,6 +29,21 @@ jobs:
         run: npm run check
       - name: Run tests
         run: npm test
+      - name: Install browser test dependencies
+        run: |
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Test browser editing and export
+        run: npm run test:browser
+      - name: Upload UI test screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-smoke
+          path: artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build static site
         run: npm run build
       - name: Configure Pages
