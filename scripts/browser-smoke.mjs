@@ -80,7 +80,10 @@ try {
   const secondCount=await second.locator('.layer-card').count();await secondCanvas.focus();await page.keyboard.press('Meta+v');
   assert.equal(await second.locator('.layer-card').count(),secondCount+1);assert.equal(await second.locator('textarea').last().inputValue(),'MEN');
   await second.locator('textarea').last().fill('貼付け先だけ変更');assert.equal(await first.locator('textarea').first().inputValue(),'コピー後に編集');
-  await secondCanvas.focus();await page.keyboard.press('Meta+z');assert.equal(await second.locator('.layer-card').count(),secondCount);
+  await secondCanvas.focus();await page.keyboard.press('Meta+z');assert.equal(await second.locator('textarea').last().inputValue(),'MEN','first undo reverts editing the pasted text');
+  await page.keyboard.press('Meta+z');assert.equal(await second.locator('.layer-card').count(),secondCount,'second undo removes the paste');
+  await page.keyboard.press('Meta+Shift+z');assert.equal(await second.locator('.layer-card').count(),secondCount+1,'redo restores the pasted layer');
+  await page.keyboard.press('Meta+z');assert.equal(await second.locator('.layer-card').count(),secondCount);
   await first.locator('textarea').first().focus();
   const native=await first.locator('textarea').first().evaluate(input=>{
     const copy=new KeyboardEvent('keydown',{key:'c',ctrlKey:true,bubbles:true,cancelable:true}),paste=new KeyboardEvent('keydown',{key:'v',ctrlKey:true,bubbles:true,cancelable:true});
