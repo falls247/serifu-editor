@@ -1,5 +1,5 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache } from './renderer.js';
-import { normalizeLayer, checkpoint, restore, duplicateLayer, swapText, copyToNext, EFFECT_LIMITS } from './model.js';
+import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
@@ -25,6 +25,8 @@ function requestPageFonts(p){
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
+let layerClipboard=null;
+const clipboardPastes=new Map();
 let preferences;
 try { preferences=normalizePreferences(JSON.parse(localStorage.getItem(PREFS_KEY))); } catch { preferences=defaultPreferences(); }
 let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null, autosaveTimer=null;
@@ -238,7 +240,7 @@ $('deck').addEventListener('input', event => {
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
   const l = p.layers.find(item => item.id === id); if (!l) return;
   let value = input.value;
-  const limits = { size: [8, 500], rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [1, 80], ...EFFECT_LIMITS };
+  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [1, 80], ...EFFECT_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;
     value = Number(value);
@@ -337,8 +339,21 @@ function connectCanvas(p) {
 }
 
 window.addEventListener('keydown', event => {
-  if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || busy) return;
+  if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable || event.isComposing || busy) return;
   const p = active(); if (!p) return;
+  const key=event.key.toLowerCase(),command=event.ctrlKey||event.metaKey;
+  if (command && !event.altKey && !event.shiftKey && event.target===p.canvas && ['c','v'].includes(key)) {
+    if (event.repeat) return;
+    if (key==='c' && selected(p)) {
+      event.preventDefault();layerClipboard=copySelection(selected(p),p.img.width,p.img.height);clipboardPastes.clear();
+      status('選択した文字と設定をコピーした。貼付け先のプレビューで Ctrl／⌘＋V。');
+    } else if (key==='v' && layerClipboard) {
+      event.preventDefault();const count=(clipboardPastes.get(p.id)||0)+1;clipboardPastes.set(p.id,count);
+      edit(p,()=>{const copy=pasteSelection(layerClipboard,p.img.width,p.img.height,count*20);p.layers.push(copy);p.selectedId=copy.id;});
+      p.canvas.focus({preventScroll:true});status('文字と設定を貼り付けた。ドラッグで位置調整、Ctrl／⌘＋Zで戻す。');
+    }
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
     event.preventDefault();
     if (restore(p, event.shiftKey ? 'redo' : 'undo')) { dirty(); renderCards(p); drawPage(p); updateGlobal(); }

@@ -25,3 +25,9 @@ test('brush presets retain texture and scale directional blur independently on n
   for(const key of ['blurXRatio','blurYRatio','blurStrength','inkCore','roughness','dryInk','brushTails'])delete legacy.style[key];
   applyPreset(target,legacy,1000,750);assert.equal(target.blurY,0);assert.equal(target.dryInk,0);
 });
+test('numeric ink thickness is a preset setting with compatible defaults and bounded scaling',()=>{
+  const source={...newLayer('dialogue',1000,750),thickness:-2.5},preset=createPreset('細いセリフ',source,1000,750);
+  const target=applyPreset(newLayer('dialogue',2000,1500),preset,2000,1500);assert.equal(target.thickness,-5);
+  delete preset.style.thicknessRatio;applyPreset(target,preset,1000,750);assert.equal(target.thickness,0);
+  source.thickness=20;const thick=createPreset('太いセリフ',source,1000,750);applyPreset(target,thick,4000,3000);assert.equal(target.thickness,30);
+});

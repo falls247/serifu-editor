@@ -13,4 +13,4 @@ async function prepareFont({directory,source,file,sha}){
   await writeFile(target,bytes);
 }
 for(let i=0;i<FONT_FILES.length;i+=4)await Promise.all(FONT_FILES.slice(i,i+4).map(prepareFont));
-console.log('日本語書体9種類とOFLライセンスを準備した');
+console.log(`日本語書体${FONT_FILES.filter(font=>font.file.endsWith('.ttf')).length}種類とOFLライセンスを準備した`);

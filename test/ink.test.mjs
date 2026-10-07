@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directionalBlur, distressMask, dilateMask, inkSeed } from '../ink.js';
+import { directionalBlur, distressMask, dilateMask, inkSeed, adjustInkThickness } from '../ink.js';
 
 test('vertical blur spreads ink only vertically and preserves left-right edges',()=>{
   const width=81,height=81,source=new Uint8ClampedArray(width*height);
@@ -29,4 +29,16 @@ test('white keyline dilation does not fill the entire glyph surface',()=>{
   const edge=dilateMask(source,7,7,1);
   assert.equal(edge.filter(v=>v===255).length,9);
   assert.equal(edge[0],0);assert.equal(edge[24],255);
+});
+test('numeric ink thickness expands and erodes the body, including fractional values, without moving it',()=>{
+  const width=21,height=21,source=new Uint8ClampedArray(width*height);
+  for(let y=7;y<=13;y++)for(let x=7;x<=13;x++)source[y*width+x]=255;
+  const mass=alpha=>alpha.reduce((sum,v)=>sum+v,0);
+  const thin=adjustInkThickness(source,width,height,-1),thick=adjustInkThickness(source,width,height,1),half=adjustInkThickness(source,width,height,.5);
+  assert.equal(mass(thin),25*255);assert.equal(mass(thick),81*255);assert.ok(mass(source)<mass(half)&&mass(half)<mass(thick));
+  assert.equal(thin[10*width+10],255);assert.equal(thick[0],0);assert.equal(source[7*width+7],255);
+  assert.deepEqual(adjustInkThickness(source,width,height,0),source);
+  assert.ok(adjustInkThickness(new Uint8ClampedArray(source.length),width,height,30).every(v=>v===0));
+  const full=new Uint8ClampedArray(25).fill(255),eroded=adjustInkThickness(full,5,5,-1);
+  assert.equal(eroded[0],0);assert.equal(eroded[12],255,'erosion must treat pixels beyond the surface as transparent');
 });

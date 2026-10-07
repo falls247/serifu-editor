@@ -1,4 +1,4 @@
-import { inkSeed, distressMask, directionalBlur, dilateMask } from './ink.js';
+import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness } from './ink.js';
 import { fontDescription } from './fonts.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -12,7 +12,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
     x: width * .5, y: height * .4,
     w: clamp(width * (kind === 'sfx' ? .34 : .36), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .46), 30, 30000),
     size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .04)), 16, 500),
-    rotation: kind === 'sfx' ? -12 : 0, outline: clamp(Math.round(width * .006), 2, 80),
+    rotation: kind === 'sfx' ? -12 : 0, thickness:0, outline: clamp(Math.round(width * .006), 2, 80),
     vertical: true, color: '#111111', effect: 'burst',
     font: kind === 'sfx' ? 'comic' : 'sans', blur: 0, motionBlur: 0, blurAngle: 90,
     distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
@@ -116,15 +116,16 @@ function tintedMask(ctx, alpha, width, height, color, strength=1) {
   c.putImageData(pixels,0,0);return surface;
 }
 function warpedGlyph(ctx, l, char, glyphAngle=0) {
-  const key = [char,glyphAngle,l.size,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore].join('|');
+  if(l.kind!=='sfx')l={...l,color:DIALOGUE_COLORS[l.speaker],effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
+  const key = [char,glyphAngle,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore].join('|');
   if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
   const sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);
   const reach=l.size*(l.brushTails||0)/100*.65;
-  const base=l.size*(2.5*Math.max(sx,sy)+Math.abs(shear)*sy)+l.outline*6+reach*2;
+  const base=l.size*(2.5*Math.max(sx,sy)+Math.abs(shear)*sy)+l.outline*6+Math.max(0,l.thickness||0)*6+reach*2;
   const drawWidth=Math.ceil(base+(l.blurX||0)*3.5),drawHeight=Math.ceil(base+(l.blurY||0)*3.5);
   // Bound intermediate allocations at extreme font/blur/stretch settings.
   const quality=Math.min(1,Math.sqrt(2000000/(drawWidth*drawHeight)));
-  l={...l,size:l.size*quality,outline:l.outline*quality,blurX:(l.blurX||0)*quality,blurY:(l.blurY||0)*quality};
+  l={...l,size:l.size*quality,thickness:(l.thickness||0)*quality,outline:l.outline*quality,blurX:(l.blurX||0)*quality,blurY:(l.blurY||0)*quality};
   const width=Math.max(1,Math.round(drawWidth*quality)),height=Math.max(1,Math.round(drawHeight*quality));
   const ink = createSurface(ctx, width, height), c = ink.getContext('2d');
   c.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
@@ -143,7 +144,8 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
   }
   const pixels=warped.getContext('2d').getImageData(0,0,width,height).data,source=new Uint8ClampedArray(width*height);
   for(let i=0;i<source.length;i++)source[i]=pixels[i*4+3];
-  const body=distressMask(source,width,height,{size:l.size,roughness:l.roughness,dryInk:l.dryInk,seed:inkSeed(char)});
+  const thickened=adjustInkThickness(source,width,height,l.thickness);
+  const body=distressMask(thickened,width,height,{size:l.size,roughness:l.roughness,dryInk:l.dryInk,seed:inkSeed(char)});
   const alpha=distressMask(body,width,height,{size:l.size,brushTails:l.brushTails,seed:inkSeed(char)});
   const edge=dilateMask(body,width,height,l.outline),fibreEdge=dilateMask(alpha,width,height,Math.min(l.outline,1));
   for(let i=0;i<edge.length;i++)edge[i]=Math.max(edge[i],fibreEdge[i]);
@@ -169,13 +171,13 @@ function paintText(ctx, l) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
   let sequence=0;
   const paint = (char,x,y,glyphAngle=0) => {
-    if (!sfx) {ctx.save();ctx.translate(x,y);ctx.rotate(glyphAngle);drawInk(ctx,l,char,0,0);ctx.restore();return;}
+    if (!sfx && !l.thickness) {ctx.save();ctx.translate(x,y);ctx.rotate(glyphAngle);drawInk(ctx,l,char,0,0);ctx.restore();return;}
     const i=sequence++, glyph=warpedGlyph(ctx,l,char,glyphAngle),image=glyph.surface;
     ctx.save(); ctx.translate(x,y);
-    if (l.effect === 'rumble') { ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04); ctx.rotate((i%2?1:-1)*.07); }
+    if (sfx && l.effect === 'rumble') { ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04); ctx.rotate((i%2?1:-1)*.07); }
     const matrix=ctx.getTransform(), pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
-    ctx.filter=l.blur>0 ? `blur(${l.blur*pixelScale}px)` : 'none';
-    if (l.motionBlur>0) {
+    ctx.filter=sfx && l.blur>0 ? `blur(${l.blur*pixelScale}px)` : 'none';
+    if (sfx && l.motionBlur>0) {
       const angle=l.blurAngle*Math.PI/180;
       const steps=Math.min(160,Math.max(12,Math.ceil(l.motionBlur/2)));
       for (let step=steps;step>0;step--) { const distance=l.motionBlur*step/steps; ctx.globalAlpha=(.2+(1-step/steps)*.8)/Math.sqrt(steps); ctx.drawImage(image,-glyph.drawWidth/2-Math.cos(angle)*distance,-glyph.drawHeight/2-Math.sin(angle)*distance,glyph.drawWidth,glyph.drawHeight); }

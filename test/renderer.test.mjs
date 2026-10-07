@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hit, handleAt, exportName, newLayer } from '../renderer.js';
-import { normalizeLayer, checkpoint, restore, swapText, copyToNext } from '../model.js';
+import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection } from '../model.js';
 
 const page = layers => ({ layers, done: false, selectedId: layers[0]?.id || null, undo: [], redo: [] });
 test('rotation preserves pointer selection and handle coordinates', () => {
@@ -54,6 +54,30 @@ test('copying to a different image scales positions without sharing mutable laye
 test('new dialogue and effects default to vertical writing',()=>{
   assert.equal(newLayer('dialogue',1000,750).vertical,true);
   assert.equal(newLayer('sfx',1000,750).vertical,true);
+});
+test('selection clipboard keeps a snapshot and pastes independent styles at the target resolution',()=>{
+  for(const kind of ['dialogue','sfx']){
+    const original={...newLayer(kind,1000,750,'female'),text:'コピー',size:80,thickness:2.5,font:'train',blurX:12,blurY:40,dryInk:70};
+    const clipboard=copySelection(original,1000,750);original.text='コピー後の変更';original.thickness=10;
+    const target=page([]),copy=pasteSelection(clipboard,2000,750,20);
+    checkpoint(target);target.layers.push(copy);
+    assert.equal(copy.text,'コピー');assert.equal(copy.speaker,'female');assert.equal(copy.font,'train');assert.equal(copy.thickness,2.5);
+    assert.equal(copy.x,clipboard.layer.x*2+20);assert.equal(copy.y,clipboard.layer.y+20);assert.equal(copy.w,clipboard.layer.w*2);
+    assert.equal(copy.size,80);assert.equal(copy.blurX,24);assert.equal(copy.blurY,40);assert.equal(copy.dryInk,70);
+    assert.notEqual(copy.id,original.id);copy.text='独立した編集';assert.equal(clipboard.layer.text,'コピー');
+    const repeat=pasteSelection(clipboard,2000,750,40);assert.notEqual(repeat.id,copy.id);assert.equal(repeat.x,copy.x+20);
+    restore(target,'undo');assert.equal(target.layers.length,0);restore(target,'redo');assert.equal(target.layers[0].text,'独立した編集');
+  }
+});
+test('ink thickness restores, scales, and defaults to the original font for older projects',()=>{
+  for(const thickness of [-1.5,0,4.5]){
+    const layer={...newLayer('sfx',1000,750),thickness};
+    assert.equal(normalizeLayer(JSON.parse(JSON.stringify(layer))).thickness,thickness);
+    const source=page([layer]),target=page([]);copyToNext(source,target,1000,750,2000,1500);
+    assert.equal(target.layers[0].thickness,thickness*2);
+  }
+  const old={...newLayer('dialogue',1000,750)};delete old.thickness;assert.equal(normalizeLayer(old,2).thickness,0);
+  for(const thickness of [-11,31,NaN])assert.throws(()=>normalizeLayer({...old,thickness}));
 });
 test('blur and distortion survive project restoration with range validation',()=>{
   const l={...newLayer('sfx',1000,750),blur:7,motionBlur:60,warp:'wave',distortion:80,skew:-25,stretchX:140};

@@ -98,7 +98,7 @@ export function directionalBlur(source,width,height,blurX=0,blurY=0) {
   }
   return new Uint8ClampedArray(result);
 }
-export function dilateMask(source,width,height,radius) {
+function extremeMask(source,width,height,radius,expand) {
   radius=Math.ceil(radius);
   if(!radius)return new Uint8ClampedArray(source);
   let input=source;
@@ -108,14 +108,26 @@ export function dilateMask(source,width,height,radius) {
       const start=vertical?line:line*width;let head=0,tail=0,next=0;
       for(let k=0;k<length;k++){
         while(next<length&&next<=k+radius){
-          while(tail>head&&input[start+queue[tail-1]*stride]<=input[start+next*stride])tail--;
+          while(tail>head&&(expand?input[start+queue[tail-1]*stride]<=input[start+next*stride]:input[start+queue[tail-1]*stride]>=input[start+next*stride]))tail--;
           queue[tail++]=next++;
         }
         while(tail>head&&queue[head]<k-radius)head++;
-        out[start+k*stride]=input[start+queue[head]*stride];
+        out[start+k*stride]=!expand&&(k<radius||k>=length-radius)?0:input[start+queue[head]*stride];
       }
     }
     input=out;
   }
   return input;
+}
+export function dilateMask(source,width,height,radius) {
+  return extremeMask(source,width,height,radius,true);
+}
+export function adjustInkThickness(source,width,height,amount=0) {
+  // Expand/erode glyph ink rather than changing its advance or relying on synthetic font weights.
+  const radius=Math.abs(amount),whole=Math.floor(radius),fraction=radius-whole;
+  const base=extremeMask(source,width,height,whole,amount>=0);
+  if(!fraction)return base;
+  const next=extremeMask(source,width,height,whole+1,amount>=0);
+  for(let i=0;i<base.length;i++)base[i]=base[i]*(1-fraction)+next[i]*fraction;
+  return base;
 }
