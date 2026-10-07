@@ -134,6 +134,17 @@ try {
   },project.pages[2]);
   assert.equal(repeated[0],repeated[1],'brush texture must stay fixed on repaint');
   assert.equal(repeated[0],expectedPreview,'export must match unselected live preview, including directional blur and dry brush');
+  await first.locator('.layer-card').nth(2).locator('textarea').focus();
+  const fontSelect=first.locator('.position-controls [data-field=font]');
+  assert.equal(await fontSelect.locator('option').count(),11);
+  const originalFont=await fontSelect.inputValue(),fontPictures=[];
+  for(const key of ['pop','angular','rock','hand','round','flowing','decorative']){
+    await fontSelect.selectOption(key);await page.evaluate(()=>document.fonts.ready);
+    assert.equal(await page.evaluate(async key=>{const {fontDescription}=await import('./fonts.js');return document.fonts.check(fontDescription({font:key,kind:'sfx'}).load);},key),true,`${key} must load its bundled Japanese font`);
+    fontPictures.push(await first.locator('canvas').evaluate(canvas=>canvas.toDataURL()));
+  }
+  assert.equal(new Set(fontPictures).size,7,'added font choices must produce seven distinct letter shapes');
+  await fontSelect.selectOption(originalFont);
   await page.locator('#projectInput').setInputFiles('artifacts/project.json');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 6 && !document.querySelector('#deck').inert);
   assert.equal(await rows.nth(3).locator('textarea').first().inputValue(), 'MEN');

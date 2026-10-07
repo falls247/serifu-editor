@@ -1,4 +1,6 @@
 import { inkSeed, distressMask, directionalBlur, dilateMask } from './ink.js';
+import { fontDescription } from './fonts.js';
+export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
 export const EFFECTS = Object.freeze({ impact: 'ドン！／立体', burst: 'バン！／集中線', speed: 'シュッ／スピード', rumble: 'ゴゴゴ／震え', tension: 'ゾワッ／感情・緊張' });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
@@ -86,7 +88,6 @@ function ornament(ctx, l) {
   ctx.restore();
 }
 
-export const FONT_CHOICES = Object.freeze({ comic: '漫画・極太', brush: '筆文字・ハネ', sans: 'ゴシック', serif: '明朝' });
 export const WARP_CHOICES = Object.freeze({ wave: '波打ち', bulge: '膨張', taper: '先細り' });
 const glyphCache = new Map();
 let cachePixels = 0;
@@ -97,9 +98,7 @@ function createSurface(ctx, width, height) {
   return new ctx.canvas.constructor(width, height);
 }
 function fontFamily(l) {
-  if (l.font === 'comic') return '"MangaBold", "Noto Sans CJK JP", "Yu Gothic", sans-serif';
-  if (l.font === 'brush') return '"MangaBrush", "Yu Mincho", serif';
-  return l.font === 'serif' ? '"Yu Mincho", "Hiragino Mincho ProN", serif' : '"Noto Sans JP", "Yu Gothic", sans-serif';
+  return fontDescription(l).family;
 }
 function drawInk(ctx, l, char, x, y) {
   if (l.kind === 'sfx') {
@@ -128,7 +127,7 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
   l={...l,size:l.size*quality,outline:l.outline*quality,blurX:(l.blurX||0)*quality,blurY:(l.blurY||0)*quality};
   const width=Math.max(1,Math.round(drawWidth*quality)),height=Math.max(1,Math.round(drawHeight*quality));
   const ink = createSurface(ctx, width, height), c = ink.getContext('2d');
-  c.font = `${l.font==='brush'?'400':'900'} ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
+  c.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
   c.translate(width/2,height/2);c.transform(1,0,shear,1,0,0);c.scale(sx,sy);c.rotate(glyphAngle);c.fillStyle='#ffffff';c.fillText(char,0,0);c.setTransform(1,0,0,1,0,0);
   let warped = ink;
   if (l.distortion > 0) {
@@ -166,7 +165,7 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
 }
 function paintText(ctx, l) {
   const sfx = l.kind === 'sfx';
-  ctx.font = `${l.font==='brush'?'400':sfx?'900':'700'} ${l.size}px ${fontFamily(l)}`;
+  ctx.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
   let sequence=0;
   const paint = (char,x,y,glyphAngle=0) => {

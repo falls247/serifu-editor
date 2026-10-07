@@ -3,8 +3,27 @@ import { normalizeLayer, checkpoint, restore, duplicateLayer, swapText, copyToNe
 import { exportName } from './renderer.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
+import { FONT_CATALOG, FONT_STYLES, fontDescription } from './fonts.js';
 
 const $ = id => document.getElementById(id);
+const fontStyles=document.createElement('style');fontStyles.textContent=FONT_STYLES;document.head.append(fontStyles);
+for(const select of $('pageTemplate').content.querySelectorAll('[data-field=font]')){
+  const groups=new Map();
+  for(const [key,font] of Object.entries(FONT_CATALOG)){
+    if(!groups.has(font.group)){const group=element('optgroup');group.label=font.group;select.append(group);groups.set(font.group,group);}
+    const option=element('option','',font.label);option.value=key;groups.get(font.group).append(option);
+  }
+}
+const fontLoads=new Map();
+const fontErrors=new Set();
+function requestPageFonts(p){
+  if(!document.fonts)return;
+  for(const layer of p.layers){
+    const query=fontDescription(layer).load;
+    if(!query||document.fonts.check(query)||fontLoads.has(query))continue;
+    fontLoads.set(query,document.fonts.load(query).then(()=>{fontErrors.delete(query);clearGlyphCache();pages.forEach(drawPage);pages.forEach(updateControls);}).catch(error=>{fontErrors.add(query);pages.forEach(updateControls);status(`書体を読み込めなかった: ${error.message}。ページを再読込して再試行。`);}));
+  }
+}
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
 let preferences;
 try { preferences=normalizePreferences(JSON.parse(localStorage.getItem(PREFS_KEY))); } catch { preferences=defaultPreferences(); }
@@ -55,6 +74,7 @@ function updateGlobal() {
 
 function drawPage(p) {
   if (!p?.canvas) return;
+  requestPageFonts(p);
   const scale = p.canvas.width / p.img.width;
   const displayScale = p.canvas.getBoundingClientRect().width / p.img.width || scale;
   draw(p.canvas.getContext('2d'), p.img, p.layers, p.id === activeId ? p.selectedId : null, scale, displayScale);
@@ -76,6 +96,9 @@ function updateControls(p) {
   for (const input of controls.querySelectorAll('[data-field]')) {
     if (input !== document.activeElement) input.value = l ? String(l[input.dataset.field]) : '';
   }
+  const query=l&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
+  fontStatus.textContent=query&&document.fonts&&!document.fonts.check(query)?fontErrors.has(query)?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
+  fontStatus.hidden=!fontStatus.textContent;
   for (const card of p.row.querySelectorAll('.layer-card')) card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
 }
 
@@ -393,8 +416,8 @@ $('save').onclick = () => guard(async () => {
   let completed = 0;
   try {
     if(document.fonts){
-      const families=new Set(snapshot.flatMap(p=>p.layers.map(l=>l.font==='brush'?'MangaBrush':l.font==='comic'?'MangaBold':null)).filter(Boolean));
-      await Promise.all([...families].map(family=>document.fonts.load(`${family==='MangaBrush'?'400':'900'} 64px ${family}`)));
+      const queries=new Set(snapshot.flatMap(p=>p.layers.map(l=>fontDescription(l).load)).filter(Boolean));
+      await Promise.all([...queries].map(query=>document.fonts.load(query)));
       clearGlyphCache();
     }
     for (const [i, p] of snapshot.entries()) {
