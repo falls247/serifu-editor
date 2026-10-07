@@ -15,3 +15,13 @@ test('fresh settings enable autosave every two minutes and ignore malformed pres
   const prefs=normalizePreferences({version:1,presets:[null,{id:'bad',name:'bad',kind:'sfx',style:{}}],defaults:{sfx:'bad'}});
   assert.equal(prefs.autosave.enabled,true);assert.equal(prefs.autosave.minutes,2);assert.equal(prefs.defaults.sfx,'sfx-impact');
 });
+test('brush presets retain texture and scale directional blur independently on non-square images',()=>{
+  const source={...newLayer('sfx',1000,750),font:'brush',blurX:20,blurY:40,dryInk:85,brushTails:75,inkCore:65};
+  const preset=createPreset('筆の掠れ',source,1000,750),target=newLayer('sfx',2000,750);
+  applyPreset(target,preset,2000,750);
+  assert.equal(target.blurX,40);assert.equal(target.blurY,40);
+  for(const key of ['font','dryInk','brushTails','inkCore'])assert.equal(target[key],source[key]);
+  const legacy=createPreset('旧プリセット',source,1000,750);
+  for(const key of ['blurXRatio','blurYRatio','blurStrength','inkCore','roughness','dryInk','brushTails'])delete legacy.style[key];
+  applyPreset(target,legacy,1000,750);assert.equal(target.blurY,0);assert.equal(target.dryInk,0);
+});

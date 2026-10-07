@@ -25,6 +25,12 @@ try {
   const rows = page.locator('.image-row'), first = rows.nth(0), second = rows.nth(1);
   const bounds = await first.locator('.row-columns > section').evaluateAll(items => items.map(item => item.getBoundingClientRect().left));
   assert.ok(bounds[0] < bounds[1] && bounds[1] < bounds[2], 'original, dialogue and preview must appear left to right');
+  assert.ok(await page.locator('textarea').evaluateAll(items=>items.every(input=>input.rows===1&&input.getBoundingClientRect().height<60)),'single-line dialogue and effects must start compact');
+  const oneLineHeight=await first.locator('textarea').first().evaluate(input=>input.getBoundingClientRect().height);
+  await first.locator('textarea').first().fill('一行目\n二行目\n三行目');
+  assert.ok(await first.locator('textarea').first().evaluate(input=>input.getBoundingClientRect().height)>oneLineHeight*2,'newlines must grow the input');
+  await first.locator('textarea').first().fill('長いセリフ'.repeat(100));
+  assert.equal(await first.locator('textarea').first().evaluate(input=>input.getBoundingClientRect().height),oneLineHeight,'removing newlines must shrink the input even for long text');
   await first.locator('textarea').nth(0).fill('男性の編集テスト');
   await second.locator('textarea').nth(0).fill('二枚目の編集');
   assert.equal(await first.locator('textarea').nth(0).inputValue(), '男性の編集テスト');
@@ -101,13 +107,37 @@ try {
   await second.locator('[data-action=add-sfx]').click();
   assert.equal(await second.locator('.layer-card').last().locator('[data-field=blur]').inputValue(),'4');
   assert.equal(await second.locator('.layer-card').last().locator('[data-preset-select]').inputValue(),effectPreset);
+  const third=rows.nth(2),tensionCard=third.locator('.layer-card').nth(2);
+  await tensionCard.locator('[data-preset-select]').selectOption('sfx-tension');
+  await page.evaluate(()=>document.fonts.ready);
+  assert.equal(await page.evaluate(()=>document.fonts.check('400 110px MangaBrush')),true,'bundled Japanese brush font must load');
+  await third.locator('.layer-card').nth(2).locator('summary').click();
+  const tension=third.locator('.layer-card').nth(2);
+  await tension.locator('[data-field=blurY]').fill('96');
+  await tension.locator('[data-field=dryInk]').fill('90');
+  await tension.locator('[data-field=brushTails]').fill('90');
+  await tension.locator('textarea').fill('ゾワッ');
+  await third.screenshot({path:'artifacts/tension.png'});
+  await third.locator('canvas').screenshot({path:'artifacts/tension-preview.png'});
+  await page.locator('#defaultSfx').selectOption(effectPreset);
   const downloadPromise = page.waitForEvent('download'); await page.click('#projectSave');
   const download = await downloadPromise; await download.saveAs('artifacts/project.json');
   const project = JSON.parse(await readFile('artifacts/project.json', 'utf8'));
   assert.equal(project.version, 3); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
+  assert.equal(project.pages[2].layers[2].font,'brush');assert.equal(project.pages[2].layers[2].blurY,96);assert.equal(project.pages[2].layers[2].dryInk,90);assert.equal(project.pages[2].layers[2].brushTails,90);
+  await first.locator('.layer-card').first().click();
+  const expectedPreview=await third.locator('canvas').evaluate(canvas=>canvas.toDataURL());
+  const repeated=await page.evaluate(async p=>{
+    const {draw}=await import('./renderer.js'),img=new Image();img.src=p.src;await img.decode();
+    const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
+    draw(canvas.getContext('2d'),img,p.layers);const first=canvas.toDataURL();draw(canvas.getContext('2d'),img,p.layers);return [first,canvas.toDataURL()];
+  },project.pages[2]);
+  assert.equal(repeated[0],repeated[1],'brush texture must stay fixed on repaint');
+  assert.equal(repeated[0],expectedPreview,'export must match unselected live preview, including directional blur and dry brush');
   await page.locator('#projectInput').setInputFiles('artifacts/project.json');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 6 && !document.querySelector('#deck').inert);
   assert.equal(await rows.nth(3).locator('textarea').first().inputValue(), 'MEN');
+  assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=blurY]').inputValue(),'96');
   const old = { version: 1, pages: [{ ...project.pages[0], layers: [{ ...project.pages[0].layers[0], kind: 'bubble', shape: 'ellipse', fill: '#ffffff', tailX: 0, tailY: 0 }] }] };
   await writeFile('artifacts/old.json', JSON.stringify(old)); await page.locator('#projectInput').setInputFiles('artifacts/old.json');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#deck').inert);
@@ -157,6 +187,7 @@ try {
   await page.click('#restoreDraft');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===7&&!document.querySelector('#deck').inert);
   assert.equal(await page.locator('.image-row').first().locator('textarea').first().inputValue(),'短周期の保存');
+  assert.equal(await page.locator('.image-row').nth(2).locator('.layer-card').nth(2).locator('[data-field=brushTails]').inputValue(),'90');
   await page.locator('#autosaveEnabled').uncheck();
   const savedAt=await page.evaluate(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta()).savedAt;});
   await page.locator('.image-row').first().locator('textarea').first().fill('自動保存OFF');await page.clock.fastForward(120000);
@@ -165,7 +196,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: 'artifacts/mobile.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile layout must not overflow horizontally');
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Browser smoke passed: 3-column layout, continuous editing, role colors/keylines, swap, independent undo, drag, all effects, project/legacy import, source deletion confirm and original-size batch export.');
+  console.log('Browser smoke passed: compact/auto-height inputs, brush font, directional blur/dry-brush preview-export parity, presets/draft recovery, 3-column layout, continuous editing, undo, drag, source deletion and original-size export.');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/failure.png', fullPage: true }).catch(() => {}); }
   throw error;

@@ -61,3 +61,11 @@ test('blur and distortion survive project restoration with range validation',()=
   for(const key of ['blur','motionBlur','warp','distortion','skew','stretchX'])assert.equal(restored[key],l[key]);
   assert.throws(()=>normalizeLayer({...l,blur:100}));
 });
+test('directional blur and brush texture restore from projects, with backward-compatible defaults',()=>{
+  const l={...newLayer('sfx',1000,750),font:'brush',effect:'tension',blurX:14,blurY:140,blurStrength:350,inkCore:65,roughness:60,dryInk:85,brushTails:90};
+  const restored=normalizeLayer(JSON.parse(JSON.stringify(l)),3);
+  for(const key of ['font','effect','blurX','blurY','blurStrength','inkCore','roughness','dryInk','brushTails'])assert.equal(restored[key],l[key]);
+  for(const invalid of [{blurY:301},{dryInk:-1},{blurStrength:401}])assert.throws(()=>normalizeLayer({...l,...invalid}));
+  const old={...l};for(const key of ['blurX','blurY','blurStrength','inkCore','roughness','dryInk','brushTails'])delete old[key];
+  assert.equal(normalizeLayer(old,3).blurY,0);assert.equal(normalizeLayer(old,3).dryInk,0);
+});

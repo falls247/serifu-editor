@@ -93,6 +93,10 @@ function element(tag, className, text) {
   return node;
 }
 
+function fitTextInput(input) {
+  input.rows=Math.max(1,input.value.split('\n').length);
+}
+
 function button(action, text, title) {
   const b = element('button', '', text); b.dataset.action = action;
   if (title) b.title = title;
@@ -131,7 +135,7 @@ function renderCards(p) {
     }
     const presetLine=element('div','preset-controls'),presetSelect=element('select');
     presetSelect.dataset.presetSelect='';presetSelect.setAttribute('aria-label',l.kind==='sfx'?'効果音プリセット':'セリフプリセット');presetLine.append(presetSelect);card.append(presetLine);
-    const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.rows = 3;
+    const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.wrap='off';fitTextInput(text);
     text.placeholder = l.kind === 'sfx' ? 'ドーン！' : 'セリフを入力';
     text.setAttribute('aria-label', l.kind === 'sfx' ? '効果音テキスト' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ');
     card.append(text);
@@ -144,13 +148,13 @@ function renderCards(p) {
       color.type = 'color'; color.dataset.field = 'color'; color.value = l.color; colorLabel.append(color); options.append(colorLabel); card.append(options);
     }
     if(l.kind==='sfx') {
-      const details=element('details','effect-details');details.append(element('summary','','ブラー・歪み・傾きの調整'));
+      const details=element('details','effect-details');details.append(element('summary','','ブラー・掠れ・ハネ・歪みの調整'));
       const grid=element('div','effect-grid');
-      const labels={blur:'ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'流れ方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
+      const labels={blurY:'縦ブラー（px）',blurX:'横ブラー（px）',blurStrength:'滲みの強さ（%）',inkCore:'文字の芯（%）',roughness:'輪郭の荒れ（%）',dryInk:'筆の掠れ（%）',brushTails:'ハネ・払い（%）',blur:'全方向ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'残像の方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
       for(const [field,labelText] of Object.entries(labels)){const label=element('label','',labelText),input=element('input');input.type='number';input.dataset.field=field;[input.min,input.max]=EFFECT_LIMITS[field];input.step=field==='blur'?'0.5':'1';input.value=String(l[field]);label.append(input);grid.append(label);}
       const warpLabel=element('label','','歪みの形'),warpSelect=element('select');warpSelect.dataset.field='warp';
       for(const [value,label] of Object.entries(WARP_CHOICES)){const option=element('option','',label);option.value=value;warpSelect.append(option);}warpSelect.value=l.warp;warpLabel.append(warpSelect);grid.append(warpLabel);
-      details.append(grid,element('p','effect-note','0で無効。ブラー・歪み・縦横倍率を組み合わせ、プレビューで調整。'));card.append(details);
+      details.append(grid,element('p','effect-note','感情・緊張はプリセット「感情／緊張の掠れ」から開始。縦ブラーは300px、滲みは400%まで。「文字の芯」で読みやすさを調整。掠れ・ハネは文字の形に直接適用。'));card.append(details);
     }
     const swap = element('div', 'swap-controls'), target = element('select'); target.dataset.swapTarget = '';
     target.setAttribute('aria-label', 'セリフを入れ替える相手'); swap.append(target, button('swap', 'セリフ交換')); card.append(swap);
@@ -207,6 +211,7 @@ $('deck').addEventListener('input', event => {
   if (busy) return;
   const input = event.target, field = input.dataset.field;
   if (!field) return;
+  if(field==='text')fitTextInput(input);
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
   const l = p.layers.find(item => item.id === id); if (!l) return;
   let value = input.value;
@@ -387,6 +392,11 @@ $('save').onclick = () => guard(async () => {
   const directory = await parent.getDirectoryHandle(folder, { create: true }), snapshot = snapshotPages();
   let completed = 0;
   try {
+    if(document.fonts){
+      const families=new Set(snapshot.flatMap(p=>p.layers.map(l=>l.font==='brush'?'MangaBrush':l.font==='comic'?'MangaBold':null)).filter(Boolean));
+      await Promise.all([...families].map(family=>document.fonts.load(`${family==='MangaBrush'?'400':'900'} 64px ${family}`)));
+      clearGlyphCache();
+    }
     for (const [i, p] of snapshot.entries()) {
       status(`保存中 ${i + 1} / ${snapshot.length} 枚`);
       const canvas = document.createElement('canvas'); canvas.width = p.img.width; canvas.height = p.img.height;
@@ -433,7 +443,9 @@ $('demo').onclick = () => guard(async () => {
     ctx.fillStyle = '#ffebbd'; ctx.beginPath(); ctx.arc(790, 160, 66, 0, Math.PI * 2); ctx.fill();
     const male = makeLayer('dialogue', 1000, 750, 'male'); male.x = 300; male.y = 170; male.text = ['さあ、出発しよう。', 'あの山の向こうへ。', 'ここから始まるんだ。'][i];
     const female = makeLayer('dialogue', 1000, 750, 'female'); female.x = 650; female.y = 280; female.text = ['うん、楽しみ！', '景色がきれい！', '続きも見てみよう。'][i];
-    const sfx = makeLayer('sfx', 1000, 750); sfx.x = 560; sfx.y = 450; sfx.effect = ['burst', 'speed', 'rumble'][i]; sfx.text = ['ドーン！', 'シュッ', 'ゴゴゴ…'][i];
+    const sfx = makeLayer('sfx', 1000, 750);
+    if(preferences.presets.find(p=>p.id===preferences.defaults.sfx)?.builtin)applyPreset(sfx,preferences.presets.find(p=>p.id===['sfx-impact','sfx-speed','sfx-tension'][i]),1000,750);
+    sfx.x = 560; sfx.y = 420; sfx.text = ['ドーン！', 'シュッ', 'ゾワッ…'][i];
     const src = c.toDataURL(), p = createPage({ name: `sample-${i + 1}.png`, src, img: await decode(src), layers: [male, female, sfx] });
     pages.push(p); mountPage(p);
   }
@@ -573,4 +585,8 @@ $('clearDraft').onclick=()=>guard(async()=>{
   status('一時保存を消去した。自動保存がONなら次の周期で再保存する。');
 });
 refreshPresetMenus();configureAutosave();updateGlobal();
-if(document.fonts)document.fonts.load('900 64px MangaBold').then(()=>{clearGlyphCache();pages.forEach(drawPage);}).catch(()=>{});
+if(document.fonts){
+  const redrawFonts=()=>{clearGlyphCache();pages.forEach(drawPage);};
+  document.fonts.addEventListener('loadingdone',redrawFonts);
+  document.fonts.load('900 64px MangaBold').then(redrawFonts).catch(()=>{});
+}

@@ -1,5 +1,5 @@
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
-export const EFFECT_LIMITS = Object.freeze({ blur: [0,30], motionBlur: [0,150], blurAngle: [-180,180], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
+export const EFFECT_LIMITS = Object.freeze({ blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
 export function normalizeLayer(input, version = 3) {
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
@@ -16,7 +16,7 @@ export function normalizeLayer(input, version = 3) {
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < 1 || outline > 80) throw new Error('白い縁の太さが不正');
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
-  const extras = { font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, distortion:0, skew:0, stretchX:100, stretchY:100 };
+  const extras = { font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
   if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
   for (const [key,[min,max]] of Object.entries(EFFECT_LIMITS)) if (!Number.isFinite(extras[key]) || extras[key]<min || extras[key]>max) throw new Error('効果音の設定が範囲外');
@@ -63,7 +63,8 @@ export function copyToNext(source, target, sourceWidth, sourceHeight, targetWidt
     ...layer, id: crypto.randomUUID(), x: layer.x * sx, y: layer.y * sy,
     w: clamp(layer.w * sx, 30, 30000), h: clamp(layer.h * sy, 30, 30000),
     size: clamp(layer.size * Math.min(sx, sy), 8, 500), outline: clamp(layer.outline * Math.min(sx, sy), 1, 80),
-    blur: clamp(layer.blur * Math.min(sx,sy),0,30), motionBlur: clamp(layer.motionBlur * Math.min(sx,sy),0,150),
+    blur: clamp(layer.blur * Math.min(sx,sy),0,30), motionBlur: clamp(layer.motionBlur * Math.min(sx,sy),0,300),
+    blurX:clamp((layer.blurX||0)*sx,0,150),blurY:clamp((layer.blurY||0)*sy,0,300),
   });
   return true;
 }
