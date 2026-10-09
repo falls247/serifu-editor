@@ -1,5 +1,5 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache } from './renderer.js';
-import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
+import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
@@ -73,9 +73,10 @@ function updateGlobal() {
     const copy = p.row.querySelector('[data-action=copy-next]');
     if (copy) copy.disabled = !p.layers.length || i === pages.length - 1;
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
+    p.row.querySelector('[data-action=cut-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=paste-all]').disabled = busy || !pageClipboard?.layers.length;
     p.row.querySelector('.batch-copy-hint').textContent = pageClipboard
-      ? `コピー済み：${pageClipboard.name} · ${pageClipboard.layers.length}件。この画像に追加。貼付け一回分は「戻す」で取り消せる。`
+      ? `${pageClipboard.cut?'カット':'コピー'}済み：${pageClipboard.name} · ${pageClipboard.layers.length}件。この画像に追加。カット・貼付けは各画像の「戻す」で取り消せる。`
       : '台詞・効果音をまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。';
   });
 }
@@ -295,6 +296,10 @@ $('deck').addEventListener('click', event => {
     pageClipboard = { ...copyLayers(p.layers,p.img.width,p.img.height), name:p.name };
     updateGlobal();
     status(`「${p.name}」の台詞・効果音 ${pageClipboard.layers.length}件をコピーした。別の画像の「文字を一括ペースト」で追加できる。`);
+  } else if (action === 'cut-all' && p.layers.length) {
+    pageClipboard = { ...cutLayers(p,p.img.width,p.img.height), name:p.name, cut:true };
+    markChanged(p); renderCards(p); drawPage(p);
+    status(`「${p.name}」の台詞・効果音 ${pageClipboard.layers.length}件をカットした。「文字を一括ペースト」で追加、元画像の「戻す」で復元できる。`);
   } else if (action === 'paste-all') {
     const copies = pasteLayers(pageClipboard,p,p.img.width,p.img.height);
     if (copies.length) {

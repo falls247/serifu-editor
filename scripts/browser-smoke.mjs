@@ -25,6 +25,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 3 && !document.querySelector('#deck').inert);
   const rows = page.locator('.image-row'), first = rows.nth(0), second = rows.nth(1);
   assert.equal(await first.locator('[data-action=copy-all]').isEnabled(),true);
+  assert.equal(await first.locator('[data-action=cut-all]').isEnabled(),true);
   assert.equal(await second.locator('[data-action=paste-all]').isDisabled(),true,'batch paste requires a copied image');
   const bounds = await first.locator('.row-columns > section').evaluateAll(items => items.map(item => item.getBoundingClientRect().left));
   assert.ok(bounds[0] < bounds[1] && bounds[1] < bounds[2], 'original, dialogue and preview must appear left to right');
@@ -116,6 +117,21 @@ try {
   await batchTarget.locator('[data-action=undo]').click();assert.equal(await batchTarget.locator('.layer-card').count(),3,'one undo removes the entire batch');
   await batchTarget.locator('[data-action=redo]').click();assert.equal(await batchTarget.locator('.layer-card').count(),6);
   await batchTarget.locator('[data-action=undo]').click();
+  await first.locator('textarea').first().fill(batchTexts[0]);
+  await first.locator('[data-action=cut-all]').click();
+  assert.equal(await first.locator('.layer-card').count(),0,'batch cut removes every dialogue and effect');
+  assert.equal(await first.locator('[data-action=copy-all]').isDisabled(),true);
+  assert.equal(await first.locator('[data-action=cut-all]').isDisabled(),true);
+  assert.equal(await first.locator('.no-layers').isVisible(),true);
+  assert.equal(await first.locator('.position-controls [data-field=x]').isDisabled(),true);
+  assert.ok((await second.locator('.batch-copy-hint').textContent()).includes('カット済み'));
+  await batchTarget.locator('[data-action=paste-all]').click();
+  assert.deepEqual(await batchTarget.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),[...targetTexts,...batchTexts]);
+  await batchTarget.locator('[data-action=undo]').click();assert.equal(await batchTarget.locator('.layer-card').count(),3);
+  await first.locator('[data-action=undo]').click();
+  assert.deepEqual(await first.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),batchTexts,'one undo restores the entire cut');
+  await first.locator('[data-action=redo]').click();assert.equal(await first.locator('.layer-card').count(),0);
+  await first.locator('[data-action=undo]').click();
   await second.locator('[data-action=paste-all]').click();await second.locator('[data-action=paste-all]').click();
   assert.equal(await second.locator('.layer-card').count(),secondCount+layerCount*2,'the same clipboard can paste repeatedly');
   const pastedIds=await second.locator('.layer-card').evaluateAll(cards=>cards.map(card=>card.dataset.layerId));
@@ -127,6 +143,26 @@ try {
   assert.equal(await first.locator('.layer-card').count(),layerCount+1,'batch buttons must leave the single-layer shortcut clipboard intact');
   assert.equal(await first.locator('.layer-card').last().locator('.kind-label').textContent(),'✦ 効果音');
   await page.keyboard.press('Meta+z');
+  // Actual landscape-to-portrait paste retains relative coordinates and readable glyph scaling.
+  await first.locator('[data-action=copy-all]').click();
+  const landscapeCoordinates=await first.locator('.position-controls').evaluate(controls=>Object.fromEntries(['x','y','w','h','size','outline','thickness'].map(field=>[field,Number(controls.querySelector(`[data-field=${field}]`).value)])));
+  const portraitPng=await page.evaluate(()=>{
+    const canvas=document.createElement('canvas');canvas.width=500;canvas.height=1000;
+    const context=canvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,500,1000);
+    return canvas.toDataURL().split(',')[1];
+  });
+  await page.locator('#fileInput').setInputFiles({name:'portrait.png',mimeType:'image/png',buffer:Buffer.from(portraitPng,'base64')});
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===4&&!document.querySelector('#deck').inert);
+  const portrait=rows.nth(3);
+  assert.equal(await portrait.locator('.dimensions').textContent(),'500 × 1000');
+  await portrait.locator('[data-action=paste-all]').click();
+  assert.deepEqual(await portrait.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),batchTexts);
+  const portraitCoordinates=await portrait.locator('.position-controls').evaluate(controls=>Object.fromEntries(['x','y','w','h','size','outline','thickness'].map(field=>[field,Number(controls.querySelector(`[data-field=${field}]`).value)])));
+  for(const field of ['x','w','size','outline','thickness'])assert.ok(Math.abs(portraitCoordinates[field]-landscapeCoordinates[field]*.5)<1e-8,`landscape-to-portrait ${field} scales correctly`);
+  for(const field of ['y','h'])assert.ok(Math.abs(portraitCoordinates[field]-landscapeCoordinates[field]*1000/750)<1e-8,`landscape-to-portrait ${field} preserves relative placement`);
+  await mkdir('artifacts',{recursive:true});await portrait.screenshot({path:'artifacts/portrait-paste.png'});
+  page.once('dialog',dialog=>dialog.accept());await portrait.locator('[data-action=remove]').click();
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3);
   const inkCoverage=await page.evaluate(async()=>{
     const {draw,newLayer}=await import('./renderer.js');await document.fonts.load('900 80px MangaBold');
     const original=document.createElement('canvas');original.width=320;original.height=240;original.getContext('2d').fillStyle='#ffffff';original.getContext('2d').fillRect(0,0,320,240);
@@ -288,7 +324,8 @@ try {
   const savedBatchTexts=await first.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value));
   await rows.nth(7).locator('[data-action=paste-all]').click();
   assert.deepEqual(await rows.nth(7).locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),savedBatchTexts,'batch paste works on an empty image');
-  await rows.nth(7).locator('[data-action=copy-all]').click();
+  await rows.nth(7).locator('[data-action=cut-all]').click();
+  assert.equal(await rows.nth(7).locator('.layer-card').count(),0);
   page.once('dialog', dialog => dialog.dismiss()); await rows.nth(7).locator('[data-action=delete]').click();
   assert.deepEqual(await page.evaluate(() => window.removed), []);
   page.once('dialog', dialog => dialog.accept()); await rows.nth(7).locator('[data-action=delete]').click();
@@ -333,7 +370,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: 'artifacts/mobile.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile layout must not overflow horizontally');
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Browser smoke passed: image-wide copy/paste, independent repeated batches and undo, copied styles in export/draft recovery after source deletion, fixed per-letter variation, preview shortcuts, numeric ink thickness, 19 fonts, presets, continuous editing, drag and original-size export.');
+  console.log('Browser smoke passed: image-wide copy/cut/paste, landscape-to-portrait placement, cut undo/redo, independent repeated batches, styles in export/draft recovery after source deletion, per-letter variation, preview shortcuts, numeric ink thickness, 19 fonts, presets, drag and original-size export.');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/failure.png', fullPage: true }).catch(() => {}); }
   throw error;

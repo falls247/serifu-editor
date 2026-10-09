@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hit, handleAt, exportName, newLayer } from '../renderer.js';
-import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection, copyLayers, pasteLayers } from '../model.js';
+import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers } from '../model.js';
 import { glyphVariation } from '../ink.js';
 
 const page = layers => ({ layers, done: false, selectedId: layers[0]?.id || null, undo: [], redo: [] });
@@ -99,6 +99,28 @@ test('an empty batch clipboard does not change layers, completion state or histo
   const before=structuredClone(target);
   for(const clipboard of [null,copyLayers([],1000,800)])assert.deepEqual(pasteLayers(clipboard,target,1000,800),[]);
   assert.deepEqual(target,before);
+});
+test('batch cut removes all layers in one operation and keeps a snapshot through undo, redo and independent edits',()=>{
+  const source=page([
+    {...newLayer('dialogue',1000,750,'female'),text:'移動する台詞',thickness:2.5},
+    {...newLayer('sfx',1000,750),text:'ゾワッ',font:'brush',dryInk:90,sizeVariation:8.5,horizontalJitter:3.5,glyphSeed:123456},
+  ]);
+  source.done=true;source.selectedId=source.layers[1].id;
+  const snapshot=structuredClone(source.layers),clipboard=cutLayers(source,1000,750);
+  assert.deepEqual(source.layers,[]);assert.equal(source.selectedId,null);assert.equal(source.done,false);assert.equal(source.undo.length,1);
+  assert.deepEqual(clipboard.layers,snapshot);
+  const target=page([newLayer('dialogue',500,1000)]),copies=pasteLayers(clipboard,target,500,1000);
+  assert.equal(target.layers.length,3);assert.equal(copies[0].x,snapshot[0].x*.5);assert.ok(Math.abs(copies[0].y-snapshot[0].y*1000/750)<1e-8);
+  assert.equal(restore(source,'undo'),true);assert.deepEqual(source.layers,snapshot);assert.equal(source.done,true);
+  assert.equal(restore(source,'redo'),true);assert.deepEqual(source.layers,[]);assert.equal(source.selectedId,null);
+  restore(source,'undo');source.layers[0].text='元の画像だけ変更';source.layers[1].dryInk=0;
+  assert.equal(copies[0].text,'移動する台詞');assert.equal(copies[1].dryInk,90);assert.deepEqual(clipboard.layers,snapshot);
+  assert.equal(restore(target,'undo'),true);assert.equal(target.layers.length,1);assert.equal(source.layers.length,2);
+});
+test('cutting an empty image is a no-op with no clipboard or history change',()=>{
+  const source=page([]);source.done=true;
+  const before=structuredClone(source);
+  assert.equal(cutLayers(source,1000,750),null);assert.deepEqual(source,before);
 });
 test('selection clipboard keeps a snapshot and pastes independent styles at the target resolution',()=>{
   for(const kind of ['dialogue','sfx']){

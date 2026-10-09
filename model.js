@@ -80,6 +80,14 @@ export function copyLayers(layers, width, height) {
   return { layers:structuredClone(layers), width, height };
 }
 
+export function cutLayers(source, width, height) {
+  if (!source?.layers.length) return null;
+  const clipboard=copyLayers(source.layers,width,height);
+  checkpoint(source);
+  source.layers=[];source.selectedId=null;
+  return clipboard;
+}
+
 export function pasteLayers(clipboard, target, width, height) {
   if (!target || !clipboard?.layers?.length) return [];
   const copies=clipboard.layers.map(layer=>scaledCopy(layer,clipboard.width,clipboard.height,width,height));
