@@ -12,6 +12,12 @@ function noise(x,y,seed) {
   let value=Math.imul(x+1,374761393)^Math.imul(y+1,668265263)^seed;
   value=Math.imul(value^(value>>>13),1274126177);return ((value^(value>>>16))>>>0)/4294967296;
 }
+export function glyphVariation(seed,index,sizeVariation=0,horizontalJitter=0) {
+  return {
+    scale:sizeVariation?1+(noise(index,0,seed)*2-1)*sizeVariation/100:1,
+    shift:horizontalJitter?(noise(index,1,seed)*2-1)*horizontalJitter/100:0,
+  };
+}
 export function distressMask(source,width,height,{size,roughness=0,dryInk=0,brushTails=0,seed=1}) {
   const alpha=new Uint8ClampedArray(source),rnd=random(seed);
   if(!roughness&&!dryInk&&!brushTails)return alpha;

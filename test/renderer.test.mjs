@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hit, handleAt, exportName, newLayer } from '../renderer.js';
 import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection } from '../model.js';
+import { glyphVariation } from '../ink.js';
 
 const page = layers => ({ layers, done: false, selectedId: layers[0]?.id || null, undo: [], redo: [] });
 test('rotation preserves pointer selection and handle coordinates', () => {
@@ -78,6 +79,18 @@ test('ink thickness restores, scales, and defaults to the original font for olde
   }
   const old={...newLayer('dialogue',1000,750)};delete old.thickness;assert.equal(normalizeLayer(old,2).thickness,0);
   for(const thickness of [-11,31,NaN])assert.throws(()=>normalizeLayer({...old,thickness}));
+});
+test('letter variation and its seed survive restore, copy, and undo independently of regenerated layer IDs',()=>{
+  const source={...newLayer('sfx',1000,750),sizeVariation:8.5,horizontalJitter:3.5,glyphSeed:123456};
+  const pattern=layer=>Array.from({length:10},(_,i)=>glyphVariation(layer.glyphSeed,i,layer.sizeVariation,layer.horizontalJitter));
+  const restored=normalizeLayer(JSON.parse(JSON.stringify(source)),3);
+  assert.notEqual(restored.id,source.id);assert.deepEqual(pattern(restored),pattern(source));
+  const pasted=pasteSelection(copySelection(source,1000,750),2000,1500);assert.deepEqual(pattern(pasted),pattern(source));
+  const first=page([source]),next=page([]);copyToNext(first,next,1000,750,2000,1500);assert.deepEqual(pattern(next.layers[0]),pattern(source));
+  checkpoint(first);first.layers[0].sizeVariation=12;restore(first,'undo');assert.deepEqual(pattern(first.layers[0]),pattern(restored));
+  const old={...source};for(const key of ['sizeVariation','horizontalJitter','glyphSeed'])delete old[key];
+  const a=normalizeLayer(old,2),b=normalizeLayer(old,2);assert.equal(a.sizeVariation,0);assert.equal(a.horizontalJitter,0);assert.equal(a.glyphSeed,b.glyphSeed);
+  for(const change of [{sizeVariation:31},{horizontalJitter:-1},{horizontalJitter:21},{glyphSeed:1.2},{glyphSeed:-1},{glyphSeed:4294967296}])assert.throws(()=>normalizeLayer({...source,...change}));
 });
 test('blur and distortion survive project restoration with range validation',()=>{
   const l={...newLayer('sfx',1000,750),blur:7,motionBlur:60,warp:'wave',distortion:80,skew:-25,stretchX:140};

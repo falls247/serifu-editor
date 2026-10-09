@@ -1,4 +1,4 @@
-import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness } from './ink.js';
+import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { fontDescription } from './fonts.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -6,8 +6,9 @@ export const EFFECTS = Object.freeze({ impact: 'ドン！／立体', burst: 'バ
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function newLayer(kind, width, height, speaker = 'male') {
+  const id=crypto.randomUUID();
   return {
-    id: crypto.randomUUID(), kind, speaker,
+    id, kind, speaker,
     text: kind === 'sfx' ? 'ドーン！' : '',
     x: width * .5, y: height * .4,
     w: clamp(width * (kind === 'sfx' ? .34 : .36), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .46), 30, 30000),
@@ -18,6 +19,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
     distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
     blurX: 0, blurY: 0, blurStrength: 200, inkCore: 80,
     roughness: kind === 'sfx' ? 18 : 0, dryInk: kind === 'sfx' ? 22 : 0, brushTails: kind === 'sfx' ? 25 : 0,
+    sizeVariation:kind==='sfx'?5:0, horizontalJitter:kind==='sfx'?3:0, glyphSeed:inkSeed(id),
   };
 }
 
@@ -172,8 +174,10 @@ function paintText(ctx, l) {
   let sequence=0;
   const paint = (char,x,y,glyphAngle=0) => {
     if (!sfx && !l.thickness) {ctx.save();ctx.translate(x,y);ctx.rotate(glyphAngle);drawInk(ctx,l,char,0,0);ctx.restore();return;}
-    const i=sequence++, glyph=warpedGlyph(ctx,l,char,glyphAngle),image=glyph.surface;
-    ctx.save(); ctx.translate(x,y);
+    const i=sequence++,variation=sfx?glyphVariation(l.glyphSeed??inkSeed(l.text),i,l.sizeVariation||0,l.horizontalJitter||0):{scale:1,shift:0};
+    const glyph=warpedGlyph(ctx,variation.scale===1?l:{...l,size:l.size*variation.scale},char,glyphAngle),image=glyph.surface;
+    // Jitter follows the text box's horizontal axis, including rotated vertical punctuation.
+    ctx.save(); ctx.translate(x+(sfx?variation.shift*l.size*l.stretchX/100:0),y);
     if (sfx && l.effect === 'rumble') { ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04); ctx.rotate((i%2?1:-1)*.07); }
     const matrix=ctx.getTransform(), pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
     ctx.filter=sfx && l.blur>0 ? `blur(${l.blur*pixelScale}px)` : 'none';

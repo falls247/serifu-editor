@@ -157,6 +157,14 @@ try {
   const effectCard=first.locator('.layer-card').nth(2);await effectCard.locator('textarea').focus();
   await first.locator('.position-controls [data-field=thickness]').fill('3.5');
   await effectCard.locator('summary').click();
+  assert.equal(await effectCard.locator('[data-field=sizeVariation]').inputValue(),'5');assert.equal(await effectCard.locator('[data-field=horizontalJitter]').inputValue(),'3');
+  await effectCard.locator('[data-field=sizeVariation]').fill('0');await effectCard.locator('[data-field=horizontalJitter]').fill('0');
+  const uniformLetters=await first.locator('canvas').evaluate(c=>c.toDataURL());
+  await effectCard.locator('[data-field=sizeVariation]').fill('8.5');
+  assert.notEqual(await first.locator('canvas').evaluate(c=>c.toDataURL()),uniformLetters,'letter-size variation must change the live preview');
+  await effectCard.locator('[data-field=sizeVariation]').fill('0');await effectCard.locator('[data-field=horizontalJitter]').fill('3.5');
+  assert.notEqual(await first.locator('canvas').evaluate(c=>c.toDataURL()),uniformLetters,'horizontal letter jitter must change the live preview independently');
+  await effectCard.locator('[data-field=sizeVariation]').fill('8.5');
   const beforeBlur=await first.locator('canvas').evaluate(c=>c.toDataURL());
   await effectCard.locator('[data-field=blur]').fill('4');await effectCard.locator('[data-field=distortion]').fill('70');await effectCard.locator('[data-field=motionBlur]').fill('30');
   assert.notEqual(await first.locator('canvas').evaluate(c=>c.toDataURL()),beforeBlur,'blur/warp must change rasterized preview');
@@ -165,6 +173,7 @@ try {
   await second.locator('[data-action=add-sfx]').click();
   assert.equal(await second.locator('.layer-card').last().locator('[data-field=blur]').inputValue(),'4');
   assert.equal(await second.locator('.position-controls [data-field=thickness]').inputValue(),'3.5');
+  assert.equal(await second.locator('.layer-card').last().locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await second.locator('.layer-card').last().locator('[data-field=horizontalJitter]').inputValue(),'3.5');
   assert.equal(await second.locator('.layer-card').last().locator('[data-preset-select]').inputValue(),effectPreset);
   const third=rows.nth(2),tensionCard=third.locator('.layer-card').nth(2);
   await tensionCard.locator('[data-preset-select]').selectOption('sfx-tension');
@@ -175,6 +184,7 @@ try {
   await tension.locator('[data-field=blurY]').fill('96');
   await tension.locator('[data-field=dryInk]').fill('90');
   await tension.locator('[data-field=brushTails]').fill('90');
+  await tension.locator('[data-field=sizeVariation]').fill('9');await tension.locator('[data-field=horizontalJitter]').fill('4');
   await tension.locator('textarea').fill('ゾワッ');
   await third.screenshot({path:'artifacts/tension.png'});
   await third.locator('canvas').screenshot({path:'artifacts/tension-preview.png'});
@@ -184,16 +194,19 @@ try {
   const project = JSON.parse(await readFile('artifacts/project.json', 'utf8'));
   assert.equal(project.version, 3); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
   assert.equal(project.pages[0].layers[0].thickness,2.5);assert.equal(project.pages[0].layers[2].thickness,3.5);
+  assert.equal(project.pages[0].layers[2].sizeVariation,8.5);assert.equal(project.pages[0].layers[2].horizontalJitter,3.5);assert.ok(Number.isInteger(project.pages[0].layers[2].glyphSeed));
   assert.equal(project.pages[2].layers[2].font,'brush');assert.equal(project.pages[2].layers[2].blurY,96);assert.equal(project.pages[2].layers[2].dryInk,90);assert.equal(project.pages[2].layers[2].brushTails,90);
   await first.locator('.layer-card').first().click();
   const expectedPreview=await third.locator('canvas').evaluate(canvas=>canvas.toDataURL());
   const repeated=await page.evaluate(async p=>{
     const {draw}=await import('./renderer.js'),img=new Image();img.src=p.src;await img.decode();
     const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
-    draw(canvas.getContext('2d'),img,p.layers);const first=canvas.toDataURL();draw(canvas.getContext('2d'),img,p.layers);return [first,canvas.toDataURL()];
+    draw(canvas.getContext('2d'),img,p.layers);const first=canvas.toDataURL();draw(canvas.getContext('2d'),img,p.layers);const second=canvas.toDataURL();
+    const {normalizeLayer}=await import('./model.js');draw(canvas.getContext('2d'),img,p.layers.map(l=>normalizeLayer(l,3)));return [first,second,canvas.toDataURL()];
   },project.pages[2]);
   assert.equal(repeated[0],repeated[1],'brush texture must stay fixed on repaint');
   assert.equal(repeated[0],expectedPreview,'export must match unselected live preview, including directional blur and dry brush');
+  assert.equal(repeated[0],repeated[2],'restoring regenerated layer IDs must preserve the exact letter-size/jitter pattern');
   await second.locator('textarea').first().focus();
   const thickPreview=await first.locator('canvas').evaluate(canvas=>canvas.toDataURL());
   const thickExport=await page.evaluate(async p=>{
@@ -217,6 +230,7 @@ try {
   assert.equal(await rows.nth(3).locator('textarea').first().inputValue(), 'MEN');
   await rows.nth(3).locator('textarea').first().focus();assert.equal(await rows.nth(3).locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
   assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=blurY]').inputValue(),'96');
+  assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'9');assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'4');
   const old = { version: 1, pages: [{ ...project.pages[0], layers: [{ ...project.pages[0].layers[0], kind: 'bubble', shape: 'ellipse', fill: '#ffffff', tailX: 0, tailY: 0 }] }] };
   await writeFile('artifacts/old.json', JSON.stringify(old)); await page.locator('#projectInput').setInputFiles('artifacts/old.json');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#deck').inert);
@@ -267,6 +281,7 @@ try {
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===7&&!document.querySelector('#deck').inert);
   assert.equal(await page.locator('.image-row').first().locator('textarea').first().inputValue(),'短周期の保存');
   assert.equal(await page.locator('.image-row').first().locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
+  assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'3.5');
   assert.equal(await page.locator('.image-row').nth(2).locator('.layer-card').nth(2).locator('[data-field=brushTails]').inputValue(),'90');
   await page.locator('#autosaveEnabled').uncheck();
   const savedAt=await page.evaluate(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta()).savedAt;});
@@ -276,7 +291,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: 'artifacts/mobile.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile layout must not overflow horizontally');
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Browser smoke passed: preview Ctrl/Meta copy-paste and undo, numeric ink thickness, 19 fonts, compact inputs, blur/dry-brush export parity, presets/draft recovery, continuous editing, drag, source deletion and original-size export.');
+  console.log('Browser smoke passed: fixed per-letter size/position variation, preview Ctrl/Meta copy-paste and undo, numeric ink thickness, 19 fonts, compact inputs, blur/dry-brush export parity, presets/draft recovery, continuous editing, drag, source deletion and original-size export.');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/failure.png', fullPage: true }).catch(() => {}); }
   throw error;

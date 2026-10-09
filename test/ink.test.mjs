@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directionalBlur, distressMask, dilateMask, inkSeed, adjustInkThickness } from '../ink.js';
+import { directionalBlur, distressMask, dilateMask, inkSeed, adjustInkThickness, glyphVariation } from '../ink.js';
 
 test('vertical blur spreads ink only vertically and preserves left-right edges',()=>{
   const width=81,height=81,source=new Uint8ClampedArray(width*height);
@@ -41,4 +41,14 @@ test('numeric ink thickness expands and erodes the body, including fractional va
   assert.ok(adjustInkThickness(new Uint8ClampedArray(source.length),width,height,30).every(v=>v===0));
   const full=new Uint8ClampedArray(25).fill(255),eroded=adjustInkThickness(full,5,5,-1);
   assert.equal(eroded[0],0);assert.equal(eroded[12],255,'erosion must treat pixels beyond the surface as transparent');
+});
+test('handwritten variation is bounded per letter, independent in each control, and repeatable',()=>{
+  const seed=123456,values=Array.from({length:50},(_,i)=>glyphVariation(seed,i,5,3));
+  for(const value of values){assert.ok(value.scale>=.95&&value.scale<=1.05);assert.ok(value.shift>=-.03&&value.shift<=.03);}
+  assert.ok(values.some(v=>v.scale<1)&&values.some(v=>v.scale>1),'letters must vary both above and below the base size');
+  assert.ok(values.some(v=>v.shift<0)&&values.some(v=>v.shift>0),'letters must shift in both horizontal directions');
+  assert.deepEqual(values,Array.from({length:50},(_,i)=>glyphVariation(seed,i,5,3)));
+  assert.notDeepEqual(values,Array.from({length:50},(_,i)=>glyphVariation(seed+1,i,5,3)));
+  assert.deepEqual(glyphVariation(seed,4,0,0),{scale:1,shift:0});
+  assert.equal(glyphVariation(seed,4,5,0).scale,values[4].scale);assert.equal(glyphVariation(seed,4,0,3).shift,values[4].shift);
 });
