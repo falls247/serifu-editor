@@ -76,6 +76,18 @@ export function pasteSelection(clipboard, width, height, offset=20) {
   return layer;
 }
 
+export function copyLayers(layers, width, height) {
+  return { layers:structuredClone(layers), width, height };
+}
+
+export function pasteLayers(clipboard, target, width, height) {
+  if (!target || !clipboard?.layers?.length) return [];
+  const copies=clipboard.layers.map(layer=>scaledCopy(layer,clipboard.width,clipboard.height,width,height));
+  checkpoint(target);
+  target.layers.push(...copies);
+  return copies;
+}
+
 export function swapText(page, firstId, secondId) {
   const first = page.layers.find(l => l.id === firstId), second = page.layers.find(l => l.id === secondId);
   if (!first || !second || first === second) return false;
@@ -83,8 +95,6 @@ export function swapText(page, firstId, secondId) {
 }
 
 export function copyToNext(source, target, sourceWidth, sourceHeight, targetWidth, targetHeight) {
-  if (!source || !target) return false;
-  checkpoint(target);
-  for (const layer of source.layers) target.layers.push(scaledCopy(layer,sourceWidth,sourceHeight,targetWidth,targetHeight));
-  return true;
+  if (!source) return false;
+  return pasteLayers(copyLayers(source.layers,sourceWidth,sourceHeight),target,targetWidth,targetHeight).length>0;
 }

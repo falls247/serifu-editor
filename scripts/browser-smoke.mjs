@@ -24,6 +24,8 @@ try {
   await page.click('#demo');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 3 && !document.querySelector('#deck').inert);
   const rows = page.locator('.image-row'), first = rows.nth(0), second = rows.nth(1);
+  assert.equal(await first.locator('[data-action=copy-all]').isEnabled(),true);
+  assert.equal(await second.locator('[data-action=paste-all]').isDisabled(),true,'batch paste requires a copied image');
   const bounds = await first.locator('.row-columns > section').evaluateAll(items => items.map(item => item.getBoundingClientRect().left));
   assert.ok(bounds[0] < bounds[1] && bounds[1] < bounds[2], 'original, dialogue and preview must appear left to right');
   assert.ok(await page.locator('textarea').evaluateAll(items=>items.every(input=>input.rows===1&&input.getBoundingClientRect().height<60)),'single-line dialogue and effects must start compact');
@@ -98,6 +100,33 @@ try {
   assert.equal(await first.locator('.layer-card').last().locator('.kind-label').textContent(),'✦ 効果音');
   assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'3.5');
   await page.keyboard.press('Meta+z');assert.equal(await first.locator('.layer-card').count(),layerCount);
+  // Image-wide buttons work across nonadjacent images and retain an independent snapshot.
+  const batchTexts=await first.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value));
+  const batchTarget=rows.nth(2),targetTexts=await batchTarget.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value));
+  await first.locator('[data-action=copy-all]').click();
+  assert.equal(await batchTarget.locator('[data-action=paste-all]').isEnabled(),true);
+  assert.ok((await second.locator('.batch-copy-hint').textContent()).includes('3件'));
+  await first.locator('textarea').first().fill('一括コピー後に変更');
+  await batchTarget.locator('[data-action=paste-all]').click();
+  assert.deepEqual(await batchTarget.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),[...targetTexts,...batchTexts]);
+  assert.equal(await batchTarget.locator('.layer-card').nth(5).locator('.kind-label').textContent(),'✦ 効果音');
+  await batchTarget.locator('textarea').last().fill('貼付け先だけ変更');
+  assert.equal(await first.locator('textarea').last().inputValue(),batchTexts.at(-1));
+  await batchTarget.locator('[data-action=undo]').click();
+  await batchTarget.locator('[data-action=undo]').click();assert.equal(await batchTarget.locator('.layer-card').count(),3,'one undo removes the entire batch');
+  await batchTarget.locator('[data-action=redo]').click();assert.equal(await batchTarget.locator('.layer-card').count(),6);
+  await batchTarget.locator('[data-action=undo]').click();
+  await second.locator('[data-action=paste-all]').click();await second.locator('[data-action=paste-all]').click();
+  assert.equal(await second.locator('.layer-card').count(),secondCount+layerCount*2,'the same clipboard can paste repeatedly');
+  const pastedIds=await second.locator('.layer-card').evaluateAll(cards=>cards.map(card=>card.dataset.layerId));
+  assert.equal(new Set(pastedIds).size,pastedIds.length,'every pasted layer needs a distinct identity');
+  await second.locator('[data-action=undo]').click();await second.locator('[data-action=undo]').click();
+  assert.equal(await second.locator('.layer-card').count(),secondCount);
+  await first.locator('textarea').first().fill(batchTexts[0]);
+  await shortcutCanvas.focus();await page.keyboard.press('Meta+v');
+  assert.equal(await first.locator('.layer-card').count(),layerCount+1,'batch buttons must leave the single-layer shortcut clipboard intact');
+  assert.equal(await first.locator('.layer-card').last().locator('.kind-label').textContent(),'✦ 効果音');
+  await page.keyboard.press('Meta+z');
   const inkCoverage=await page.evaluate(async()=>{
     const {draw,newLayer}=await import('./renderer.js');await document.fonts.load('900 80px MangaBold');
     const original=document.createElement('canvas');original.width=320;original.height=240;original.getContext('2d').fillStyle='#ffffff';original.getContext('2d').fillRect(0,0,320,240);
@@ -254,14 +283,25 @@ try {
     window.showDirectoryPicker = async () => directory;
   }, project.pages[0].src);
   await page.click('#open'); await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 8 && !document.querySelector('#deck').inert);
+  assert.equal(await rows.nth(7).locator('[data-action=copy-all]').isDisabled(),true,'an empty image has nothing to copy');
+  await first.locator('[data-action=copy-all]').click();
+  const savedBatchTexts=await first.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value));
+  await rows.nth(7).locator('[data-action=paste-all]').click();
+  assert.deepEqual(await rows.nth(7).locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),savedBatchTexts,'batch paste works on an empty image');
+  await rows.nth(7).locator('[data-action=copy-all]').click();
   page.once('dialog', dialog => dialog.dismiss()); await rows.nth(7).locator('[data-action=delete]').click();
   assert.deepEqual(await page.evaluate(() => window.removed), []);
   page.once('dialog', dialog => dialog.accept()); await rows.nth(7).locator('[data-action=delete]').click();
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#deck').inert);
   assert.deepEqual(await page.evaluate(() => window.removed), ['original.png']);
+  await rows.nth(6).locator('[data-action=paste-all]').click();
+  assert.equal(await rows.nth(6).locator('.layer-card').count(),1+savedBatchTexts.length,'batch clipboard survives deleting its source image');
   await page.click('#save'); await page.waitForFunction(() => document.querySelector('#status').textContent.includes('7 枚と編集データ'));
   const saved = await page.evaluate(() => window.saved);
   assert.equal(Object.keys(saved).length, 8); assert.equal(saved['serifu-project.json'].version, 3);
+  const batchExport=saved['serifu-project.json'].pages[6].layers.slice(1);
+  assert.deepEqual(batchExport.map(layer=>layer.text),savedBatchTexts);
+  assert.deepEqual(batchExport.map(({id,...layer})=>layer),saved['serifu-project.json'].pages[0].layers.map(({id,...layer})=>layer),'export preserves every pasted style and position');
   for (const [name, image] of Object.entries(saved)) if (name.endsWith('.png')) { assert.equal(image.width, 1000); assert.equal(image.height, 750); }
   await page.click('#temporarySave');
   await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済'));
@@ -283,6 +323,8 @@ try {
   assert.equal(await page.locator('.image-row').first().locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
   assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'3.5');
   assert.equal(await page.locator('.image-row').nth(2).locator('.layer-card').nth(2).locator('[data-field=brushTails]').inputValue(),'90');
+  assert.deepEqual(await rows.nth(6).locator('textarea').evaluateAll(inputs=>inputs.slice(1).map(input=>input.value)),savedBatchTexts,'draft recovery keeps batch copies independent of later source edits');
+  assert.equal(await rows.nth(6).locator('[data-action=paste-all]').isDisabled(),true,'reloading starts with an empty clipboard');
   await page.locator('#autosaveEnabled').uncheck();
   const savedAt=await page.evaluate(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta()).savedAt;});
   await page.locator('.image-row').first().locator('textarea').first().fill('自動保存OFF');await page.clock.fastForward(120000);
@@ -291,7 +333,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: 'artifacts/mobile.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile layout must not overflow horizontally');
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Browser smoke passed: fixed per-letter size/position variation, preview Ctrl/Meta copy-paste and undo, numeric ink thickness, 19 fonts, compact inputs, blur/dry-brush export parity, presets/draft recovery, continuous editing, drag, source deletion and original-size export.');
+  console.log('Browser smoke passed: image-wide copy/paste, independent repeated batches and undo, copied styles in export/draft recovery after source deletion, fixed per-letter variation, preview shortcuts, numeric ink thickness, 19 fonts, presets, continuous editing, drag and original-size export.');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/failure.png', fullPage: true }).catch(() => {}); }
   throw error;

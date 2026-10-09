@@ -1,5 +1,5 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache } from './renderer.js';
-import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
+import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
@@ -26,6 +26,7 @@ function requestPageFonts(p){
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
 let layerClipboard=null;
+let pageClipboard=null;
 const clipboardPastes=new Map();
 let preferences;
 try { preferences=normalizePreferences(JSON.parse(localStorage.getItem(PREFS_KEY))); } catch { preferences=defaultPreferences(); }
@@ -71,6 +72,11 @@ function updateGlobal() {
     p.row.querySelector('[data-action=redo]').disabled = !p.redo.length;
     const copy = p.row.querySelector('[data-action=copy-next]');
     if (copy) copy.disabled = !p.layers.length || i === pages.length - 1;
+    p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
+    p.row.querySelector('[data-action=paste-all]').disabled = busy || !pageClipboard?.layers.length;
+    p.row.querySelector('.batch-copy-hint').textContent = pageClipboard
+      ? `コピー済み：${pageClipboard.name} · ${pageClipboard.layers.length}件。この画像に追加。貼付け一回分は「戻す」で取り消せる。`
+      : '台詞・効果音をまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。';
   });
 }
 
@@ -285,6 +291,17 @@ $('deck').addEventListener('click', event => {
     p.done = true; dirty(); updateGlobal();
     const next = pages[pages.indexOf(p) + 1];
     if (next) activate(next, next.selectedId, true); else status('最後の画像まで確認済み。一括保存で書き出せる。');
+  } else if (action === 'copy-all' && p.layers.length) {
+    pageClipboard = { ...copyLayers(p.layers,p.img.width,p.img.height), name:p.name };
+    updateGlobal();
+    status(`「${p.name}」の台詞・効果音 ${pageClipboard.layers.length}件をコピーした。別の画像の「文字を一括ペースト」で追加できる。`);
+  } else if (action === 'paste-all') {
+    const copies = pasteLayers(pageClipboard,p,p.img.width,p.img.height);
+    if (copies.length) {
+      p.selectedId = copies[0].id;
+      markChanged(p); renderCards(p); drawPage(p);
+      status(`「${p.name}」に台詞・効果音 ${copies.length}件を追加した。「戻す」で一括取消できる。`);
+    }
   } else if (action === 'copy-next') {
     const next = pages[pages.indexOf(p) + 1];
     if (next && copyToNext(p, next, p.img.width, p.img.height, next.img.width, next.img.height)) {

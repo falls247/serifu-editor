@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hit, handleAt, exportName, newLayer } from '../renderer.js';
-import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection } from '../model.js';
+import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection, copyLayers, pasteLayers } from '../model.js';
 import { glyphVariation } from '../ink.js';
 
 const page = layers => ({ layers, done: false, selectedId: layers[0]?.id || null, undo: [], redo: [] });
@@ -55,6 +55,50 @@ test('copying to a different image scales positions without sharing mutable laye
 test('new dialogue and effects default to vertical writing',()=>{
   assert.equal(newLayer('dialogue',1000,750).vertical,true);
   assert.equal(newLayer('sfx',1000,750).vertical,true);
+});
+test('batch clipboard snapshots every layer and can paste repeatedly after the source changes or is removed',()=>{
+  const source=page([
+    {...newLayer('dialogue',1000,800),text:'男性の台詞',font:'mincho',thickness:-1.5},
+    {...newLayer('dialogue',1000,800,'female'),text:'女性の台詞',vertical:false,rotation:22},
+    {...newLayer('sfx',1000,800),text:'ゾワッ',font:'brush',blurY:90,dryInk:85,brushTails:90,sizeVariation:8.5,horizontalJitter:3.5,glyphSeed:123456},
+  ]);
+  const snapshot=structuredClone(source.layers),clipboard=copyLayers(source.layers,1000,800);
+  source.layers[0].text='コピー後に編集';source.layers.splice(0);
+  const existing=newLayer('dialogue',1000,800),first=page([existing]),second=page([]);
+  const copies=pasteLayers(clipboard,first,1000,800),repeated=pasteLayers(clipboard,second,1000,800);
+  assert.equal(first.layers[0],existing,'destination layers must stay intact');
+  assert.equal(first.layers.length,4);assert.equal(second.layers.length,3);
+  for(let i=0;i<snapshot.length;i++){
+    const {id}=snapshot[i];
+    for(const copy of [copies[i],repeated[i]]){
+      assert.deepEqual({...copy,id},snapshot[i],'text, style, position, order and seed must survive');
+      assert.notEqual(copy.id,id);assert.notEqual(copy,clipboard.layers[i]);
+    }
+    assert.notEqual(copies[i].id,repeated[i].id);
+  }
+  assert.equal(new Set([...copies,...repeated].map(layer=>layer.id)).size,6);
+  copies[0].text='貼付け先だけ編集';copies[2].dryInk=0;
+  assert.deepEqual(clipboard.layers,snapshot);assert.equal(repeated[0].text,'男性の台詞');assert.equal(repeated[2].dryInk,85);
+});
+test('batch paste adapts placement to the target resolution and is one undoable operation',()=>{
+  const dialogue={...newLayer('dialogue',1000,800,'female'),text:'台詞',x:400,y:200,w:200,h:300,size:80,outline:8,thickness:4};
+  const sfx={...newLayer('sfx',1000,800),text:'ドン',x:800,y:600,size:100,blur:8,motionBlur:40,blurX:12,blurY:60};
+  const clipboard=copyLayers([dialogue,sfx],1000,800),existing=newLayer('dialogue',500,1200),target=page([existing]);
+  target.done=true;
+  const copies=pasteLayers(clipboard,target,500,1200);
+  assert.equal(copies[0].x,200);assert.equal(copies[0].y,300);assert.equal(copies[0].w,100);assert.equal(copies[0].h,450);
+  assert.equal(copies[0].size,40);assert.equal(copies[0].outline,4);assert.equal(copies[0].thickness,2);
+  assert.equal(copies[1].x,400);assert.equal(copies[1].y,900);assert.equal(copies[1].blur,4);assert.equal(copies[1].motionBlur,20);
+  assert.equal(copies[1].blurX,6);assert.equal(copies[1].blurY,90);
+  assert.equal(target.done,false);assert.equal(target.undo.length,1);
+  assert.equal(restore(target,'undo'),true);assert.deepEqual(target.layers,[existing]);assert.equal(target.done,true);
+  assert.equal(restore(target,'redo'),true);assert.deepEqual(target.layers,[existing,...copies]);assert.equal(target.done,false);
+});
+test('an empty batch clipboard does not change layers, completion state or history',()=>{
+  const target=page([newLayer('dialogue',1000,800)]);target.done=true;
+  const before=structuredClone(target);
+  for(const clipboard of [null,copyLayers([],1000,800)])assert.deepEqual(pasteLayers(clipboard,target,1000,800),[]);
+  assert.deepEqual(target,before);
 });
 test('selection clipboard keeps a snapshot and pastes independent styles at the target resolution',()=>{
   for(const kind of ['dialogue','sfx']){
