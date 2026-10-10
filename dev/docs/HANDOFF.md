@@ -205,3 +205,16 @@ GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手�
 - `window.serifuMetrics` は直近の前景操作、`window.serifuDraftMetrics` は手動一時保存の測定値。`poolDelta` は当該操作のWorker時間・件数、`pool` はセッション累計。容量の割当見積もりと実際の保留Blob byteを区別する。
 - 検証：`npm run check`、`npm test`、`npm run test:browser`、`npm run build`、`npm run test:bulk`。bulk検証は `_site/` を使うため先にビルドする。PlaywrightとChromiumが必要。
 - 性能測定：`npm run benchmark:bulk -- after`。初期値は3種類×500枚×3回、短い診断は `BULK_COUNT`・`BULK_RUNS` で変更する。出力はGit管理外の `artifacts/bulk-benchmark/`。書込みは2ms遅延の疑似writerであり、実ディスクの性能値として使わない。
+
+## 2026-10-10: ink print distress / balloon styles
+
+- ブランチ: `feat/manga-ink-balloon-styles-20261010`（`main`へ直接反映しない）
+- 追加: `ink.js:printDistressMask` の本文マスク、透明欠け、飛沫。 `renderer.js` は文字index＋textureSeedでキャッシュを区別し、欠けを `destination-out` で抜く。
+- `model.js` はPROJECT_VERSION=7。効果音のインク質感と `outline=0`、吹き出しの影・ブラシ設定をバリデーション。プリセットseedは除外。
+- 吹き出し `spiky` の放射状外周を鋭くし、中央本文の `w/h` を70%へ変更。影・ブラシ・既存テールを保持。
+- `project-io.js` はJSON 1～7、`.serifu` 内部6/7読込。新版書き出しは7。
+- `export-cache.js` の描画版2。従来Workerの共通 `draw()` を維持。
+- 単体テスト追加: `test/print-distress.test.mjs`, `test/balloon-effects.test.mjs`。既存 `test/bulk-task.test.mjs` のプロジェクト版期待値を更新。
+- 既存 `main` で失敗していた先細りテストは、別列間の差分ではなく同列の配置を検証するよう修正。
+- 継続確認事項: PNG RGBA差分、実ブラウザでの参照画像比較、Workerレンダリング一致、性能P50/P95。未計測は成功扱いしない。
+- ADR: `dev/docs/adr/0012-distressed-ink-and-balloon-effects.md`。
