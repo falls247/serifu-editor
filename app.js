@@ -292,6 +292,7 @@ function updateControls(p) {
   const l = selected(p), controls = p.row.querySelector('.position-controls');
   controls.disabled = !l;
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
+  controls.querySelector('[data-field=outline]').min=l?.kind==='sfx'?'0':'1';
   controls.querySelector('legend').textContent = balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=!l;
   controls.querySelector('.multiline-align-control').hidden=!l||!['dialogue','balloon'].includes(l.kind);
