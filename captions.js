@@ -11,7 +11,7 @@ export function newCaption(width,height) {
     w:limit(width*.32,30,30000),h:limit(height*.4,30,30000),rotation:0,text:'',
     color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
     textColor:'#111111',textOutlineColor:'#ffffff',textOutlineWidth:0,font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,
-    autoFit:false,padding:limit(Math.round(width*.015),2,2000),alignX:'center',alignY:'center'};
+    autoFit:true,padding:0,alignX:'center',alignY:'center'};
 }
 
 export function captionContentBox(layer) {

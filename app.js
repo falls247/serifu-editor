@@ -195,10 +195,11 @@ function updateControls(p) {
   const l = selected(p), controls = p.row.querySelector('.position-controls');
   controls.disabled = !l;
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
-  controls.querySelector('legend').textContent = balloon?'吹き出し：楕円とテールの位置調整':l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
+  controls.querySelector('legend').textContent = balloon?'吹き出し：形状とテールの位置調整':l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=balloon;
   for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=balloon||caption;
   controls.querySelector('.balloon-style-controls').hidden=!balloon&&!caption;
+  controls.querySelector('.balloon-shape-control').hidden=!balloon;
   controls.querySelector('.caption-controls').hidden=!caption;
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;

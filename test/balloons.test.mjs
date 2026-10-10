@@ -13,7 +13,7 @@ test('new balloons are white at 25% transparency, without a tail, and cross the 
 });
 
 test('ellipse and tail hit testing use rotated shape geometry instead of empty bounding-box corners',()=>{
-  const b={...newLayer('balloon',400,400),x:200,y:200,w:200,h:100,rotation:90,tailX:0,tailY:100,tailWidth:30};
+  const b={...newLayer('balloon',400,400),shape:'ellipse',x:200,y:200,w:200,h:100,rotation:90,tailX:0,tailY:100,tailWidth:30};
   assert.equal(hit(b,200,200),true);assert.equal(hit(b,152,295),false);assert.equal(hit(b,120,200),false);
   b.tail=true;
   assert.equal(balloonGeometry(b).hasTail,true);assert.equal(hit(b,120,200),true);assert.equal(handleAt(b,100,200),'tail');

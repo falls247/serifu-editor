@@ -1,6 +1,6 @@
 const segmenter=typeof Intl.Segmenter==='function'?new Intl.Segmenter('ja',{granularity:'grapheme'}):null;
 export const graphemes=text=>segmenter?[...segmenter.segment(text)].map(part=>part.segment):Array.from(text);
-export const verticalRotation=char=>'ー―…‥（）「」『』【】〈〉《》'.includes(char)?Math.PI/2:0;
+export const verticalRotation=char=>'ー―～〜〰…‥（）「」『』【】〈〉《》'.includes(char)?Math.PI/2:0;
 export const isCornerPunctuation=char=>'、。，．､｡,.'.includes(char);
 
 // Position the actual ink at the top-right of its vertical em cell, regardless of font bearings.

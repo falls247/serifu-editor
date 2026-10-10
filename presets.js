@@ -10,7 +10,7 @@ const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio'};
 const boxStyles={
-  balloon:['rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder'],
+  balloon:['shape','rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder'],
   caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY'],
 };
 function presetFields(kind) {
