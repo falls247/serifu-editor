@@ -159,6 +159,7 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
   if(depth)out.drawImage(tintedMask(ctx,edge,width,height,'#111111'),depth,depth);
   out.drawImage(border,0,0);out.drawImage(foreground,0,0);
   const value={surface:result,drawWidth,drawHeight,width,height};
+  if(width*height>5000000)return value;
   glyphCache.set(key,value); cachePixels += width*height;
   while (cachePixels > 5000000 && glyphCache.size > 1) { const first= glyphCache.keys().next().value, old=glyphCache.get(first); cachePixels-=old.width*old.height; glyphCache.delete(first); }
   return value;

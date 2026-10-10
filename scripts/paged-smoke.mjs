@@ -16,6 +16,7 @@ try {
   page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${port}`);
+  await page.selectOption('#projectFormat','json');
   assert.equal(await page.locator('#pageSize').inputValue(), '50');
   const fixture = await page.evaluate(async () => {
     const { newLayer } = await import('./renderer.js');
@@ -31,8 +32,8 @@ try {
   await mkdir('artifacts', { recursive: true });
   await writeFile('artifacts/paged-fixture.json', JSON.stringify(fixture));
   await page.locator('#projectInput').setInputFiles('artifacts/paged-fixture.json');
-  const ready = () => page.waitForFunction(() => !document.querySelector('#deck').inert);
-  await page.waitForFunction(() => document.querySelector('#count').textContent === '500 枚' && !document.querySelector('#deck').inert);
+  const ready = () => page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);
+  await page.waitForFunction(() => document.querySelector('#count').textContent === '500 枚' && !document.querySelector('#projectLoad').disabled);
   const rows = page.locator('.image-row'), thumbs = page.locator('.thumbnail');
   const first = () => rows.first();
   assert.equal(await rows.count(), 50); assert.equal(await thumbs.count(), 500);
@@ -103,9 +104,9 @@ try {
 
   await page.evaluate(() => {
     window.savedFiles = {};
-    const root = { getDirectoryHandle: async () => ({ getFileHandle: async name => ({ createWritable: async () => ({
-      write: async data => window.savedFiles[name] = data instanceof Blob ? data.size : JSON.parse(data), close: async () => {}, abort: async () => {},
-    }) }) }) };
+    const root = { getDirectoryHandle: async () => ({ getFileHandle: async name => ({ createWritable: async () => { const parts=[]; return ({
+      write: async data => {if(data instanceof Blob)window.savedFiles[name]=data.size;else parts.push(data);}, close: async () => {if(parts.length)window.savedFiles[name]=JSON.parse(parts.join(''));}, abort: async () => {},
+    });} }) }) };
     window.showDirectoryPicker = async () => root;
   });
   await page.click('#saveEdited'); await ready();

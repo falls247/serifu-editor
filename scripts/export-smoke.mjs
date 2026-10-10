@@ -17,6 +17,7 @@ try {
   page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${port}`);
+  await page.selectOption('#projectFormat','json');
   assert.equal(await page.locator('#textSave').isDisabled(), true);
   assert.equal(await page.locator('#textTarget').inputValue(), 'female');
   await page.evaluate(() => {
@@ -24,18 +25,18 @@ try {
     canvas.getContext('2d').fillRect(0, 0, 160, 120);
     const bytes = Uint8Array.from(atob(canvas.toDataURL().split(',')[1]), char => char.charCodeAt(0));
     window.makeSource = (name, names) => ({ name, async *values() {
-      for (const filename of names) yield { kind: 'file', getFile: async () => new File([bytes], filename, { type: 'image/png' }) };
+      for (const filename of names) yield { kind: 'file', name: filename, getFile: async () => new File([bytes], filename, { type: 'image/png' }) };
     } });
     window.source = window.makeSource('読込フォルダ', ['a.png', 'b.png', 'c.png']);
     window.outputs = []; window.pickerOptions = [];
     window.destination = { name: '別の保存先', getDirectoryHandle: async name => {
       const output = { name, files: {} }; window.outputs.push(output);
-      return { getFileHandle: async filename => ({ createWritable: async () => ({
+      return { getFileHandle: async filename => ({ createWritable: async () => { const parts=[]; return ({
         write: async value => {
           if (window.failWrite) throw new Error('simulated write failure');
-          output.files[filename] = value instanceof Blob ? { bytes: value.size } : JSON.parse(value);
-        }, close: async () => {}, abort: async () => {},
-      }) }) };
+          if(value instanceof Blob)output.files[filename]={bytes:value.size};else parts.push(value);
+        }, close: async () => {if(parts.length)output.files[filename]=JSON.parse(parts.join(''));}, abort: async () => {},
+      });} }) };
     } };
     window.showDirectoryPicker = async options => {
       window.pickerOptions.push({ mode: options.mode, startsAtSource: options.startIn === window.source, hasStartIn: 'startIn' in options });
@@ -44,8 +45,9 @@ try {
     };
   });
   await page.click('#open');
-  const ready = () => page.waitForFunction(() => !document.querySelector('#deck').inert);
+  const ready = () => page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);
   await ready();
+  assert.equal(await page.locator('#bulkPanel').isHidden(),true,'finished image loading must hide progress');
   const rows = page.locator('.image-row');
   const row = name => rows.filter({ has: page.locator('.page-name', { hasText: name }) });
   const a = row('a.png'), b = row('b.png'), c = row('c.png');
@@ -92,7 +94,14 @@ try {
   assert.deepEqual(await page.evaluate(() => Object.keys(window.outputs[0].files)), ['p1_c.png', 'p2_b.png', 'p3_a.png', 'serifu-project.json']);
   assert.deepEqual(await page.evaluate(() => window.outputs[0].files['serifu-project.json'].pages.map(p => p.name)), ['c.png', 'b.png', 'a.png']);
   assert.equal(await page.evaluate(() => window.pickerOptions.at(-1).startsAtSource), true);
+  assert.equal(await page.locator('#bulkPanel').isHidden(),true,'finished export must hide progress');
   assert.ok((await page.locator('#status').textContent()).includes('別の保存先/serifu_'));
+
+  await page.evaluate(()=>{window.originalPicker=window.showDirectoryPicker;window.showDirectoryPicker=()=>new Promise(resolve=>{window.resolvePicker=resolve;});});
+  await page.click('#saveEdited');await page.waitForSelector('#bulkPanel:not([hidden])');assert.ok((await page.locator('#bulkStage').textContent()).includes('保存先の選択と準備'));
+  assert.equal(await page.locator('#bulkPanel').evaluate(n=>getComputedStyle(n).backgroundColor),'rgb(28, 32, 40)');
+  await page.screenshot({path:'artifacts/bulk-progress-dark.png'});await page.click('#bulkCancel');await page.waitForFunction(()=>!document.querySelector('#saveEdited').disabled,null,{timeout:5000});assert.equal(await page.locator('#bulkPanel').isHidden(),true);
+  await page.evaluate(()=>{window.resolvePicker(window.destination);window.showDirectoryPicker=window.originalPicker;});assert.equal(await page.evaluate(()=>window.outputs.length),1,'late picker completion cannot start an export');
   await page.click('#saveEdited'); await ready();
   assert.deepEqual(await page.evaluate(() => Object.keys(window.outputs[1].files)), ['p1_c.png', 'p3_a.png', 'serifu-project.json']);
   assert.equal(await page.evaluate(() => window.pickerOptions.at(-1).startsAtSource), true);
@@ -101,9 +110,11 @@ try {
   await page.click('#save'); await ready();
   assert.equal(await page.evaluate(() => window.outputs.length), 2);
   assert.equal(await page.locator('#save').isEnabled(), true);
+  assert.equal(await page.locator('#bulkPanel').isHidden(),true,'cancelled export must hide progress');
   await page.evaluate(() => { window.cancelPicker = false; window.failWrite = true; });
   await page.click('#save'); await ready();
   assert.ok((await page.locator('#status').textContent()).includes('0 枚保存済み。simulated write failure'));
+  assert.equal(await page.locator('#bulkPanel').isHidden(),true,'failed export must hide progress');
   await page.evaluate(() => {
     window.failWrite = false; window.pickDestination = false;
     window.source = window.makeSource('追加フォルダ', Array.from({ length: 7 }, (_, i) => `extra${i}.png`));
@@ -123,6 +134,9 @@ try {
   await page.click('#restoreDraft'); await ready();
   assert.deepEqual((await names()).slice(0, 3), ['c.png', 'b.png', 'a.png']);
   await page.evaluate(() => window.showDirectoryPicker = undefined);
+  await page.selectOption('#projectFormat','json');
+  const zipped=page.waitForEvent('download');await page.click('#saveEdited');const zipDownload=await zipped;assert.match(zipDownload.suggestedFilename(),/^serifu-edited_.*\.zip$/);await zipDownload.saveAs('artifacts/brave-edited.zip');await ready();assert.equal(await page.evaluate(()=>window.serifuMetrics.pngPacked),2);assert.equal(await page.evaluate(()=>window.serifuMetrics.archiveEntries),3);assert.equal(await page.locator('#bulkPanel').isHidden(),true);
+  const allZipped=page.waitForEvent('download');await page.click('#save');await (await allZipped).saveAs('artifacts/brave-all.zip');await ready();assert.equal(await page.evaluate(()=>window.serifuMetrics.pngPacked),10);assert.equal(await page.evaluate(()=>window.serifuMetrics.archiveEntries),11);
   await textDownload('female', '「女性C」\n「女性A1」\n「女性A2\n続き」\n');
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile layout must not overflow');
@@ -132,7 +146,7 @@ try {
 
   const imported = await browser.newPage(); await imported.goto(`http://127.0.0.1:${port}`);
   await imported.locator('#projectInput').setInputFiles('artifacts/export-project.json');
-  await imported.waitForFunction(() => document.querySelectorAll('.image-row').length === 10 && !document.querySelector('#deck').inert);
+  await imported.waitForFunction(() => document.querySelectorAll('.image-row').length === 10 && !document.querySelector('#projectLoad').disabled);
   assert.deepEqual((await imported.locator('.page-name').allTextContents()).slice(0, 3), ['c.png', 'b.png', 'a.png']);
   await imported.close();
   assert.deepEqual(errors, []);

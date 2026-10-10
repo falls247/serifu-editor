@@ -5,7 +5,7 @@ export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,8
 export function newBalloon(width,height) {
   const w=limit(width*.64,30,30000),h=limit(height*.56,30,30000);
   return {
-    id:crypto.randomUUID(),kind:'balloon',x:width*.88,y:height*.16,w,h,rotation:0,
+    id:crypto.randomUUID(),kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
     tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };

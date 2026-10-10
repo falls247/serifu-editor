@@ -1,3 +1,4 @@
+import {checkAbort} from './bulk-task.js';
 const DB_NAME='serifu-editor-drafts', DB_VERSION=1;
 let connection;
 function requestResult(request) { return new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);}); }
@@ -14,12 +15,15 @@ async function database() {
 }
 export async function getDraftMeta() {const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const data=await requestResult(tx.objectStore('drafts').get('current'));await done;return data||null;}
 export async function getImageIds() {const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);const ids=await requestResult(tx.objectStore('images').getAllKeys());await done;return new Set(ids);}
-export async function saveDraft(meta,newImages) {
+export async function saveDraft(meta,newImages,{signal,onProgress=()=>{}}={}) {
+  checkAbort(signal);
   const db=await database(),tx=db.transaction(['drafts','images'],'readwrite'),done=completed(tx);
   const images=tx.objectStore('images'),keep=new Set(meta.pages.map(p=>p.id));
-  for(const image of newImages){const lookup=images.get(image.id);lookup.onsuccess=()=>{if(!lookup.result)images.put(image);};}
+  const abort=()=>{try{tx.abort();}catch{}};signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+  let prepared=0;for(const image of newImages){const request=images.put(image);request.onsuccess=()=>onProgress(++prepared,newImages.length);}
+  const keys=images.getAllKeys();keys.onsuccess=()=>{const present=new Set(keys.result);if(meta.pages.some(p=>!present.has(p.id)))abort();};
   const cursor=images.openCursor();cursor.onsuccess=()=>{const value=cursor.result;if(value){if(!keep.has(value.key))value.delete();value.continue();}};
-  tx.objectStore('drafts').put({...meta,key:'current'});await done;
+  tx.objectStore('drafts').put({...meta,key:'current'});try{await done;}catch(error){if(signal?.aborted)throw signal.reason;throw error;}finally{signal?.removeEventListener('abort',abort);}
 }
 export async function getDraftImages(ids) {
   const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);

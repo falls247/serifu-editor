@@ -7,7 +7,7 @@ const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const alignedStart=(available,used,alignment)=>alignment==='left'||alignment==='top'?-available/2:alignment==='right'||alignment==='bottom'?available/2-used:-used/2;
 
 export function newCaption(width,height) {
-  return {id:crypto.randomUUID(),kind:'caption',x:width*.23,y:height*.28,
+  return {id:crypto.randomUUID(),kind:'caption',presetId:null,x:width*.23,y:height*.28,
     w:limit(width*.32,30,30000),h:limit(height*.4,30,30000),rotation:0,text:'',
     color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
     textColor:'#111111',textOutlineColor:'#ffffff',textOutlineWidth:0,font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,

@@ -17,3 +17,19 @@
 .preset-controls select{flex:1;min-width:0}.preset-controls button{flex:none;font-size:10px;padding:6px 9px;white-space:nowrap}
 
 .card-header{flex-wrap:wrap;gap:6px 8px}.card-heading{display:flex;align-items:center;gap:8px;min-width:0}.card-heading .kind-label{white-space:nowrap}.card-heading .role-switch{flex-shrink:0}.card-heading .role-switch button{font-size:9px;padding:3px 4px;white-space:nowrap}.card-mini-actions{margin-left:auto;flex-shrink:0}
+
+.bulk-panel { display:flex; gap: .7rem; align-items:center; flex-wrap:wrap; padding:12px 24px; background:#1c2028; color:#e9eaf0; border-bottom:1px solid var(--line); }
+.bulk-panel[hidden] { display:none; }
+.bulk-panel progress { width:150px; height:8px; border:0; border-radius:5px; overflow:hidden; appearance:none; background:var(--line); color:var(--lime); accent-color:var(--lime); }
+.bulk-panel progress::-webkit-progress-bar { background:var(--line); }
+.bulk-panel progress::-webkit-progress-value { background:var(--lime); border-radius:5px; }
+.bulk-panel progress::-moz-progress-bar { background:var(--lime); border-radius:5px; }
+.bulk-panel progress:indeterminate { background:linear-gradient(var(--lime),var(--lime)) left / 30% 100% no-repeat var(--line); animation:bulk-progress 1.2s ease-in-out infinite alternate; }
+.bulk-panel progress:indeterminate::-webkit-progress-bar { background:transparent; }
+.bulk-panel progress:indeterminate::-webkit-progress-value { background:transparent; }
+.bulk-panel progress:indeterminate::-moz-progress-bar { background:transparent; }
+@keyframes bulk-progress { to { background-position:right; } }
+@media (prefers-reduced-motion:reduce) { .bulk-panel progress:indeterminate { animation:none; background-position:center; } }
+.bulk-name { max-width:220px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.project-actions label { display:flex; align-items:center; gap:6px; }
+@media (max-width:700px) { .bulk-panel { padding:10px; } .project-actions { flex-wrap:wrap; } .project-actions label { font-size:12px; } }
