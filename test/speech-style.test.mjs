@@ -5,6 +5,18 @@ import {normalizeLayer,scaledCopy,checkpoint,restore} from '../model.js';
 import {createPreset,applyPreset,normalizePreferences,defaultPreferences} from '../presets.js';
 import {balloonBoundaryPoint,defaultSpikeCount} from '../balloons.js';
 
+test('SFX outline color and width survive copies, presets, old data and undo',()=>{
+  const original={...newLayer('sfx',1000,750),textOutlineColor:'#123abc',outline:7.5};
+  const restored=normalizeLayer(JSON.parse(JSON.stringify(original)));assert.equal(restored.textOutlineColor,'#123abc');
+  const copy=scaledCopy(original,1000,750,500,1000);assert.equal(copy.textOutlineColor,'#123abc');assert.equal(copy.outline,3.75);
+  const preset=createPreset('色付き輪郭',original,1000,750),target=newLayer('sfx',1000,750);applyPreset(target,preset,1000,750);assert.equal(target.textOutlineColor,'#123abc');assert.equal(target.outline,7.5);
+  const old={...original};delete old.textOutlineColor;assert.equal(normalizeLayer(old,9).textOutlineColor,'#ffffff');
+  delete preset.style.textOutlineColor;applyPreset(target,preset,1000,750);assert.equal(target.textOutlineColor,'#123abc');
+  for(const textOutlineColor of ['red',null,['#ffffff']])assert.throws(()=>normalizeLayer({...original,textOutlineColor}));
+  const page={layers:[original],done:false,edited:false,undo:[],redo:[],selectedId:original.id};checkpoint(page);original.textOutlineColor='#abcdef';original.outline=0;
+  restore(page,'undo');assert.equal(page.layers[0].textOutlineColor,'#123abc');assert.equal(page.layers[0].outline,7.5);restore(page,'redo');assert.equal(page.layers[0].textOutlineColor,'#abcdef');assert.equal(page.layers[0].outline,0);
+});
+
 test('speech colors and zero outlines validate, survive copies, presets and undo',()=>{
   for(const kind of ['dialogue','balloon']){
     const original={...newLayer(kind,1000,750,'female'),text:'指定色のセリフ',textColor:'#2468aa',textOutlineColor:'#cc3300',outline:0};

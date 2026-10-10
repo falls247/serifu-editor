@@ -1,5 +1,5 @@
 import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
-import { fontDescription } from './fonts.js';
+import { fontDescription, glyphFontDescription } from './fonts.js';
 import { graphemes, verticalRotation, punctuationCenter } from './typography.js';
 
 export const CAPTION_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
@@ -59,9 +59,10 @@ export function captionLayout(ctx,layer,sizeOverride) {
       if(!layer.text)return {size,font,glyphs:[],width:0,height:0,innerWidth:box.width,innerHeight:box.height,fits:true};
       const measured=new Map();
       for(const char of lines.flat())if(!measured.has(char)){
+        const glyphDescription=glyphFontDescription(ctx,layer,char),glyphFont=`${glyphDescription.weight} ${size}px ${glyphDescription.family}`;ctx.font=glyphFont;
         const m=ctx.measureText(char),left=m.actualBoundingBoxLeft||0,right=m.actualBoundingBoxRight??m.width,
           ascent=m.actualBoundingBoxAscent??size*.8,descent=m.actualBoundingBoxDescent??size*.2;
-        measured.set(char,{char,left,right,ascent,descent,width:Math.max(m.width,left+right),height:Math.max(0,ascent+descent),rotate:layer.vertical&&verticalRotation(char)!==0});
+        measured.set(char,{char,font:glyphFont,left,right,ascent,descent,width:Math.max(m.width,left+right),height:Math.max(0,ascent+descent),rotate:layer.vertical&&verticalRotation(char)!==0});
       }
       const metrics=[...measured.values()],glyphs=[];
       let width=0,height=0;
@@ -111,6 +112,7 @@ export function paintCaption(ctx,layer) {
   const outline=layer.textOutlineWidth??0;
   ctx.strokeStyle=layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.lineJoin='round';
   for(const stroke of outline>0?[true,false]:[false])for(const glyph of layout.glyphs){
+    ctx.font=glyph.font;
     ctx.save();ctx.translate(glyph.x,glyph.y);if(glyph.rotate)ctx.rotate(Math.PI/2);
     const x=(glyph.left-glyph.right)/2,y=(glyph.ascent-glyph.descent)/2;
     if(stroke)ctx.strokeText(glyph.char,x,y);else ctx.fillText(glyph.char,x,y);

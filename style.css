@@ -56,4 +56,12 @@
 .effect-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 .effect-grid label{min-width:0;overflow-wrap:anywhere}
 .effect-grid input,.effect-grid select{width:100%;min-width:0;box-sizing:border-box}
+.numeric-setting{display:grid;gap:5px;margin-top:3px;min-width:0}
+.numeric-setting input{margin-top:0;min-width:0}
+.numeric-setting input[type=range]{width:100%;height:20px;padding:0;border:0;background:transparent;accent-color:var(--lime);cursor:pointer}
+.numeric-setting input[type=range]:disabled{cursor:default;opacity:.45}
+.numeric-setting input:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.taper-controls .numeric-setting{max-width:100%}
+.taper-controls .numeric-setting input{max-width:100%}
+.sfx-outline-controls input[type=color]{height:32px;padding:3px}
 @media(max-width:520px){.ink-texture-panel .effect-grid{grid-template-columns:minmax(0,1fr)}}

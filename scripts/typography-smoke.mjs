@@ -44,6 +44,20 @@ try {
   });
   for(const p of rendering.punctuation)assert.ok(p.n>5&&p.x>125&&p.y<115,`${p.font}/${p.thickness}/${p.char}: punctuation must be upper-right, including adjusted ink thickness (${p.x},${p.y})`);
   assert.equal(rendering.none.black,0,'none must omit ornaments and extrusion shadows');assert.equal(rendering.taper.black,0);assert.ok(rendering.burst.black>50);assert.ok(rendering.none.heights.every(h=>h===rendering.none.heights[0]));assert.ok(rendering.taper.heights.every((h,i,a)=>h>0&&(!i||h<a[i-1])),'taper must visibly shrink successive letters');
+  const symbols=await page.evaluate(async()=>{
+    const {draw,newLayer,clearGlyphCache}=await import('./renderer.js'),{fontLoadQueries}=await import('./fonts.js'),{ImagePool}=await import('./bulk-pool.js');
+    for(const font of ['chikara','comic','gekifude'])await Promise.all(fontLoadQueries({font}).map(query=>document.fonts.load(query)));clearGlyphCache();
+    const bg=new OffscreenCanvas(300,300),bc=bg.getContext('2d');bc.fillStyle='#ffffff';bc.fillRect(0,0,300,300);const blob=await bg.convertToBlob(),canvas=new OffscreenCanvas(300,300),ctx=canvas.getContext('2d'),samples=[],pool=new ImagePool({size:1});
+    try{for(const font of ['chikara','comic','gekifude'])for(const kind of ['sfx','dialogue','balloon','caption'])for(const char of ['⋯','─'])for(const vertical of [false,true])for(const kerningMode of kind==='sfx'?['standard','optical']:['standard']){
+      const layer={...newLayer(kind,300,300),font,text:char,vertical,size:90,x:150,y:150,w:260,h:260,rotation:0,effect:'none',outline:0,textOutlineWidth:0,borderWidth:0,transparency:0,tail:false,autoFit:false,kerningMode,kerningStrength:85,distortion:0,skew:0,sizeVariation:0,horizontalJitter:0,roughness:0,dryInk:0,brushTails:0};
+      draw(ctx,bg,[layer]);const expected=ctx.getImageData(0,0,300,300).data;let minX=300,minY=300,maxX=-1,maxY=-1;
+      for(let y=0;y<300;y++)for(let x=0;x<300;x++)if(expected[(y*300+x)*4]<128){minX=Math.min(minX,x);maxX=Math.max(maxX,x);minY=Math.min(minY,y);maxY=Math.max(maxY,y);}
+      const png=await pool.run('render-png',{blob,width:300,height:300,layers:[layer]},undefined,()=>{throw new Error('symbol Worker unavailable');}),bitmap=await createImageBitmap(png),output=new OffscreenCanvas(300,300);output.getContext('2d').drawImage(bitmap,0,0);bitmap.close();const actual=output.getContext('2d').getImageData(0,0,300,300).data;
+      samples.push({font,kind,char,vertical,kerningMode,width:maxX-minX+1,height:maxY-minY+1,workerDiff:expected.reduce((n,value,i)=>n+(value!==actual[i]),0)});
+    }}finally{pool.close();}return samples;
+  });
+  for(const sample of symbols){assert.ok(sample.width>0&&sample.height>0);assert.ok(sample.vertical?sample.height>sample.width*2:sample.width>sample.height*2,`${sample.font}/${sample.kind}/${sample.char}/${sample.kerningMode}: symbol follows writing direction`);assert.equal(sample.workerDiff,0);}
+  await mkdir('artifacts',{recursive:true});await writeFile('artifacts/vertical-symbols-results.json',JSON.stringify(symbols,null,2));
   page.once('dialog',dialog=>dialog.accept('チカラヨワク先細り'));await page.click('#savePreset');const preset=await page.locator('#defaultSfx').inputValue();
   await source.locator('[data-action=add-sfx]').click();assert.equal(await source.locator('[data-kind=sfx]').last().locator('[data-field=taperRate]').inputValue(),'12.5');assert.equal(await field('font').inputValue(),'chikara');await source.locator('[data-action=undo]').click();
   await page.locator('#fileInput').setInputFiles({name:'03-new-image.png',mimeType:'image/png',buffer:Buffer.from(images[0],'base64')});await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);

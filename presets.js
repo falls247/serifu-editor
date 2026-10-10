@@ -18,7 +18,7 @@ const boxStyles={
 function presetFields(kind) {
   if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio',shadowBlur:'shadowBlurRatio',shadowOffsetX:'shadowOffsetXRatio',shadowOffsetY:'shadowOffsetYRatio'}};
   if(kind==='caption')return {styles:boxStyles.caption,ratios:{...boxRatioKeys,size:'sizeRatio',padding:'paddingRatio',textOutlineWidth:'textOutlineWidthRatio'}};
-  return {styles:[...styleKeys,'blurAngle',...(kind==='dialogue'?['textColor','textOutlineColor']:[])],ratios:ratioKeys};
+  return {styles:[...styleKeys,'blurAngle','textOutlineColor',...(kind==='dialogue'?['textColor']:[])],ratios:ratioKeys};
 }
 function presetDimension(kind,key,width,height) {
   if(['balloon','caption'].includes(kind)){

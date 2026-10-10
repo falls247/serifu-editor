@@ -15,7 +15,7 @@ import { ImagePool } from './bulk-pool.js';
 import { ExportCache, exportKey } from './export-cache.js';
 import { originalBlob, projectParts, projectBlob, readProject, writeParts } from './project-io.js';
 import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
-import { FONT_CATALOG, FONT_STYLES, fontDescription } from './fonts.js';
+import { FONT_CATALOG, FONT_STYLES, fontLoadQueries } from './fonts.js';
 
 const $ = id => document.getElementById(id);
 const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
@@ -33,8 +33,7 @@ const fontWaiters=new Map();
 const fontErrors=new Set();
 function requestPageFonts(p){
   if(!document.fonts)return;
-  for(const layer of p.layers){
-    const query=fontDescription(layer).load;
+  for(const query of new Set(p.layers.flatMap(fontLoadQueries))){
     if(!query||document.fonts.check(query))continue;
     if(fontLoads.has(query)){fontWaiters.get(query)?.add(p);continue;}
     const waiting=new Set([p]);fontWaiters.set(query,waiting);
@@ -256,8 +255,8 @@ function renderLayerSummary(layer,button) {
 }
 
 function persistControlValue(p,input) {
-  if(!p?.row||!input?.matches('[data-field]'))return;
-  const field=input.dataset.field,card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
+  if(!p?.row||!input?.matches(CONTROL_SELECTOR))return;
+  const field=controlField(input),card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
   if(!layer)return;
   let value=input.value;
   const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[0,80],shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS,...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
@@ -274,7 +273,7 @@ function persistControlValue(p,input) {
   if(field==='text'){fitTextInput(input);const summary=card.querySelector('.layer-summary');if(summary)renderLayerSummary(layer,summary);}
   markChanged(p);
   drawPage(p);
-  if(field!=='text')refreshPresetMenus(p);
+  updateControls(p);if(field!=='text')refreshPresetMenus(p);
 }
 
 function persistPageControl(p) {
@@ -318,16 +317,17 @@ function updateControls(p) {
   controls.querySelector('.balloon-position-note').hidden=!balloon;
   controls.querySelector('[data-action=backward]').textContent=balloon?'効果音の下へ':'背面へ';
   controls.querySelector('[data-action=forward]').textContent=balloon?'効果音の上へ':'前面へ';
-  for (const input of controls.querySelectorAll('[data-field]')) {
+  for (const input of controls.querySelectorAll(CONTROL_SELECTOR)) {
     if (input !== document.activeElement) {
       if(input.type==='checkbox')input.checked=l?.[input.dataset.field]===true;
-      else {const value=layerFieldValue(l,input.dataset.field);input.value=value===undefined?'':String(value);}
+      else syncControlValue(input,layerFieldValue(l,controlField(input)),p);
     }
   }
+  for(const input of controls.querySelectorAll('[data-numeric-field=size]'))input.disabled=caption&&l.autoFit;
   const captionStatus=controls.querySelector('.caption-fit-status');captionStatus.hidden=!caption;
   if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${layout.size}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
-  const query=l&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
-  fontStatus.textContent=query&&document.fonts&&!document.fonts.check(query)?fontErrors.has(query)?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
+  const pendingQueries=l&&document.fonts?fontLoadQueries(l).filter(query=>!document.fonts.check(query)):[],fontStatus=p.row.querySelector('.font-status');
+  fontStatus.textContent=pendingQueries.length?pendingQueries.some(query=>fontErrors.has(query))?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
   fontStatus.hidden=!fontStatus.textContent;
   const fontNote=controls.querySelector('.font-note');
   fontNote.textContent=l?FONT_CATALOG[l.font]?.note||'':'';fontNote.hidden=!fontNote.textContent;
@@ -343,10 +343,10 @@ function updateControls(p) {
       card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky'].includes(layer.shape);
       card.querySelector('.balloon-spike-count-control').hidden=layer.shape!=='spiky';
     }
-    if(['dialogue','balloon','caption'].includes(layer?.kind))for(const input of card.querySelectorAll('[data-field]')){
+    if(layer)for(const input of card.querySelectorAll(CONTROL_SELECTOR)){
       if(input===document.activeElement)continue;
       if(input.type==='checkbox')input.checked=layer[input.dataset.field];
-      else input.value=String(layerFieldValue(layer,input.dataset.field));
+      else syncControlValue(input,layerFieldValue(layer,controlField(input)),p);
     }
   }
 }
@@ -381,6 +381,7 @@ function activate(p, id = p.selectedId, scroll = false) {
 function unmountPage(p) {
   if (!p.row) return;
   persistPageControl(p);
+  rememberCardDetails(p);
   p.resizeObserver?.disconnect();
   p.canvas.width = 1; p.canvas.height = 1;
   p.row.remove(); p.row = null; p.canvas = null; p.resizeObserver = null;
@@ -472,6 +473,41 @@ function settingNumber(field,title,limits,value,step='1'){
   const label=element('label','',title),input=element('input');input.type='number';input.dataset.field=field;
   [input.min,input.max]=limits;input.step=step;input.value=String(value);label.append(input);return label;
 }
+const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
+function controlField(input){return input.dataset.field??input.dataset.numericField;}
+function syncControlValue(input,value,p){
+  const field=controlField(input);
+  if(input.type==='range'&&['x','y','w','h'].includes(field)){
+    const dimension=['y','h'].includes(field)?p.img.height:p.img.width;
+    input.min=String(['w','h'].includes(field)?30:Math.min(-dimension,value??0));
+    input.max=String(['w','h'].includes(field)?Math.min(30000,Math.max(dimension*2,value??0,30)):Math.max(dimension*2,value??0));
+  }
+  if(input.type==='range'&&input.dataset.numericStep&&Number.isFinite(value)){
+    const step=Number(input.dataset.numericStep),ticks=(value-(Number(input.min)||0))/step;
+    input.step=Math.abs(ticks-Math.round(ticks))<1e-8?String(step):'any';
+  }
+  input.value=value===undefined?'':Number.isFinite(value)&&['number','range'].includes(input.type)?String(Number(value.toPrecision(15))):String(value);
+}
+function addNumericControls(root,p){
+  for(const input of root.querySelectorAll('input[data-field][type=number], input[data-field][type=range]')){
+    if(input.closest('.numeric-setting'))continue;
+    const field=input.dataset.field,label=input.closest('label'),title=input.getAttribute('aria-label')||label?.textContent.trim()||field;
+    const wrap=element('div','numeric-setting'),linked=element('input');linked.type=input.type==='number'?'range':'number';linked.dataset.numericField=field;
+    const dimension=['y','h'].includes(field)?p.img.height:p.img.width,value=Number(input.value);
+    linked.min=input.min||String(Math.min(-dimension,value||0));linked.max=input.max||String(Math.max(dimension*2,value||0));linked.step=input.step||'1';
+    if(['w','h'].includes(field))linked.max=String(Math.min(30000,Math.max(dimension*2,value||0,30)));
+    linked.value=input.value;linked.disabled=input.disabled;
+    const range=input.type==='range'?input:linked;range.dataset.numericStep=input.step||'1';range.step='any';
+    input.setAttribute('aria-label',`${title}${input.type==='range'?' スライダー':''}`);linked.setAttribute('aria-label',`${title}${linked.type==='range'?' スライダー':''}`);
+    input.before(wrap);if(input.type==='number')wrap.append(input,linked);else wrap.append(linked,input);
+  }
+}
+function rememberCardDetails(p){
+  p.cardDetails??=new Map();
+  for(const card of p.row?.querySelectorAll('.layer-card')??[])for(const details of card.querySelectorAll('details')){
+    p.cardDetails.set(`${card.dataset.layerId}:${details.querySelector('summary').textContent}`,details.open);
+  }
+}
 function brushControls(layer){
   const details=element('details','brush-settings effect-details');details.append(element('summary','','ブラシ輪郭'));
   const grid=element('div','effect-grid');grid.append(settingSelect('borderStyle','描画モード',BRUSH_MODES,layer.borderStyle??'solid'));
@@ -497,6 +533,7 @@ function button(action, text, title) {
 
 function renderCards(p) {
   if (!p.row) return;
+  rememberCardDetails(p);
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
   for (const l of p.layers) {
@@ -567,6 +604,9 @@ function renderCards(p) {
       select.value = l.effect; label.append(select); options.append(label);
       const colorLabel = element('label', '', '文字色'), color = element('input');
       color.type = 'color'; color.dataset.field = 'color'; color.value = l.color; colorLabel.append(color); options.append(colorLabel); card.append(options);
+      const outlineControls=element('div','effect-grid sfx-outline-controls');
+      const outlineLabel=element('label','','輪郭色'),outlineColor=element('input');outlineColor.type='color';outlineColor.dataset.field='textOutlineColor';outlineColor.value=l.textOutlineColor??'#ffffff';outlineLabel.append(outlineColor);
+      outlineControls.append(outlineLabel,settingNumber('outline','輪郭の太さ（px）',[0,80],l.outline,'0.5'));card.append(outlineControls);
       const taper=element('div','taper-controls'),rateLabel=element('label','','先細りの変化率（%／文字）'),rate=element('input');
       rate.type='number';rate.dataset.field='taperRate';[rate.min,rate.max]=EFFECT_LIMITS.taperRate;rate.step='0.5';rate.value=String(l.taperRate);rateLabel.append(rate);
       taper.hidden=l.effect!=='taper';taper.append(rateLabel,element('p','effect-note','初期値10%。基準100pxなら100→90→80px。最小8px。改行しても縮小を継続。ばらつき0なら指定率どおり。'));card.append(taper);
@@ -594,6 +634,8 @@ function renderCards(p) {
       for(const [value,label] of Object.entries(WARP_CHOICES)){const option=element('option','',label);option.value=value;warpSelect.append(option);}warpSelect.value=l.warp;warpLabel.append(warpSelect);grid.append(warpLabel);
       details.append(grid,element('p','effect-note','手描きの揺れはサイズ±5%・左右±3%から調整。左右は文字幅が基準。0で追加のばらつきなし。文字ごとの変化は保存・再読込でも固定。'),element('p','effect-note','感情・緊張はプリセット「感情／緊張の掠れ」から開始。縦ブラーは300px、滲みは400%まで。「文字の芯」で読みやすさを調整。掠れ・ハネは文字の形に直接適用。'));card.append(details);
     }
+    addNumericControls(card,p);
+    for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${l.id}:${details.querySelector('summary').textContent}`)??false;
     container.append(card);
   }
   refreshPresetMenus(p); updateControls(p);
@@ -601,6 +643,7 @@ function renderCards(p) {
 
 function mountPage(p) {
   const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;
+  addNumericControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
   row.querySelector('.dimensions').textContent = `${p.img.width} × ${p.img.height}`;
   const original = row.querySelector('.original'); original.src = p.src; original.alt = `元画像 ${p.name}`;
@@ -664,7 +707,7 @@ $('deck').addEventListener('focusout', event => {
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
-  const input = event.target, field = input.dataset.field;
+  const input = event.target, field = controlField(input);
   if (!field) return;
   if(field==='text')fitTextInput(input);
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
@@ -684,6 +727,7 @@ $('deck').addEventListener('input', event => {
   if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)renderLayerSummary(l,summary);}
   markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
+$('deck').addEventListener('change',event=>editing.delete(event.target));
 
 $('deck').addEventListener('click', event => {
   if (editLocked()) return;
@@ -892,7 +936,7 @@ function download(blob, name) {
 }
 async function prepareExportFonts(snapshot,task) {
   task?.stage('書体準備');if(!document.fonts)return;
-  const queries=new Set(snapshot.flatMap(p=>p.layers.map(l=>fontDescription(l).load)).filter(Boolean));
+  const queries=new Set(snapshot.flatMap(p=>p.layers.flatMap(fontLoadQueries)));
   for(const query of queries){checkAbort(task?.signal);const faces=await document.fonts.load(query);if(!faces.length)throw new Error(`書体を読込できない: ${query}`);}
   clearGlyphCache();
 }

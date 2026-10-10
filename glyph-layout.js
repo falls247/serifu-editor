@@ -1,4 +1,4 @@
-import { fontDescription } from './fonts.js';
+import { fontDescription, glyphFontDescription } from './fonts.js';
 import { inkSeed, glyphVariation, adjustInkThickness } from './ink.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset, isCornerPunctuation } from './typography.js';
 
@@ -15,7 +15,7 @@ export function createSurface(ctx,width,height){
 
 // Used by both optical analysis and the final ink renderer, including vertical punctuation.
 export function glyphInkSurface(ctx,layer,char,angle,width,height){
-  const ink=createSurface(ctx,width,height),c=ink.getContext('2d'),description=fontDescription(layer);
+  const ink=createSurface(ctx,width,height),c=ink.getContext('2d'),description=glyphFontDescription(ctx,layer,char);
   c.font=`${description.weight} ${layer.size}px ${description.family}`;c.textAlign='center';c.textBaseline='middle';
   const corner=verticalPunctuationOffset(c,char,layer.size,layer.vertical);
   c.translate(width/2,height/2);c.transform(1,0,Math.tan(layer.skew*Math.PI/180),1,0,0);
@@ -38,7 +38,7 @@ function warpAt(l,y){
 
 // Metrics first. Masks are only built on demand for pairs with intersecting cross-axis bounds.
 export function measureGlyph(ctx,l,char,angle){
-  const description=fontDescription(l),key=[description.family,description.weight,char,l.size,l.vertical,angle,l.stretchX,l.stretchY,l.skew,l.distortion,l.warp,l.thickness??0].join('|');
+  const description=glyphFontDescription(ctx,l,char),key=[description.family,description.weight,char,l.size,l.vertical,angle,l.stretchX,l.stretchY,l.skew,l.distortion,l.warp,l.thickness??0].join('|');
   if(cache.has(key)){const entry=cache.get(key);cache.delete(key);cache.set(key,entry);return entry;}
   ctx.font=`${description.weight} ${l.size}px ${description.family}`;ctx.textAlign='center';ctx.textBaseline='middle';
   const m=ctx.measureText(char),corner=verticalPunctuationOffset(ctx,char,l.size,l.vertical),sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);

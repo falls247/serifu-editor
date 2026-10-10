@@ -62,6 +62,8 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < 0 || outline > 80) throw new Error('文字の輪郭の太さが不正');
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
+  const textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
+  if(typeof textOutlineColor!=='string'||!/^#[0-9a-f]{6}$/i.test(textOutlineColor))throw new Error('文字の輪郭色が不正');
   const extras = { ...PLACEMENT_DEFAULTS, taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, grungeAmount:65, scratchLength:55, scratchAngle:90, spatterAmount:40, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
   if(!['standard','optical'].includes(extras.kerningMode))throw new Error('文字配置方式が不正');
@@ -77,7 +79,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     id: crypto.randomUUID(), kind, speaker, text: input.text,
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
     rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
-    ...(kind==='dialogue'?speechColors(input):{}),
+    ...(kind==='dialogue'?speechColors(input):{textOutlineColor}),
     ...extras, glyphSeed, inkTexture, textureSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }

@@ -116,3 +116,30 @@ JSONは版1〜9、高速 `.serifu` は内部プロジェクト版6〜9を読み�
 - 字形サーフェスとブラシサーフェスはそれぞれ200万画素上限で品質を制限する。大きい図形では微細な掠れが弱くなる場合がある。
 - キャッシュは有限。多数の異なる文字・サイズ・seedを続けて編集すると古い解析と画像を再生成する。初回描画にはCPU負荷がある。
 - ブラウザ、端末書体、フォント読込条件が異なる環境間の画素一致は保証しない。
+
+## 追加修正: 設定操作・不足文字・効果音の輪郭色
+
+配置再生成で失われていた詳細の開閉状態を、レイヤーごとに保持した。再生成・Undo・プリセット適用・表示範囲の切替でも復元する。カードと位置調整の数値は直接入力・増減・スライダーを連動させ、端数のあるコピー値や大きい配置幅も正しく反映する。
+
+851チカラヨワクの `♥`・`♡` はcmapに登録済みだが字形データが空だった。選択した書体の通常の文字は維持し、欠損文字にはGEKIFUDE SFXを優先する。登録済みの空字形はCanvasの実インク境界で検出し、その書記素だけGEKIFUDEへ置換する。標準／輪郭詰めの計測と描画、セリフ、吹き出し、キャプション、画像Workerで共有した。
+
+効果音カードに輪郭色と太さを追加。`textOutlineColor` の欠損値は白、`outline` は0〜80px・0.5px刻みで、0なら輪郭なし。保存・復元、コピー、プリセット、Undoに対応する。保存形式は9のまま、描画キャッシュ版は7（下記の縦書き記号補正を含む）。詳細の開閉状態は表示専用で保存データに含めない。
+
+変更対象は `app.js`、`style.css`、`fonts.js`、`renderer.js`、`glyph-layout.js`、`captions.js`、`image-worker.js`、`model.js`、`presets.js`、`export-cache.js`、`package.json`、関連テストと開発資料。設計判断は [ADR-0015](adr/0015-numeric-controls-and-glyph-fallback.md) に記録した。
+
+- `npm test`: 15テストファイル成功。空字形判定・フォントキャッシュ・輪郭色の互換性とコピー／プリセット／Undoを追加検証。
+- `npm run check`、`npm run build`、`git diff --check`: 成功。
+- ブラウザ11スクリプトと一括処理テスト: 個別に実行し全成功。既存の縦書き、句読点、先細り、各種保存・復元・ページ表示も確認。
+- 新しい受入テスト: 48組の数値UI、直接入力・増減・スライダードラッグ・Undo、再生成後の詳細保持、輪郭色の保存・復元、430px画面の収まりを確認。
+- 5書体 × 2種類のハート × 縦横 × 標準／輪郭詰めの40条件で描画を確認。チカラヨワクのハートはGEKIFUDE指定との画素差0。通常のかなは元の書体を維持。
+- 共通Canvasの再描画、アプリのPNG、実WorkerのPNGは画素差0。全21書体の既存Worker一致テストも成功。
+
+目視確認した画像: [描画例](../../artifacts/sfx-font-fallback.png)、[PCの設定](../../artifacts/sfx-controls-desktop.png)、[モバイルの設定](../../artifacts/sfx-controls-mobile.png)。検証値は [sfx-controls-results.json](../../artifacts/sfx-controls-results.json)。画像と結果はGit管理外。
+
+GEKIFUDEの読込を追加で待つため、未読込時は既存TTF約208KiBの転送が増える。GEKIFUDEにもない文字は従来の端末書体を使用する。広範囲のseedを正確に指定する場合は直接入力・増減を併用する。
+
+## 追加修正: 縦書きの記号方向
+
+`⋯`（U+22EF）と `─`（U+2500）を共通の縦書き回転対象へ追加した。従来は類似文字の `…`・`―` だけを扱っていたため、横向きのまま描かれた。効果音の標準配置／輪郭詰め、セリフ、吹き出し本文、キャプションすべてに反映し、横書きは従来の向きを維持する。
+
+3書体 × 2文字 × 縦横 × 各レイヤー／配置方式の60条件で、実インク領域の縦横比と実Worker PNGの画素差0を確認。`npm test`、`npm run check`、ビルド、組版ブラウザテストが成功。[修正前](../../artifacts/vertical-symbols-before.png)と[修正後](../../artifacts/vertical-symbols-after.png)を目視確認した。結果は [vertical-symbols-results.json](../../artifacts/vertical-symbols-results.json)、判断の補足は [ADR-0005](adr/0005-fonts-and-manga-typography.md)。

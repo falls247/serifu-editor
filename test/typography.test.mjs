@@ -1,11 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {newLayer,glyphFontSize,textGlyphs,EFFECTS} from '../renderer.js';
-import {verticalPunctuationOffset,graphemes} from '../typography.js';
+import {verticalPunctuationOffset,verticalRotation,graphemes} from '../typography.js';
 import {captionLayout} from '../captions.js';
 import {normalizeLayer,copySelection,pasteSelection,checkpoint,restore} from '../model.js';
 import {createPreset,applyPreset,defaultPreferences,normalizePreferences} from '../presets.js';
 const context=()=>({font:'',save(){this.saved=this.font;},restore(){this.font=this.saved;},measureText(char){const size=Number(this.font.match(/([\d.]+)px/)[1]);return {width:size,actualBoundingBoxLeft:0,actualBoundingBoxRight:size,actualBoundingBoxAscent:size*.8,actualBoundingBoxDescent:size*.2};}});
+
+test('midline ellipsis and box-drawing line rotate only in vertical text across every layer',()=>{
+  for(const char of ['⋯','─']){
+    assert.equal(verticalRotation(char),Math.PI/2);
+    for(const vertical of [true,false]){
+      for(const kind of ['dialogue','balloon','sfx'])for(const kerningMode of kind==='sfx'?['standard','optical']:['standard']){
+        const layer={...newLayer(kind,1000,750),text:char,vertical,kerningMode,kerningStrength:85,sizeVariation:0,horizontalJitter:0,rotationJitter:0};
+        assert.equal(textGlyphs(context(),layer)[0].angle,vertical?Math.PI/2:0);
+      }
+      const caption={...newLayer('caption',1000,750),text:char,vertical,autoFit:false};assert.equal(captionLayout(context(),caption).glyphs[0].rotate,vertical);
+    }
+  }
+  assert.equal(verticalRotation('あ'),0);assert.equal(verticalRotation('♥'),0);
+});
 
 test('vertical Japanese punctuation uses actual font bearings to place ink in the upper-right',()=>{
   for(const char of ['、','。','，','．','､','｡']){
