@@ -473,7 +473,13 @@ function renderCards(p) {
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
       const orderLabel=element('label','','効果音との重なり'),order=element('select');order.dataset.field='sfxOrder';
-      for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);card.append(grid);
+      for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);
+       const brushLabel=element('label','','枠線の描き方'),brushSelect=element('select');brushSelect.dataset.field='borderStyle';
+       for(const [value,title] of [['solid','通常'],['brush','ブラシ風']]){const option=element('option','',title);option.value=value;brushSelect.append(option);}
+       brushSelect.value=l.borderStyle??'solid';brushLabel.append(brushSelect);grid.append(brushLabel);card.append(grid);
+       const shadowLabel=element('label','tail-toggle','影を付ける'),shadowToggle=element('input');
+       shadowToggle.type='checkbox';shadowToggle.dataset.field='shadowEnabled';shadowToggle.checked=l.shadowEnabled??false;
+       shadowLabel.prepend(shadowToggle);card.append(shadowLabel);
       const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
       card.append(element('p','effect-note','25%透過＝不透明度75%。セリフ・書体・文字サイズ・方向・枠と形状は右側で調整。'));
       container.append(card);continue;
