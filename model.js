@@ -23,7 +23,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   if(input?.kind==='balloon'){
     input={...input,distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
       size:input.size===undefined?40:input.size,outline:input.outline===undefined?4:input.outline,thickness:input.thickness===undefined?0:input.thickness,
-      vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font};
+      vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font,shadowEnabled:input.shadowEnabled??false,shadowColor:input.shadowColor??'#222222',shadowBlur:input.shadowBlur??12,shadowOffsetX:input.shadowOffsetX??6,shadowOffsetY:input.shadowOffsetY??6,shadowOpacity:input.shadowOpacity??45,borderStyle:input.borderStyle??'solid',brushRoughness:input.brushRoughness??50};
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('吹き出しの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('吹き出しの座標・サイズが範囲外');
