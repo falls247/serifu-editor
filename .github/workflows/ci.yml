@@ -10,10 +10,10 @@ jobs:
           node-version: 22
       - run: npm run check
       - run: npm test
+      - run: npm run fonts
       - run: npm run build
       - run: npm install --no-save playwright
       - run: npx playwright install chromium --with-deps
-      - run: npm run fonts
       - run: npm run test:bulk
       - run: npm run test:browser
       - uses: actions/upload-artifact@v4
