@@ -104,7 +104,16 @@ export function paintBalloon(ctx,layer) {
     ctx.shadowBlur=layer.shadowBlur;ctx.shadowOffsetX=layer.shadowOffsetX;ctx.shadowOffsetY=layer.shadowOffsetY;
   }
   ctx.fillStyle=layer.color;ctx.fill();ctx.restore();
-  if(layer.borderWidth>0){ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='round';ctx.stroke();}
+  if(layer.borderWidth>0){
+    ctx.strokeStyle=layer.borderColor;ctx.lineJoin='round';
+    if(layer.borderStyle==='brush'){
+      for(let pass=1;pass<=3;pass++){
+        ctx.save();ctx.globalAlpha=[0,.7,.4,.3][pass];
+        ctx.lineWidth=layer.borderWidth*[0,1.05,.7,.38][pass];
+        balloonPath(ctx,layer,pass);ctx.stroke();ctx.restore();
+      }
+    }else{ctx.lineWidth=layer.borderWidth;ctx.stroke();}
+  }
 }
 
 // Every balloon stays below dialogue and captions. Front balloons also require SFX below them.
