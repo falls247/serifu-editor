@@ -10,3 +10,5 @@
 
 .caption-controls[hidden],[data-ink-control][hidden]{display:none}.caption-controls{margin-top:12px}.caption-controls input[type=color]{height:32px;padding:3px}.layer-card[data-kind=caption] .kind-label{color:#f2d5a7}
 .taper-controls[hidden]{display:none}.taper-controls{margin-top:10px}.taper-controls input{max-width:120px}
+
+.text-export-controls{display:flex;align-items:end;gap:7px}.text-export-controls select{width:145px;margin-top:3px;font-size:11px}.text-export-controls button{font-size:11px;white-space:nowrap;color:var(--lime)}.row-header>.page-actions{gap:6px;flex-shrink:0}.page-actions button{padding:7px 9px;font-size:11px;white-space:nowrap}.row-header>div:first-child{flex:1}@media(max-width:850px){.row-header{flex-wrap:wrap}.row-header>.page-actions{margin-left:auto}}@media(max-width:520px){.row-header>div:first-child{flex-basis:100%}.row-header>.page-actions{width:100%;justify-content:flex-end;gap:5px}.page-actions button{padding:7px;font-size:10px}.text-export-controls{width:100%}.text-export-controls label{flex:1}.text-export-controls select{width:100%}}

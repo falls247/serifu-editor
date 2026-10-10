@@ -3,6 +3,7 @@ import { BALLOON_LIMITS } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
 import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
+import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
 import { FONT_CATALOG, FONT_STYLES, fontDescription } from './fonts.js';
@@ -28,6 +29,7 @@ function requestPageFonts(p){
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
+let sourceDirectory = null;
 let layerClipboard=null;
 let pageClipboard=null;
 const clipboardPastes=new Map();
@@ -55,6 +57,8 @@ function updateGlobal() {
   $('save').disabled = !pages.length || busy;
   $('saveEdited').disabled = !pages.some(p=>p.edited) || busy;
   $('projectSave').disabled = !pages.length || busy;
+  $('textTarget').disabled = !pages.length || busy;
+  $('textSave').disabled = !pages.length || busy;
   for (const id of ['open', 'files', 'projectLoad', 'demo']) $(id).disabled = busy;
   const index = pages.findIndex(p => p.id === activeId);
   $('previous').disabled = busy || index <= 0;
@@ -76,6 +80,8 @@ function updateGlobal() {
     p.row.querySelector('[data-action=undo]').disabled = !p.undo.length;
     p.row.querySelector('[data-action=redo]').disabled = !p.redo.length;
     p.row.querySelector('[data-action=save-image]').disabled = busy;
+    p.row.querySelector('[data-action=move-up]').disabled = busy || i === 0;
+    p.row.querySelector('[data-action=move-down]').disabled = busy || i === pages.length - 1;
     const copy = p.row.querySelector('[data-action=copy-next]');
     if (copy) copy.disabled = !p.layers.length || i === pages.length - 1;
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
@@ -283,6 +289,20 @@ function refreshJump() {
   updateGlobal();
 }
 
+function movePage(p, offset) {
+  const index = pages.indexOf(p), destination = index + offset;
+  if (index < 0 || destination < 0 || destination >= pages.length) return;
+  const neighbor = pages[destination];
+  [pages[index], pages[destination]] = [neighbor, p];
+  if (offset < 0) neighbor.row.before(p.row);
+  else neighbor.row.after(p.row);
+  dirty(); refreshJump(); activate(p, p.selectedId, true);
+  const focusTarget = p.row.querySelector(`[data-action=move-${offset < 0 ? 'up' : 'down'}]:enabled`)
+    || p.row.querySelector('.page-actions button:enabled');
+  focusTarget?.focus({ preventScroll: true });
+  status(`「${p.name}」を ${destination + 1} / ${pages.length} ページへ移動した`);
+}
+
 function markChanged(p) {
   dirty(); p.done = false;p.edited=true; updateGlobal();
 }
@@ -357,6 +377,8 @@ $('deck').addEventListener('click', event => {
     if (restore(p, action)) { dirty(); renderCards(p); drawPage(p); updateGlobal(); }
   } else if (action === 'save-image') {
     guard(()=>saveImage(p));
+  } else if (action === 'move-up' || action === 'move-down') {
+    movePage(p, action === 'move-up' ? -1 : 1);
   } else if (action === 'complete') {
     p.done = true; dirty(); updateGlobal();
     const next = pages[pages.indexOf(p) + 1];
@@ -484,7 +506,7 @@ async function addFiles(entries) {
   for (const { file, directory = null } of entries) {
     if (!/\.(png|jpe?g|webp|gif|avif)$/i.test(file.name)) continue;
     const src = URL.createObjectURL(file);
-    try { const p = createPage({ name: file.name, src, img: await decode(src), file, directory }); pages.push(p); first ||= p; mountPage(p); count++; }
+    try { const p = createPage({ name: file.name, src, img: await decode(src), file, directory }); pages.push(p); first ||= p; mountPage(p); count++; if (directory) sourceDirectory = directory; }
     catch { URL.revokeObjectURL(src); failures++; }
   }
   if (!activeId && first) activeId = first.id;
@@ -539,10 +561,12 @@ async function saveImage(p) {
   status(`「${name}」のダウンロードを開始した`);
 }
 async function saveImages(editedOnly=false) {
-  const snapshot=snapshotPages().filter(p=>!editedOnly||p.edited);
+  const allPages=snapshotPages();
+  const snapshot=allPages.map((p,index)=>({...p,pageIndex:index})).filter(p=>!editedOnly||p.edited);
   if(!snapshot.length){status('保存対象の編集済み画像がない。');return;}
   if (!window.showDirectoryPicker) { status('新規フォルダへの直接一括保存はPC版Chrome / Edgeが対象。編集データを保存してPCへ持ち出せる。'); return; }
-  const parent = await window.showDirectoryPicker({ mode: 'readwrite' });
+  const startIn = allPages.some(p=>p.directory===sourceDirectory) ? sourceDirectory : allPages.find(p=>p.directory)?.directory;
+  const parent = await window.showDirectoryPicker({ mode: 'readwrite', ...(startIn ? { startIn } : {}) });
   const folder = `serifu_${new Date().toISOString().replace(/[:.]/g, '-')}_${crypto.randomUUID().slice(0, 8)}`;
   const directory = await parent.getDirectoryHandle(folder, { create: true });
   let completed = 0;
@@ -551,14 +575,21 @@ async function saveImages(editedOnly=false) {
     for (const [i, p] of snapshot.entries()) {
       status(`保存中 ${i + 1} / ${snapshot.length} 枚`);
       const blob = await imageBlob(p);
-      await write(directory, exportName(p.name, i), blob); completed++;
+      await write(directory, pageExportName(p.name, p.pageIndex, allPages.length), blob); completed++;
     }
     await write(directory, 'serifu-project.json', JSON.stringify(await projectData(snapshot)));
-    changed = false; status(`${snapshot.length} 枚と編集データを「${folder}」へ保存した`);
+    if (!editedOnly || snapshot.length === allPages.length) changed = false;
+    status(`${snapshot.length} 枚と編集データを「${parent.name ? `${parent.name}/` : ''}${folder}」へ保存した`);
   } catch (error) { throw new Error(`${folder} 内に ${completed} 枚保存済み。${error.message}`); }
 }
 $('save').onclick = () => guard(()=>saveImages());
 $('saveEdited').onclick = () => guard(()=>saveImages(true));
+$('textSave').onclick = () => guard(() => {
+  const target = $('textTarget').value, text = textExport(snapshotPages(), target);
+  if (!text) { status('選択した対象に出力できる本文がない。'); return; }
+  download(new Blob(['\ufeff', text], { type: 'text/plain;charset=utf-8' }), `serifu-${target}.txt`);
+  status(`${$('textTarget').selectedOptions[0].textContent}のテキストをページ順に出力した`);
+});
 $('projectSave').onclick = () => guard(async () => {
   if (!pages.length) return;
   download(new Blob([JSON.stringify(await projectData(snapshotPages()))], { type: 'application/json' }), 'serifu-project.json');

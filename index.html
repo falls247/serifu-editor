@@ -22,6 +22,10 @@
     <div class="project-actions"><button id="projectLoad">編集データを読込</button><button id="projectSave">編集データを保存</button></div>
   </div>
   <div class="settings-bar">
+    <div class="text-export-controls" role="group" aria-label="全ページのテキスト出力">
+      <label>テキスト出力対象<select id="textTarget"><option value="female" selected>女性の台詞</option><option value="male">男性の台詞</option><option value="dialogue">すべての台詞</option><option value="caption">キャプション</option><option value="sfx">効果音</option><option value="all">すべての本文</option></select></label>
+      <button id="textSave" title="全ページを現在のページ順に出力。台詞1件ごとに「」で囲んで改行。">テキストを保存</button>
+    </div>
     <div class="preset-group"><label>セリフの既定<select id="defaultDialogue" aria-label="セリフの既定プリセット"></select></label><button data-delete-preset="dialogue" title="この既定プリセットを削除">×</button></div>
     <div class="preset-group"><label>効果音の既定<select id="defaultSfx" aria-label="効果音の既定プリセット"></select></label><button data-delete-preset="sfx" title="この既定プリセットを削除">×</button></div>
     <button id="savePreset">選択中の設定を記憶</button>
@@ -49,7 +53,11 @@
     <article class="image-row">
       <div class="row-header">
         <div><span class="page-number"></span><strong class="page-name"></strong><span class="dimensions"></span><span class="edited-badge" hidden>編集済み</span></div>
-        <button data-action="complete" class="complete-button">編集完了・次へ ↓</button>
+        <div class="page-actions" role="group" aria-label="ページ順の変更と編集完了">
+          <button data-action="move-up" title="このページを1つ前へ移動">ページ移動↑</button>
+          <button data-action="move-down" title="このページを1つ後へ移動">ページ移動↓</button>
+          <button data-action="complete" class="complete-button">編集完了・次へ ↓</button>
+        </div>
       </div>
       <div class="row-columns">
         <section class="original-pane" aria-label="元画像">
