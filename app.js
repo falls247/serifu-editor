@@ -30,6 +30,14 @@ function requestPageFonts(p){
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
 let sourceDirectory = null;
+const VIEW_KEY = 'serifu.view.v1';
+let view = { pageSize: 50, thumbnails: true, scale: 100 }, batchStart = 0, syncingView = false;
+try {
+  const saved = JSON.parse(localStorage.getItem(VIEW_KEY));
+  if ([50, 100, 'all'].includes(saved?.pageSize)) view.pageSize = saved.pageSize;
+  if (typeof saved?.thumbnails === 'boolean') view.thumbnails = saved.thumbnails;
+  if (Number.isFinite(saved?.scale)) view.scale = clamp(saved.scale, 50, 200);
+} catch {}
 let layerClipboard=null;
 let pageClipboard=null;
 const clipboardPastes=new Map();
@@ -47,10 +55,19 @@ function pageFrom(element) {
 }
 
 function createPage({ id=crypto.randomUUID(), name, src, img, file = null, directory = null, layers = [], done = false, edited = false }) {
-  return { id, name, src, img, file, directory, layers, done, edited:edited===true||layers.length>0, selectedId: layers[0]?.id || null, undo: [], redo: [] };
+  const thumbnail = document.createElement('canvas'), ratio = Math.min(1, 320 / Math.max(img.width, img.height));
+  thumbnail.width = Math.max(1, Math.round(img.width * ratio)); thumbnail.height = Math.max(1, Math.round(img.height * ratio));
+  thumbnail.getContext('2d').drawImage(img, 0, 0, thumbnail.width, thumbnail.height);
+  const thumbnailSrc = thumbnail.toDataURL('image/webp', .75);
+  thumbnail.width = 1; thumbnail.height = 1;
+  // 寸法だけを残し、非表示ページの元解像度のデコード結果を解放する。
+  img.width = img.naturalWidth || img.width; img.height = img.naturalHeight || img.height;
+  img.onload = null; img.onerror = null; img.src = '';
+  return { id, name, src, thumbnailSrc, img, file, directory, layers, done, edited:edited===true||layers.length>0, selectedId: layers[0]?.id || null, undo: [], redo: [] };
 }
 
 function updateGlobal() {
+  if (syncingView) return;
   $('empty').hidden = pages.length > 0;
   $('count').textContent = `${pages.length} 枚`;
   $('progress').textContent = pages.length ? `確認済み ${pages.filter(p => p.done).length} / ${pages.length} 枚` : '画像ごとに編集内容を保持';
@@ -66,11 +83,32 @@ function updateGlobal() {
   $('jump').disabled = busy || !pages.length;
   if ($('jump').value !== activeId) $('jump').value = activeId || '';
   $('deck').inert = busy;
+  $('thumbnailList').inert = busy;
+  for (const id of ['pageSize', 'toggleThumbnails', 'thumbnailScale']) $(id).disabled = busy;
+  const batchEnd = view.pageSize === 'all' ? pages.length : Math.min(pages.length, batchStart + view.pageSize);
+  $('viewRange').textContent = pages.length ? `${batchStart + 1}–${batchEnd} / ${pages.length}枚` : '0 / 0枚';
+  $('previousBatch').disabled = busy || batchStart === 0;
+  $('nextBatch').disabled = busy || batchEnd >= pages.length;
+  $('thumbnailProgress').textContent = `現在 ${index < 0 ? 0 : index + 1} / ${pages.length} · 確認済み ${pages.filter(p=>p.done).length}`;
   $('temporarySave').disabled=busy||!pages.length;
   $('savePreset').disabled=busy||!active()||!selected(active())||!['dialogue','sfx'].includes(selected(active()).kind);
   for(const id of ['defaultDialogue','defaultSfx','autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy;
   updateDraftUI();
   pages.forEach((p, i) => {
+    if (p.thumbnail) {
+      const state = `${i}:${p.edited}:${p.done}:${p.id === activeId}`;
+      if (p.thumbnailState !== state) {
+        p.thumbnailState = state;
+        p.thumbnail.classList.toggle('active', p.id === activeId);
+        p.thumbnail.classList.toggle('edited', p.edited);
+        p.thumbnail.classList.toggle('done', p.done);
+        if (p.id === activeId) p.thumbnail.setAttribute('aria-current', 'page');
+        else p.thumbnail.removeAttribute('aria-current');
+        p.thumbnail.querySelector('.thumbnail-number').textContent = String(i + 1).padStart(2, '0');
+        p.thumbnail.querySelector('.thumbnail-state').textContent = p.done ? '✓ 確認済み' : p.edited ? '編集済み' : '未編集';
+        p.thumbnail.setAttribute('aria-label', `${i + 1}ページ ${p.name} ${p.done ? '確認済み' : p.edited ? '編集済み' : '未編集'}`);
+      }
+    }
     if (!p.row) return;
     p.row.classList.toggle('active', p.id === activeId);
     p.row.classList.toggle('done', p.done);
@@ -96,12 +134,14 @@ function updateGlobal() {
 function drawPage(p) {
   if (!p?.canvas) return;
   requestPageFonts(p);
+  if (!p.img.complete || !p.img.naturalWidth) return;
   const scale = p.canvas.width / p.img.width;
   const displayScale = p.canvas.getBoundingClientRect().width / p.img.width || scale;
   draw(p.canvas.getContext('2d'), p.img, p.layers, p.id === activeId ? p.selectedId : null, scale, displayScale);
 }
 
 function sizePreview(p) {
+  if (!p.row) return;
   const frame = p.row.querySelector('.preview-frame');
   const width = Math.max(1, Math.min(frame.clientWidth - 2, 620 * p.img.width / p.img.height));
   p.canvas.style.width = `${width}px`;
@@ -154,10 +194,87 @@ function updateControls(p) {
 
 function activate(p, id = p.selectedId, scroll = false) {
   const previous = active(); activeId = p.id; p.selectedId = id;
+  const index = pages.indexOf(p);
+  const nextStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
+  if (!p.row || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
   if (previous && previous !== p) drawPage(previous);
   updateControls(p); drawPage(p); updateGlobal();
   if (scroll) p.row.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
+
+function unmountPage(p) {
+  if (!p.row) return;
+  p.resizeObserver?.disconnect();
+  p.canvas.width = 1; p.canvas.height = 1;
+  p.row.remove(); p.row = null; p.canvas = null; p.resizeObserver = null;
+  p.img.src = '';
+}
+
+function syncVisiblePages() {
+  const count = view.pageSize === 'all' ? Math.max(1, pages.length) : view.pageSize;
+  batchStart = Math.min(batchStart, Math.floor(Math.max(0, pages.length - 1) / count) * count);
+  const visible = new Set(pages.slice(batchStart, batchStart + count));
+  syncingView = true;
+  try {
+    for (const p of pages) if (!visible.has(p)) unmountPage(p);
+    for (const p of visible) {
+      if (!p.row) mountPage(p);
+      $('deck').append(p.row);
+    }
+  } finally { syncingView = false; }
+  updateGlobal();
+}
+
+function refreshThumbnails() {
+  const fragment = document.createDocumentFragment();
+  for (const p of pages) {
+    if (!p.thumbnail) {
+      const thumbnail = element('button', 'thumbnail'); thumbnail.dataset.pageId = p.id;
+      const image = element('img'); image.loading = 'lazy'; image.decoding = 'async'; image.src = p.thumbnailSrc; image.alt = '';
+      const caption = element('span', 'thumbnail-caption');
+      caption.append(element('b', 'thumbnail-number'), element('span', 'thumbnail-state'));
+      const name = element('span', 'thumbnail-name', p.name); name.title = p.name;
+      thumbnail.append(image, caption, name); p.thumbnail = thumbnail;
+    }
+    fragment.append(p.thumbnail);
+  }
+  $('thumbnailList').replaceChildren(fragment);
+}
+
+function applyViewSettings() {
+  $('pageSize').value = String(view.pageSize);
+  $('thumbnailSidebar').hidden = !view.thumbnails;
+  $('workspace').classList.toggle('sidebar-hidden', !view.thumbnails);
+  $('toggleThumbnails').textContent = view.thumbnails ? 'サムネイルを非表示' : 'サムネイルを表示';
+  $('toggleThumbnails').setAttribute('aria-expanded', String(view.thumbnails));
+  $('thumbnailScale').value = String(view.scale);
+  $('thumbnailScaleValue').value = `${view.scale}%`;
+  $('workspace').style.setProperty('--thumbnail-width', `${160 * view.scale / 100}px`);
+}
+
+function rememberView() {
+  applyViewSettings();
+  try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { status('表示設定を記憶できなかった。現在の表示には適用した。'); }
+}
+$('toggleThumbnails').onclick = () => { view.thumbnails = !view.thumbnails; rememberView(); };
+$('thumbnailScale').oninput = event => { view.scale = Number(event.target.value); rememberView(); };
+$('pageSize').onchange = event => {
+  view.pageSize = event.target.value === 'all' ? 'all' : Number(event.target.value);
+  const index = Math.max(0, pages.indexOf(active()));
+  batchStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
+  rememberView(); syncVisiblePages();
+  if (active()) activate(active());
+};
+$('thumbnailList').onclick = event => {
+  if (busy) return;
+  const p = pages.find(p=>p.id===event.target.closest('[data-page-id]')?.dataset.pageId);
+  if (p) activate(p, p.selectedId, true);
+};
+for (const [id, offset] of [['previousBatch', -1], ['nextBatch', 1]]) $(id).onclick = () => {
+  if (busy || view.pageSize === 'all') return;
+  const p = pages[batchStart + offset * view.pageSize];
+  if (p) activate(p, p.selectedId, true);
+};
 
 function element(tag, className, text) {
   const node = document.createElement(tag);
@@ -192,6 +309,7 @@ function updateSwapOptions(p) {
 }
 
 function renderCards(p) {
+  if (!p.row) return;
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
   for (const l of p.layers) {
@@ -215,9 +333,9 @@ function renderCards(p) {
     if(l.kind==='caption'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='モノローグ・説明を入力';text.setAttribute('aria-label','キャプションの本文');card.append(text);
       const grid=element('div','effect-grid');
-      for(const [field,labelText,type] of [['textColor','文字色','color'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['padding','内側の余白（px）','number']]){
+      for(const [field,labelText,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['textOutlineWidth','文字の輪郭の太さ（px）','number'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['padding','内側の余白（px）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
-        if(type==='number'){[input.min,input.max]=CAPTION_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
+        if(type==='number'){[input.min,input.max]=CAPTION_LIMITS[field];input.step=['borderWidth','textOutlineWidth'].includes(field)?'0.5':'1';}label.append(input);grid.append(label);
       }
       for(const [field,labelText] of [['alignX','左右の揃え方'],['alignY','上下の揃え方']]){
         const label=element('label','',labelText),select=element('select');select.dataset.field=field;
@@ -276,6 +394,9 @@ function mountPage(p) {
   row.querySelector('.source-note').textContent = p.directory ? '元ファイルは上書きしない。削除は確認後に完全削除。' : '元ファイルとの接続なし。元画像削除は無効。';
   const copy = button('copy-next', '文字を次の画像へ複製 →'); copy.className = 'copy-next'; row.querySelector('.dialogue-pane').append(copy);
   p.canvas = row.querySelector('canvas'); p.canvas.tabIndex = 0;
+  p.img.onload = () => { if (p.row) { sizePreview(p); updateControls(p); } };
+  p.img.onerror = () => { if (p.row) status(`「${p.name}」のプレビュー画像を読み込めなかった。`); };
+  p.img.src = p.src;
   const scale = Math.min(1, 1400 / Math.max(p.img.width, p.img.height));
   p.canvas.width = Math.max(1, Math.round(p.img.width * scale)); p.canvas.height = Math.max(1, Math.round(p.img.height * scale));
   $('deck').append(row); renderCards(p);
@@ -284,6 +405,7 @@ function mountPage(p) {
 }
 
 function refreshJump() {
+  syncVisiblePages(); refreshThumbnails();
   $('jump').replaceChildren();
   pages.forEach((p, i) => { const option = element('option', '', `${i + 1}. ${p.name}`); option.value = p.id; $('jump').append(option); });
   updateGlobal();
@@ -294,8 +416,6 @@ function movePage(p, offset) {
   if (index < 0 || destination < 0 || destination >= pages.length) return;
   const neighbor = pages[destination];
   [pages[index], pages[destination]] = [neighbor, p];
-  if (offset < 0) neighbor.row.before(p.row);
-  else neighbor.row.after(p.row);
   dirty(); refreshJump(); activate(p, p.selectedId, true);
   const focusTarget = p.row.querySelector(`[data-action=move-${offset < 0 ? 'up' : 'down'}]:enabled`)
     || p.row.querySelector('.page-actions button:enabled');
@@ -457,6 +577,13 @@ window.addEventListener('keydown', event => {
   if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable || event.isComposing || busy) return;
   const p = active(); if (!p) return;
   const key=event.key.toLowerCase(),command=event.ctrlKey||event.metaKey;
+  if (key === 'delete' && event.target === p.canvas && !command && !event.altKey) {
+    if (!selected(p) || event.repeat) return;
+    event.preventDefault();
+    edit(p, () => { p.layers = p.layers.filter(l=>l.id!==p.selectedId); p.selectedId = null; });
+    p.canvas.focus({ preventScroll: true }); status('選択オブジェクトを削除した。Ctrl／⌘＋Zで戻せる。');
+    return;
+  }
   if (command && !event.altKey && !event.shiftKey && event.target===p.canvas && ['c','v'].includes(key)) {
     if (event.repeat) return;
     if (key==='c' && selected(p)) {
@@ -479,7 +606,7 @@ window.addEventListener('keydown', event => {
 });
 
 function removePage(p) {
-  const index = pages.indexOf(p); pages.splice(index, 1); p.resizeObserver.disconnect(); p.row.remove();
+  const index = pages.indexOf(p); pages.splice(index, 1); unmountPage(p); p.thumbnail?.remove();
   if (p.src.startsWith('blob:')) URL.revokeObjectURL(p.src);
   if (activeId === p.id) activeId = pages[Math.min(index, pages.length - 1)]?.id || null;
   dirty(); refreshJump(); if (active()) activate(active());
@@ -506,7 +633,7 @@ async function addFiles(entries) {
   for (const { file, directory = null } of entries) {
     if (!/\.(png|jpe?g|webp|gif|avif)$/i.test(file.name)) continue;
     const src = URL.createObjectURL(file);
-    try { const p = createPage({ name: file.name, src, img: await decode(src), file, directory }); pages.push(p); first ||= p; mountPage(p); count++; if (directory) sourceDirectory = directory; }
+    try { const p = createPage({ name: file.name, src, img: await decode(src), file, directory }); pages.push(p); first ||= p; count++; if (directory) sourceDirectory = directory; }
     catch { URL.revokeObjectURL(src); failures++; }
   }
   if (!activeId && first) activeId = first.id;
@@ -546,12 +673,14 @@ async function prepareExportFonts(snapshot) {
 }
 async function imageBlob(p) {
   const canvas=document.createElement('canvas');canvas.width=p.img.width;canvas.height=p.img.height;
+  let image;
   try {
-    draw(canvas.getContext('2d'),p.img,p.layers);
+    image=p.img.complete&&p.img.naturalWidth?p.img:await decode(p.src);
+    draw(canvas.getContext('2d'),image,p.layers);
     const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
     if(!blob)throw new Error('PNG生成に失敗');
     return blob;
-  } finally {canvas.width=1;canvas.height=1;}
+  } finally {canvas.width=1;canvas.height=1;if(image&&image!==p.img)image.src='';}
 }
 async function saveImage(p) {
   const snapshot={...p,layers:structuredClone(p.layers)},name=exportName(p.name,pages.indexOf(p));
@@ -606,7 +735,7 @@ $('projectInput').onchange = event => {
       if (typeof p.name !== 'string' || typeof p.src !== 'string' || !/^data:image\/(png|jpeg|webp|gif|avif);base64,/.test(p.src) || !Array.isArray(p.layers)) throw new Error('画像データが不正');
       loaded.push(createPage({ name: p.name, src: p.src, img: await decode(p.src), layers: p.layers.map(l => normalizeLayer(l, data.version)), done: p.done === true,edited:p.edited===true }));
     }
-    pages.push(...loaded); for (const p of loaded) mountPage(p);
+    pages.push(...loaded);
     mergePresets(data.preferences);dirty();refreshJump();activate(loaded[0], loaded[0].selectedId, true);
     status(data.version === 1 ? '旧データを追加。吹き出しは白縁の男性セリフへ変換した。' : '編集データを追加。元ファイルとの接続がないため元画像削除は無効。');
   });
@@ -628,7 +757,7 @@ $('demo').onclick = () => guard(async () => {
     if(preferences.presets.find(p=>p.id===preferences.defaults.sfx)?.builtin)applyPreset(sfx,preferences.presets.find(p=>p.id===['sfx-impact','sfx-speed','sfx-tension'][i]),1000,750);
     sfx.x = 560; sfx.y = 420; sfx.text = ['ドーン！', 'シュッ', 'ゾワッ…'][i];
     const src = c.toDataURL(), p = createPage({ name: `sample-${i + 1}.png`, src, img: await decode(src), layers: [male, female, sfx] });
-    pages.push(p); mountPage(p);
+    pages.push(p);
   }
   refreshJump();activate(pages[first],pages[first].selectedId,true);dirty();
   status('3枚のサンプルを追加。中央でセリフを編集し、右で位置を調整。');
@@ -755,9 +884,9 @@ $('restoreDraft').onclick=()=>guard(async()=>{
       catch(error){URL.revokeObjectURL(src);throw error;}
     }
   }catch(error){for(const p of loaded)URL.revokeObjectURL(p.src);throw error;}
-  for(const p of pages){p.resizeObserver.disconnect();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);}
+  for(const p of pages){unmountPage(p);if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);}
   $('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;
-  mergePresets(meta.preferences);for(const p of loaded)mountPage(p);refreshJump();if(active())activate(active());
+  batchStart=0;mergePresets(meta.preferences);refreshJump();if(active())activate(active());
   dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。');
 });
 $('clearDraft').onclick=()=>guard(async()=>{
@@ -765,7 +894,7 @@ $('clearDraft').onclick=()=>guard(async()=>{
   await forgetDraft();draftMeta=null;lastSavedRevision=-1;delete $('draftStatus').dataset.error;updateDraftUI();
   status('一時保存を消去した。自動保存がONなら次の周期で再保存する。');
 });
-refreshPresetMenus();configureAutosave();updateGlobal();
+applyViewSettings();refreshPresetMenus();configureAutosave();updateGlobal();
 if(document.fonts){
   const redrawFonts=()=>{clearGlyphCache();pages.forEach(drawPage);};
   document.fonts.addEventListener('loadingdone',redrawFonts);

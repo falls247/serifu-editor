@@ -1,7 +1,7 @@
 import { fontDescription } from './fonts.js';
 import { graphemes, verticalRotation, punctuationCenter } from './typography.js';
 
-export const CAPTION_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500]});
+export const CAPTION_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
 export const CAPTION_ALIGNMENTS=Object.freeze({alignX:{left:'左',center:'中央',right:'右'},alignY:{top:'上',center:'中央',bottom:'下'}});
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const alignedStart=(available,used,alignment)=>alignment==='left'||alignment==='top'?-available/2:alignment==='right'||alignment==='bottom'?available/2-used:-used/2;
@@ -10,7 +10,7 @@ export function newCaption(width,height) {
   return {id:crypto.randomUUID(),kind:'caption',x:width*.23,y:height*.28,
     w:limit(width*.32,30,30000),h:limit(height*.4,30,30000),rotation:0,text:'',
     color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
-    textColor:'#111111',font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,
+    textColor:'#111111',textOutlineColor:'#ffffff',textOutlineWidth:0,font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,
     autoFit:false,padding:limit(Math.round(width*.015),2,2000),alignX:'center',alignY:'center'};
 }
 
@@ -23,7 +23,9 @@ export function captionContentBox(layer) {
 export function captionLayout(ctx,layer,sizeOverride) {
   ctx.save();
   try {
-    const box=captionContentBox(layer),description=fontDescription(layer),lines=layer.text.split('\n').map(graphemes);
+    const box=captionContentBox(layer),outline=layer.textOutlineWidth??0,
+      textWidth=Math.max(1,box.width-outline*2),textHeight=Math.max(1,box.height-outline*2),
+      description=fontDescription(layer),lines=layer.text.split('\n').map(graphemes);
     const atSize=size=>{
       const font=`${description.weight} ${size}px ${description.family}`;
       ctx.font=font;ctx.textAlign='left';ctx.textBaseline='alphabetic';
@@ -39,25 +41,26 @@ export function captionLayout(ctx,layer,sizeOverride) {
       if(layer.vertical){
         const advance=Math.max(size*1.12,...metrics.map(m=>m.rotate?m.width:m.height));
         const columnWidth=Math.max(size*1.3,...metrics.map(m=>m.rotate?m.height:m.width));
-        const count=Math.max(1,Math.floor(box.height/advance)),columns=[];
+        const count=Math.max(1,Math.floor(textHeight/advance)),columns=[];
         for(const chars of lines){if(!chars.length)columns.push([]);for(let i=0;i<chars.length;i+=count)columns.push(chars.slice(i,i+count));}
         width=columns.length*columnWidth;height=Math.max(0,...columns.map(column=>column.length*advance));
-        const startX=alignedStart(box.width,width,layer.alignX??'center');
+        const startX=alignedStart(textWidth,width,layer.alignX??'center');
         columns.forEach((column,i)=>column.forEach((char,j)=>{
           const m=measured.get(char),corner=punctuationCenter(char,size,true,m.left+m.right,m.height);
-          glyphs.push({...m,x:startX+(columns.length-i-.5)*columnWidth+corner.x,y:alignedStart(box.height,column.length*advance,layer.alignY??'center')+(j+.5)*advance+corner.y});
+          glyphs.push({...m,x:startX+(columns.length-i-.5)*columnWidth+corner.x,y:alignedStart(textHeight,column.length*advance,layer.alignY??'center')+(j+.5)*advance+corner.y});
         }));
       }else{
         const advance=Math.max(size*1.3,...metrics.map(m=>m.height)),rows=[];
         for(const chars of lines){
           let row=[],rowWidth=0;
-          for(const char of chars){const m=measured.get(char);if(row.length&&rowWidth+m.width>box.width){rows.push(row);row=[];rowWidth=0;}row.push(m);rowWidth+=m.width;}
+          for(const char of chars){const m=measured.get(char);if(row.length&&rowWidth+m.width>textWidth){rows.push(row);row=[];rowWidth=0;}row.push(m);rowWidth+=m.width;}
           rows.push(row);
         }
         width=Math.max(0,...rows.map(row=>row.reduce((sum,m)=>sum+m.width,0)));height=rows.length*advance;
-        const startY=alignedStart(box.height,height,layer.alignY??'center');
-        rows.forEach((row,i)=>{let x=alignedStart(box.width,row.reduce((sum,m)=>sum+m.width,0),layer.alignX??'center');for(const m of row){glyphs.push({...m,x:x+m.width/2,y:startY+(i+.5)*advance});x+=m.width;}});
+        const startY=alignedStart(textHeight,height,layer.alignY??'center');
+        rows.forEach((row,i)=>{let x=alignedStart(textWidth,row.reduce((sum,m)=>sum+m.width,0),layer.alignX??'center');for(const m of row){glyphs.push({...m,x:x+m.width/2,y:startY+(i+.5)*advance});x+=m.width;}});
       }
+      width+=outline*2;height+=outline*2;
       return {size,font,glyphs,width,height,innerWidth:box.width,innerHeight:box.height,fits:width<=box.width+.001&&height<=box.height+.001};
     };
     if(sizeOverride!==undefined)return atSize(sizeOverride);
@@ -75,6 +78,13 @@ export function paintCaption(ctx,layer) {
   const layout=captionLayout(ctx,layer);
   ctx.save();ctx.beginPath();ctx.rect(-layout.innerWidth/2,-layout.innerHeight/2,layout.innerWidth,layout.innerHeight);ctx.clip();
   ctx.font=layout.font;ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle=layer.textColor;
-  for(const glyph of layout.glyphs){ctx.save();ctx.translate(glyph.x,glyph.y);if(glyph.rotate)ctx.rotate(Math.PI/2);ctx.fillText(glyph.char,(glyph.left-glyph.right)/2,(glyph.ascent-glyph.descent)/2);ctx.restore();}
+  const outline=layer.textOutlineWidth??0;
+  ctx.strokeStyle=layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.lineJoin='round';
+  for(const stroke of outline>0?[true,false]:[false])for(const glyph of layout.glyphs){
+    ctx.save();ctx.translate(glyph.x,glyph.y);if(glyph.rotate)ctx.rotate(Math.PI/2);
+    const x=(glyph.left-glyph.right)/2,y=(glyph.ascent-glyph.descent)/2;
+    if(stroke)ctx.strokeText(glyph.char,x,y);else ctx.fillText(glyph.char,x,y);
+    ctx.restore();
+  }
   ctx.restore();
 }

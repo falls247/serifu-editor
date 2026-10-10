@@ -30,6 +30,7 @@ git diff --check
 | `caption-smoke.mjs` | キャプション、自動追従と手動サイズ、揃え方、クリップ、コピー、互換性 |
 | `typography-smoke.mjs` | 添付TTFの一致、句読点の実位置、装飾なし、先細りの描画と復元 |
 | `export-smoke.mjs` | 対象別TXT、ページ順、連番、保存先、順序の復元、モバイル配置（ADR-0007で追加） |
+| `paged-smoke.mjs` | 500件の表示数・縮小サムネイル・範囲境界・Delete・輪郭・全件保存（ADR-0008で追加） |
 
 フォルダ保存・元画像削除は模擬ハンドルで検証し、利用者の実画像を削除しない。スクリーンショットはGit管理外の `artifacts/` へ出す。同一環境で選択枠なしのプレビューとPNGを比較し、異なる端末フォント間のバイト一致は要求しない。
 
@@ -40,7 +41,7 @@ git diff --check
 | 経路 | 起動条件と処理 |
 |---|---|
 | `.github/workflows/ci.yml` | push／pull_request。Node 22で構文と単体を検証 |
-| `.github/workflows/pages.yml` | mainへのpush／手動。構文・単体、Playwright／Chromium／日本語フォールバック準備、フォント準備、5本のブラウザ検証、静的ビルド |
+| `.github/workflows/pages.yml` | mainへのpush／手動。構文・単体、Playwright／Chromium／日本語フォールバック準備、フォント準備、6本のブラウザ検証、静的ビルド |
 | Pages deploy | build成功後、`_site/` のartifactを `github-pages` 環境へ公開 |
 
 ブラウザのスクリーンショットartifactは成功・失敗時ともアップロードし、保持期間は7日。公開ジョブだけにPages書込みとIDトークンの権限を与える。同時公開のキャンセルはしない設定。

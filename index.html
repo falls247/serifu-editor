@@ -32,6 +32,18 @@
     <div class="draft-controls"><button id="temporarySave">一時保存</button><label class="autosave-toggle"><input id="autosaveEnabled" type="checkbox" checked>自動保存</label><label class="interval-label"><input id="autosaveMinutes" type="number" min="0.1" max="1440" step="0.1" value="2" aria-label="自動保存の周期（分）">分ごと</label><span id="draftStatus" role="status">まだ一時保存なし</span></div>
   </div>
   <div id="draftNotice" class="draft-notice" hidden><span id="draftSummary"></span><button id="restoreDraft">保存した編集を復元</button><button id="clearDraft">一時保存を消去</button></div>
+  <div class="view-bar">
+    <button id="toggleThumbnails" aria-expanded="true" aria-controls="thumbnailSidebar">サムネイルを非表示</button>
+    <label>表示件数<select id="pageSize"><option value="50" selected>50件ずつ</option><option value="100">100件ずつ</option><option value="all">全表示</option></select></label>
+    <nav aria-label="表示範囲の切替"><button id="previousBatch">前の範囲</button><span id="viewRange" role="status">0 / 0枚</span><button id="nextBatch">次の範囲</button></nav>
+  </div>
+  <div id="workspace" class="workspace">
+    <aside id="thumbnailSidebar" class="thumbnail-sidebar" aria-label="ページのサムネイル一覧">
+      <div class="thumbnail-heading"><strong>ページ一覧</strong><span id="thumbnailProgress"></span></div>
+      <label class="thumbnail-zoom">サムネイル倍率 <output id="thumbnailScaleValue">100%</output><input id="thumbnailScale" type="range" min="50" max="200" step="10" value="100"></label>
+      <p class="thumbnail-legend"><span>未編集</span><span class="edited">編集済み</span><span class="done">✓ 確認済み</span></p>
+      <div id="thumbnailList" class="thumbnail-list"></div>
+    </aside>
   <main>
     <div class="column-headings" aria-hidden="true"><span><b>01</b> 元画像</span><span><b>02</b> セリフ・効果音</span><span><b>03</b> プレビュー・位置調整</span></div>
     <section id="empty" class="empty">
@@ -44,6 +56,7 @@
     </section>
     <div id="deck"></div>
   </main>
+  </div>
   <footer><span id="status" role="status" aria-live="polite">画像の外部送信なし · ブラウザ内で編集</span><span class="shortcut-hint">ドラッグ：移動／角：サイズ／丸：回転　矢印：1px　Shift：10px</span></footer>
   <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
   <input id="folderInput" type="file" accept="image/*" webkitdirectory multiple hidden>
@@ -79,7 +92,7 @@
         <section class="preview-pane" aria-label="編集結果と位置調整">
           <div class="preview-toolbar"><span class="preview-label">LIVE PREVIEW</span><div class="preview-actions"><button data-action="save-image" title="この画像だけ元解像度のPNGで保存">画像を保存</button><button data-action="undo" title="この画像の編集を戻す">↶ 戻す</button><button data-action="redo" title="この画像の編集をやり直す">↷</button></div></div>
           <div class="preview-frame"><canvas class="preview" aria-label="文字をドラッグして位置調整"></canvas></div>
-          <p class="preview-hint">文字をドラッグで移動。右下の角でサイズ調整、上の丸で回転。選択中に Ctrl／⌘＋C でコピー、プレビュー上で Ctrl／⌘＋V で貼付け。</p>
+          <p class="preview-hint">文字をドラッグで移動。右下の角でサイズ調整、上の丸で回転。プレビュー上で Delete：選択オブジェクトを削除、Ctrl／⌘＋C／V：コピー・貼付け。</p>
           <fieldset class="position-controls"><legend class="selected-name">文字を選択して位置調整</legend><div class="control-grid">
             <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
             <label data-text-control>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>
@@ -91,6 +104,7 @@
             <label>枠線の色<input data-field="borderColor" type="color"></label><label>枠線の太さ（px）<input data-field="borderWidth" type="number" min="0" max="80" step="0.5"></label>
           </div><div class="caption-controls" hidden><div class="control-grid">
             <label>キャプションの文字色<input data-field="textColor" type="color"></label><label>内側の余白（px）<input data-field="padding" type="number" min="0" max="2000" step="1"></label>
+            <label>文字の輪郭色<input data-field="textOutlineColor" type="color"></label><label>文字の輪郭の太さ（px）<input data-field="textOutlineWidth" type="number" min="0" max="80" step="0.5" title="0で輪郭なし"></label>
             <label>左右の揃え方<select data-field="alignX"><option value="left">左</option><option value="center">中央</option><option value="right">右</option></select></label>
             <label>上下の揃え方<select data-field="alignY"><option value="top">上</option><option value="center">中央</option><option value="bottom">下</option></select></label>
           </div><label class="tail-toggle"><input data-field="autoFit" type="checkbox">文字サイズをボックスに合わせる</label><p class="caption-fit-status effect-note"></p>
