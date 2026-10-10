@@ -264,7 +264,7 @@ function persistControlValue(p,input) {
   else if(input.type==='number'||input.type==='range'){
     if(value===''||!Number.isFinite(Number(value)))return;
     value=Number(value);
-    if(Object.hasOwn(limits,field))value=clamp(value,...limits[field]);
+    if(Object.hasOwn(limits,field))value=clamp(value,...(field==='outline'&&layer.kind==='sfx'?[0,80]:limits[field]));
   }
   if(Object.is(layer[field],value))return;
   checkpoint(p);layer[field]=value;if(field!=='text')layer.presetId=null;
@@ -596,9 +596,9 @@ $('deck').addEventListener('input', event => {
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;
     value = Number(value);
-    if (limits[field]) value = clamp(value, ...limits[field]);
+    if (limits[field]) value = clamp(value, ...(field==='outline'&&l.kind==='sfx'?[0,80]:limits[field]));
   } else if (field === 'vertical') value = value === 'true';
-  else if(field==='tail'||field==='autoFit')value=input.checked;
+  else if(field==='tail'||field==='autoFit'||field==='shadowEnabled')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
   l[field] = value;if(field!=='text')l.presetId=null;
