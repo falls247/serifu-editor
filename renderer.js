@@ -27,6 +27,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
     blurX: 0, blurY: 0, blurStrength: 200, inkCore: 80,
     roughness: kind === 'sfx' ? 18 : 0, dryInk: kind === 'sfx' ? 22 : 0, brushTails: kind === 'sfx' ? 25 : 0,
     sizeVariation:kind==='sfx'?5:0, horizontalJitter:kind==='sfx'?3:0, glyphSeed:inkSeed(id),
+    inkTexture:'none',grungeAmount:65,scratchLength:55,scratchAngle:90,spatterAmount:40,textureSeed:inkSeed(id+':texture'),
   };
 }
 
