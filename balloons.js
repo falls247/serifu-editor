@@ -80,7 +80,7 @@ function balloonPath(ctx,layer,brushPass=0) {
   if(layer.shape==='distorted-rect'||layer.shape==='spiky'||brushPass){
     const from=g.hasTail?g.start:0,to=g.hasTail?g.end:FULL_TURN,steps=Math.max(2,Math.ceil((to-from)/(FULL_TURN/360)));
     for(let index=0;index<=steps;index++){
-      const angle=from+(to-from)*index/steps,point=balloonBoundaryPoint(layer,angle);
+      const angle=from+(to-from)*index/steps,point=balloonBoundaryPoint(layer,angle);if(brushPass){const n=Math.sin(index*1.31+brushPass*2.97+layer.shapeSeed*.0001),j=n*layer.borderWidth*(layer.brushRoughness??50)/100*.5;point.x+=j*Math.cos(angle);point.y+=j*Math.sin(angle);}
       if(index===0)ctx.moveTo(point.x,point.y);else ctx.lineTo(point.x,point.y);
     }
     if(g.hasTail){ctx.lineTo(g.tip.x,g.tip.y);ctx.lineTo(g.a.x,g.a.y);}
