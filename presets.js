@@ -41,6 +41,7 @@ export function defaultPreferences() {
     builtin('sfx-rumble','縦書き・ゴゴゴ','sfx',{effect:'rumble',font:'comic',distortion:45,warp:'wave',skew:-7,stretchX:85}),
     builtin('sfx-tension','縦書き・感情／緊張の掠れ','sfx',{effect:'tension',font:'brush',size:110,outline:3,rotation:-7,distortion:35,warp:'wave',skew:-10,stretchX:85,stretchY:115,roughness:50,dryInk:75,brushTails:60,blurY:24,blurStrength:280,inkCore:90}),
     builtin('sfx-vertical-blur','縦書き・強い縦ブラー','sfx',{effect:'tension',font:'brush',size:110,outline:3,rotation:0,distortion:30,warp:'taper',skew:-10,roughness:45,dryInk:65,brushTails:70,blurY:65,blurStrength:350,inkCore:65}),
+    builtin('sfx-grunge-print','かすれ印刷・荒れインク（参考画像風）','sfx',{effect:'none',inkTexture:'grunge',color:'#14305f',outline:0,font:'comic',grungeAmount:70,scratchLength:60,scratchAngle:90,spatterAmount:35,roughness:15,dryInk:10,brushTails:5}),
     builtin('balloon-standard','標準の吹き出し','balloon'),
     builtin('caption-standard','標準のキャプション','caption'),
   ];
