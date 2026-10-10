@@ -12,4 +12,4 @@ for (const asset of assets) {
 await writeFile(new URL('.nojekyll', output), '');
 console.log(`GitHub Pages用の静的ファイル ${assets.length} 件を _site/ に出力した`);
 
-try { await access(new URL('assets/fonts/DelaGothicOne-Regular.ttf',root)); await cp(new URL('assets/',root),new URL('assets/',output),{recursive:true}); } catch { console.log('ローカル書体なし。端末の日本語書体を使用（npm run fontsで準備可能）'); }
+try { await access(new URL('assets/fonts/DelaGothicOne-Regular.ttf',root)); await cp(new URL('assets/fonts/',root),new URL('assets/fonts/',output),{recursive:true}); } catch { console.log('ローカル書体なし。端末の日本語書体を使用（npm run fontsで準備可能）'); }

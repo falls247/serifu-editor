@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdir,writeFile } from 'node:fs/promises';
+import { mkdir,readFile,writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 const {chromium}=createRequire(import.meta.url)('playwright');
 const port=5189,server=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port)},stdio:['ignore','pipe','pipe']});
@@ -8,7 +8,7 @@ let browser,page;
 try {
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Test server did not start')),10000);server.stdout.once('data',()=>{clearTimeout(timer);resolve();});server.once('error',reject);server.stderr.on('data',chunk=>process.stderr.write(chunk));});
   browser=await chromium.launch({headless:true});page=await browser.newPage({viewport:{width:1440,height:1000}});
-  const errors=[];page.on('pageerror',error=>errors.push(error.message));await page.clock.install();
+  const errors=[],downloads=[];page.on('pageerror',error=>errors.push(error.message));page.on('download',download=>downloads.push(download));await page.clock.install();
   await page.goto(`http://127.0.0.1:${port}`);
   assert.equal(await page.locator('#saveEdited').evaluate(button=>button.previousElementSibling.id),'save');
   const images=await page.evaluate(()=>[[1000,750],[1000,750],[500,1000]].map(([width,height])=>{
@@ -20,11 +20,21 @@ try {
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#deck').inert);
   const rows=page.locator('.image-row'),source=rows.nth(0),untouched=rows.nth(1),portrait=rows.nth(2);
   const controls=source.locator('.position-controls'),field=name=>controls.locator(`[data-field=${name}]`);
+  assert.equal(await source.locator('[data-action=save-image]').evaluate(button=>button.nextElementSibling.dataset.action),'undo');
   assert.equal(await page.locator('[data-kind=balloon]').count(),0,'opening images must not add balloons');
   assert.equal(await page.locator('#saveEdited').isDisabled(),true);
   assert.deepEqual(await source.locator('.add-actions button').evaluateAll(buttons=>buttons.map(button=>button.dataset.action)),['add-male','add-female','add-sfx','add-balloon']);
   await untouched.locator('canvas').focus();await untouched.locator('[data-action=complete]').click();
   assert.equal(await page.locator('#saveEdited').isDisabled(),true,'selection and confirmation alone must not mark an image edited');
+  await page.evaluate(()=>window.showDirectoryPicker=undefined);
+  let saving=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();let single=await saving;
+  assert.equal(single.suggestedFilename(),'001_01-source.png');assert.equal(downloads.length,1,'single save must download only the clicked image');
+  await page.waitForFunction(()=>!document.querySelector('#deck').inert);
+  assert.equal(await page.locator('#saveEdited').isDisabled(),true,'saving an untouched image must not mark it edited');
+  const decodedSingle=async download=>page.evaluate(async base64=>{
+    const image=new Image();image.src=`data:image/png;base64,${base64}`;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {width:image.width,height:image.height,src:canvas.toDataURL()};
+  },(await readFile(await download.path())).toString('base64'));
+  const rawSingle=await decodedSingle(single);assert.equal(rawSingle.width,1000);assert.equal(rawSingle.height,750);assert.equal(rawSingle.src,await source.locator('canvas').evaluate(canvas=>canvas.toDataURL()));
   await source.locator('[data-action=add-balloon]').click();
   const balloon=source.locator('[data-kind=balloon]').first();
   assert.equal(await balloon.locator('[data-field=color]').inputValue(),'#ffffff');
@@ -36,6 +46,10 @@ try {
   assert.equal(await page.locator('#saveEdited').isEnabled(),true);
   await source.locator('[data-action=undo]').click();assert.equal(await page.locator('#saveEdited').isDisabled(),true,'undoing the first edit restores unedited status');
   await source.locator('[data-action=redo]').click();assert.equal(await page.locator('#saveEdited').isEnabled(),true);
+  await balloon.locator('[data-field=borderColor]').fill('#7d28c5');assert.equal(await field('borderColor').inputValue(),'#7d28c5');
+  await field('borderColor').fill('#e25822');assert.equal(await balloon.locator('[data-field=borderColor]').inputValue(),'#e25822','card and preview frame-color controls must stay synchronized');
+  await source.locator('[data-action=undo]').click();assert.equal(await field('borderColor').inputValue(),'#7d28c5');
+  await source.locator('[data-action=redo]').click();assert.equal(await balloon.locator('[data-field=borderColor]').inputValue(),'#e25822');
   await field('x').fill('300');await field('y').fill('180');await field('w').fill('220');await field('h').fill('240');
   await balloon.locator('[data-field=tail]').check();
   assert.equal(await source.locator('.balloon-tail-controls').isVisible(),true);
@@ -56,6 +70,9 @@ try {
   await source.locator('[data-action=add-sfx]').click();
   await source.locator('[data-kind=sfx] [data-preset-select]').selectOption('sfx-tension');
   await source.locator('[data-kind=sfx] textarea').fill('ゾワッ');
+  await field('font').selectOption('gekifude');await page.evaluate(()=>document.fonts.load('400 64px MangaGekifude'));
+  assert.equal(await page.evaluate(()=>document.fonts.check('400 64px MangaGekifude')),true);
+  assert.match(await source.locator('.font-note').innerText(),/漢字と英小文字/);
   await balloon.locator('[data-field=sfxOrder]').selectOption('above');
   await page.evaluate(()=>document.fonts.ready);
   await canvas.scrollIntoViewIfNeeded();rect=await canvas.boundingBox();
@@ -89,12 +106,24 @@ try {
   });
   await untouched.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);
   const preview=await canvas.evaluate(canvas=>canvas.toDataURL());
+  await page.evaluate(()=>{window.originalFontLoad=document.fonts.load.bind(document.fonts);document.fonts.load=(...args)=>new Promise(resolve=>window.finishExportFont=()=>resolve(window.originalFontLoad(...args)));});
+  saving=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();
+  await page.waitForFunction(()=>typeof window.finishExportFont==='function');assert.equal(downloads.length,1,'PNG generation must wait for font loading');assert.equal(await source.locator('[data-action=save-image]').isDisabled(),true);
+  await page.evaluate(()=>{window.finishExportFont();document.fonts.load=window.originalFontLoad;});single=await saving;
+  assert.equal(downloads.length,2);assert.equal(single.suggestedFilename(),'001_01-source.png');
+  assert.equal((await decodedSingle(single)).src,preview,'single PNG must include the supplied font and colored balloon, without selection handles');
+  await page.waitForFunction(()=>!document.querySelector('#deck').inert);
+  await page.evaluate(()=>document.fonts.load=()=>Promise.reject(new Error('simulated font load failure')));
+  await source.locator('[data-action=save-image]').click();await page.waitForFunction(()=>!document.querySelector('#deck').inert&&document.querySelector('#status').textContent.includes('simulated font load failure'));
+  assert.equal(downloads.length,2,'a font error must not download an incomplete image');assert.equal(await source.locator('[data-action=save-image]').isEnabled(),true);
+  await page.evaluate(()=>document.fonts.load=window.originalFontLoad);await untouched.locator('canvas').focus();
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===1&&window.outputs[0].files['serifu-project.json']&&!document.querySelector('#deck').inert);
   const editedOutput=await page.evaluate(()=>window.outputs[0]);const editedProject=editedOutput.files['serifu-project.json'];
   assert.ok(editedOutput.name.startsWith('serifu_'));assert.equal(Object.keys(editedOutput.files).length,2);
   assert.equal(editedProject.pages.length,1);assert.equal(editedProject.pages[0].name,'01-source.png');assert.equal(editedProject.version,4);
   const exportedBalloon=editedProject.pages[0].layers.find(layer=>layer.kind==='balloon');
   assert.equal(exportedBalloon.tail,true);assert.equal(exportedBalloon.transparency,45);assert.equal(exportedBalloon.sfxOrder,'above');
+  assert.equal(exportedBalloon.borderColor,'#e25822');assert.equal(editedProject.pages[0].layers.find(layer=>layer.kind==='sfx').font,'gekifude');
   const exportedPng=Object.values(editedOutput.files).find(file=>file.src);
   assert.equal(exportedPng.width,1000);assert.equal(exportedPng.height,750);
   const actualExport=await page.evaluate(async src=>{const img=new Image();img.src=src;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;canvas.getContext('2d').drawImage(img,0,0);return canvas.toDataURL();},exportedPng.src);
@@ -106,6 +135,7 @@ try {
   await source.locator('[data-action=copy-all]').click();await portrait.locator('[data-action=paste-all]').click();
   const copiedBalloon=portrait.locator('[data-kind=balloon]').first();
   assert.equal(await copiedBalloon.locator('[data-field=transparency]').inputValue(),'45');assert.equal(await copiedBalloon.locator('[data-field=tail]').isChecked(),true);assert.equal(await copiedBalloon.locator('[data-field=sfxOrder]').inputValue(),'above');
+  assert.equal(await copiedBalloon.locator('[data-field=borderColor]').inputValue(),'#e25822');
   assert.ok(Math.abs(Number(await portrait.locator('.position-controls [data-field=tailX]').inputValue())-exportedBalloon.tailX*.5)<1e-8);
   await portrait.locator('canvas').focus();await page.keyboard.press('Control+c');await page.keyboard.press('Control+v');
   assert.equal(await portrait.locator('[data-kind=balloon]').count(),2);await page.keyboard.press('Control+z');assert.equal(await portrait.locator('[data-kind=balloon]').count(),1);
@@ -118,6 +148,7 @@ try {
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#deck').inert);
   assert.equal(await source.locator('[data-kind=balloon] [data-field=transparency]').inputValue(),'45');assert.equal(await source.locator('[data-kind=balloon] [data-field=tail]').isChecked(),true);
+  assert.equal(await source.locator('[data-kind=balloon] [data-field=borderColor]').inputValue(),'#e25822');
   assert.equal(await untouched.locator('.edited-badge').isVisible(),false);assert.equal(await portrait.locator('.edited-badge').isVisible(),true);
   await untouched.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await canvas.evaluate(canvas=>canvas.toDataURL()),preview,'draft recovery preserves exact bubble geometry and rendering');
   await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/balloon-desktop.png'});
@@ -129,6 +160,6 @@ try {
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,'new save and balloon controls must fit mobile widths');
   await page.screenshot({path:'artifacts/balloon-mobile.png'});assert.deepEqual(errors,[]);
-  console.log('Balloon browser smoke passed: untouched/confirmed images excluded, edited-state undo and recovery, default off-image ellipse, 75% white opacity, seamless tail drag/resize, enforced dialogue layering, configurable SFX order, copy/paste across aspect ratios, preview/export parity, project/draft round-trips and mobile layout.');
+  console.log('Balloon browser smoke passed: single-image PNG download without directory API, font wait/error recovery, supplied GEKIFUDE font, synchronized frame colors, untouched/confirmed images excluded, edited-state undo and recovery, default off-image ellipse, 75% white opacity, seamless tail drag/resize, enforced dialogue layering, configurable SFX order, copy/paste across aspect ratios, preview/export parity, project/draft round-trips and mobile layout.');
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/balloon-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}

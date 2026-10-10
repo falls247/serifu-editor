@@ -1,6 +1,7 @@
-// Bundled, OFL-licensed Japanese fonts, pinned to verified Google Fonts blobs.
+// Google Fonts use pinned OFL-licensed blobs; the supplied SFX font is bundled under CC0.
 export const FONT_COMMIT='7085eb89a950e85db5b166b7a58d414544b4140c';
 export const FONT_CATALOG=Object.freeze({
+  gekifude:{label:'激筆 SFX（GEKIFUDE SFX）',group:'漫画の筆文字・効果音',family:'MangaGekifude',fallback:'"Noto Sans CJK JP", "Yu Gothic", sans-serif',weight:400,file:'GEKIFUDE-SFX-Regular.ttf',sha:'c890e51d246c95d97489226fe19fa28c2a60c914',license:'GEKIFUDE-SFX-CC0.txt',licenseSha:'0f52cb8436a3c9e818479f85fd3b420c881a1090',bundled:true,note:'かな・英大文字・数字・記号向け。漢字と英小文字は端末の代替書体で表示。'},
   comic:{label:'漫画・極太（Dela Gothic One）',group:'太字・インパクト',family:'MangaBold',fallback:'"Noto Sans CJK JP", "Yu Gothic", sans-serif',weight:900,faceWeight:'100 900',directory:'delagothicone',file:'DelaGothicOne-Regular.ttf',sha:'258f93526667223b6fd9476258d42ace60c7bfd6',license:'OFL.txt',licenseSha:'87fae845f60599624117220cf9477a0eca0785c2'},
   pop:{label:'丸太・ポップ（Mochiy Pop One）',group:'太字・インパクト',family:'MangaPop',fallback:'sans-serif',weight:400,directory:'mochiypopone',file:'MochiyPopOne-Regular.ttf',sha:'f239f79ceabc9badc25538ab578b81fcc1f116fa',license:'MochiyPopOne-OFL.txt',licenseSha:'86795012f007cabeb9436324516df761ca239d3e'},
   angular:{label:'鋭角・力強い（Reggae One）',group:'太字・インパクト',family:'MangaAngular',fallback:'sans-serif',weight:400,directory:'reggaeone',file:'ReggaeOne-Regular.ttf',sha:'f4f626ef844f87b114e452bbd20a8cbf18fc288d',license:'ReggaeOne-OFL.txt',licenseSha:'e0eee2be4b495dc76f687f68f2d530535d61ab52'},
@@ -23,8 +24,8 @@ export const FONT_CATALOG=Object.freeze({
 });
 export const FONT_CHOICES=Object.freeze(Object.fromEntries(Object.entries(FONT_CATALOG).map(([key,font])=>[key,font.label])));
 export const FONT_FILES=Object.values(FONT_CATALOG).filter(font=>font.file).flatMap(font=>[
-  {directory:font.directory,source:font.file,file:font.file,sha:font.sha},
-  {directory:font.directory,source:'OFL.txt',file:font.license,sha:font.licenseSha},
+  {directory:font.directory,source:font.file,file:font.file,sha:font.sha,bundled:font.bundled===true},
+  {directory:font.directory,source:font.bundled?font.license:'OFL.txt',file:font.license,sha:font.licenseSha,bundled:font.bundled===true},
 ]);
 export const FONT_STYLES=Object.values(FONT_CATALOG).filter(font=>font.file).map(font=>`@font-face{font-family:${font.family};src:url('./assets/fonts/${font.file}') format('truetype');font-weight:${font.faceWeight||font.weight};font-display:swap}`).join('\n');
 export function fontDescription(layer) {

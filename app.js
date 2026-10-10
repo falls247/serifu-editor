@@ -74,6 +74,7 @@ function updateGlobal() {
     p.row.querySelector('[data-action=complete]').textContent = p.done ? '✓ 確認済み・次へ ↓' : '編集完了・次へ ↓';
     p.row.querySelector('[data-action=undo]').disabled = !p.undo.length;
     p.row.querySelector('[data-action=redo]').disabled = !p.redo.length;
+    p.row.querySelector('[data-action=save-image]').disabled = busy;
     const copy = p.row.querySelector('[data-action=copy-next]');
     if (copy) copy.disabled = !p.layers.length || i === pages.length - 1;
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
@@ -108,6 +109,7 @@ function updateControls(p) {
   const balloon=l?.kind==='balloon';
   controls.querySelector('legend').textContent = balloon?'吹き出し：楕円とテールの位置調整':l ? `${l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出しを選択して位置調整';
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=balloon;
+  controls.querySelector('.balloon-style-controls').hidden=!balloon;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
   controls.querySelector('.balloon-position-note').hidden=!balloon;
   controls.querySelector('[data-action=backward]').textContent=balloon?'効果音の下へ':'背面へ';
@@ -118,7 +120,17 @@ function updateControls(p) {
   const query=l&&!balloon&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
   fontStatus.textContent=query&&document.fonts&&!document.fonts.check(query)?fontErrors.has(query)?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
   fontStatus.hidden=!fontStatus.textContent;
-  for (const card of p.row.querySelectorAll('.layer-card')) card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
+  const fontNote=controls.querySelector('.font-note');
+  fontNote.textContent=l&&!balloon?FONT_CATALOG[l.font]?.note||'':'';fontNote.hidden=!fontNote.textContent;
+  for (const card of p.row.querySelectorAll('.layer-card')) {
+    card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
+    const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
+    if(layer?.kind==='balloon')for(const input of card.querySelectorAll('[data-field]')){
+      if(input===document.activeElement)continue;
+      if(input.type==='checkbox')input.checked=layer[input.dataset.field];
+      else input.value=String(layer[input.dataset.field]);
+    }
+  }
 }
 
 function activate(p, id = p.selectedId, scroll = false) {
@@ -171,7 +183,7 @@ function renderCards(p) {
     mini.append(button('duplicate', '複製'), button('drop-layer', '×', 'このレイヤーを削除')); header.append(mini); card.append(header);
     if(l.kind==='balloon'){
       const grid=element('div','effect-grid');
-      for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','輪郭の色','color'],['borderWidth','輪郭の太さ（px）','number']]){
+      for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
@@ -312,6 +324,8 @@ $('deck').addEventListener('click', event => {
     edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2; }, false);
   } else if (['undo', 'redo'].includes(action)) {
     if (restore(p, action)) { dirty(); renderCards(p); drawPage(p); updateGlobal(); }
+  } else if (action === 'save-image') {
+    guard(()=>saveImage(p));
   } else if (action === 'complete') {
     p.done = true; dirty(); updateGlobal();
     const next = pages[pages.indexOf(p) + 1];
@@ -471,6 +485,28 @@ function snapshotPages() { return pages.map(p => ({ ...p, layers: structuredClon
 function download(blob, name) {
   const a = document.createElement('a'), url = URL.createObjectURL(blob); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+async function prepareExportFonts(snapshot) {
+  if(!document.fonts)return;
+  const queries=new Set(snapshot.flatMap(p=>p.layers.filter(l=>l.kind!=='balloon').map(l=>fontDescription(l).load)).filter(Boolean));
+  await Promise.all([...queries].map(query=>document.fonts.load(query)));
+  clearGlyphCache();
+}
+async function imageBlob(p) {
+  const canvas=document.createElement('canvas');canvas.width=p.img.width;canvas.height=p.img.height;
+  try {
+    draw(canvas.getContext('2d'),p.img,p.layers);
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+    if(!blob)throw new Error('PNG生成に失敗');
+    return blob;
+  } finally {canvas.width=1;canvas.height=1;}
+}
+async function saveImage(p) {
+  const snapshot={...p,layers:structuredClone(p.layers)},name=exportName(p.name,pages.indexOf(p));
+  status(`「${p.name}」の画像を保存中…`);
+  await prepareExportFonts([snapshot]);
+  download(await imageBlob(snapshot),name);
+  status(`「${name}」のダウンロードを開始した`);
+}
 async function saveImages(editedOnly=false) {
   const snapshot=snapshotPages().filter(p=>!editedOnly||p.edited);
   if(!snapshot.length){status('保存対象の編集済み画像がない。');return;}
@@ -480,18 +516,11 @@ async function saveImages(editedOnly=false) {
   const directory = await parent.getDirectoryHandle(folder, { create: true });
   let completed = 0;
   try {
-    if(document.fonts){
-      const queries=new Set(snapshot.flatMap(p=>p.layers.filter(l=>l.kind!=='balloon').map(l=>fontDescription(l).load)).filter(Boolean));
-      await Promise.all([...queries].map(query=>document.fonts.load(query)));
-      clearGlyphCache();
-    }
+    await prepareExportFonts(snapshot);
     for (const [i, p] of snapshot.entries()) {
       status(`保存中 ${i + 1} / ${snapshot.length} 枚`);
-      const canvas = document.createElement('canvas'); canvas.width = p.img.width; canvas.height = p.img.height;
-      draw(canvas.getContext('2d'), p.img, p.layers);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png')); if (!blob) throw new Error('PNG生成に失敗');
+      const blob = await imageBlob(p);
       await write(directory, exportName(p.name, i), blob); completed++;
-      canvas.width = 1; canvas.height = 1;
     }
     await write(directory, 'serifu-project.json', JSON.stringify(await projectData(snapshot)));
     changed = false; status(`${snapshot.length} 枚と編集データを「${folder}」へ保存した`);

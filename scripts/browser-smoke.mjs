@@ -282,7 +282,7 @@ try {
   const fontSelect=first.locator('.position-controls [data-field=font]');
   assert.equal(await fontSelect.locator('option').count(),Object.keys(FONT_CATALOG).length);
   const originalFont=await fontSelect.inputValue(),fontPictures=[];
-  const addedFonts=['pop','angular','rock','hand','round','flowing','decorative','daruma','potta','yomogi','kurenai','syuku','train','dot','stick'];
+  const addedFonts=['gekifude','pop','angular','rock','hand','round','flowing','decorative','daruma','potta','yomogi','kurenai','syuku','train','dot','stick'];
   for(const key of addedFonts){
     await fontSelect.selectOption(key);await page.evaluate(()=>document.fonts.ready);
     assert.equal(await page.evaluate(async key=>{const {fontDescription}=await import('./fonts.js');return document.fonts.check(fontDescription({font:key,kind:'sfx'}).load);},key),true,`${key} must load its bundled Japanese font`);

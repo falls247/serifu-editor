@@ -1,0 +1,20 @@
+CC0 1.0 Universal
+
+To the extent possible under law, HIDEOUT has waived all copyright and
+related or neighboring rights to GEKIFUDE SFX and all included source files.
+
+You may copy, modify, distribute, sell, repackage, embed, or otherwise use
+this work for any purpose, including commercial purposes, without asking
+permission and without attribution.
+
+No Rights Reserved.
+
+Official CC0 deed:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Official legal code:
+https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+This work is published from Japan.
+The work is provided as-is, without warranties or liability, to the fullest
+extent permitted by applicable law.
