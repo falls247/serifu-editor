@@ -74,10 +74,10 @@ export function balloonHit(layer,point) {
   return sides.every(value=>value>=0)||sides.every(value=>value<=0);
 }
 
-function balloonPath(ctx,layer) {
+function balloonPath(ctx,layer,brushPass=0) {
   const g=balloonGeometry(layer);
   ctx.beginPath();
-  if(layer.shape==='distorted-rect'||layer.shape==='spiky'){
+  if(layer.shape==='distorted-rect'||layer.shape==='spiky'||brushPass){
     const from=g.hasTail?g.start:0,to=g.hasTail?g.end:FULL_TURN,steps=Math.max(2,Math.ceil((to-from)/(FULL_TURN/160)));
     for(let index=0;index<=steps;index++){
       const angle=from+(to-from)*index/steps,point=balloonBoundaryPoint(layer,angle);
