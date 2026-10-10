@@ -137,3 +137,80 @@ export function adjustInkThickness(source,width,height,amount=0) {
   for(let i=0;i<base.length;i++)base[i]=base[i]*(1-fraction)+next[i]*fraction;
   return base;
 }
+
+
+// Deterministic distressed-print texture. All three masks are local to the glyph.
+// A missing glyph never generates spatter; removed ink is always transparent.
+export function printDistressMask(source,width,height,{size=100,grungeAmount=65,scratchLength=55,scratchAngle=90,spatterAmount=40,seed=1}={}) {
+  const body=new Uint8ClampedArray(source),speckles=new Uint8ClampedArray(source.length),knockout=new Uint8ClampedArray(source.length);
+  if(!grungeAmount&&!spatterAmount)return {body,speckles,knockout};
+  let left=width,top=height,right=-1,bottom=-1,inkCount=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++)if(source[y*width+x]>64){
+    left=Math.min(left,x);top=Math.min(top,y);right=Math.max(right,x);bottom=Math.max(bottom,y);inkCount++;
+  }
+  if(right<left)return {body,speckles,knockout};
+  const amount=grungeAmount/100,rnd=random(seed>>>0),scale=Math.max(1,size);
+  if(amount){
+    const grain=Math.max(1,Math.round(scale*.014));
+    // Correlated pinholes and edge chips; thresholds are fixed for each seed.
+    for(let y=top;y<=bottom;y++)for(let x=left;x<=right;x++){
+      const i=y*width+x,v=source[i];if(!v)continue;
+      const cloud=noise(Math.floor(x/(grain*5)),Math.floor(y/(grain*5)),seed^0x74ab);
+      const n=noise(Math.floor(x/grain),Math.floor(y/grain),seed^0x1997);
+      const grit=noise(x,y,seed^0x9328);
+      const intensity=(n*.65+grit*.35)*(.55+cloud*.9);
+      const isEdge=(x===0||y===0||x===width-1||y===height-1||source[i-1]<96||source[i+1]<96||source[i-width]<96||source[i+width]<96);
+      const threshold=(isEdge?.17:.075)*amount;
+      if(intensity<threshold)body[i]=Math.round(v*(.08+grit*.24));
+    }
+    if(scratchLength>0){
+      const count=Math.min(180,Math.ceil(6+scale*.23*amount));
+      const theta=scratchAngle*Math.PI/180,dx=Math.cos(theta),dy=Math.sin(theta);
+      for(let mark=0;mark<count;mark++){
+        const x0=left+rnd()*(right-left),y0=top+rnd()*(bottom-top);
+        const length=scale*(.08+rnd()*.75)*scratchLength/100;
+        const half=Math.max(.35,scale*(.0015+rnd()*.008)*(.4+amount*.6));
+        const wiggle=rnd()*Math.PI*2,step=Math.max(1,Math.round(length*.02));
+        for(let t=0;t<length;t+=step){
+          const taper=Math.sin(Math.PI*(t+.5)/(length+1));
+          const drift=Math.sin(t/Math.max(1,scale)*12+wiggle)*scale*.007;
+          const px=x0+dx*t-dy*drift,py=y0+dy*t+dx*drift;
+          const rad=Math.max(.35,half*taper);
+          for(let yy=Math.max(top,Math.floor(py-rad-1));yy<=Math.min(bottom,Math.ceil(py+rad+1));yy++)
+            for(let xx=Math.max(left,Math.floor(px-rad-1));xx<=Math.min(right,Math.ceil(px+rad+1));xx++){
+              const d=Math.abs((xx-px)*dy-(yy-py)*dx);
+              const along=(xx-px)*dx+(yy-py)*dy;
+              if(d>rad+.35||Math.abs(along-t)>step+1)continue;
+              const i=yy*width+xx;
+              if(source[i]&&noise(xx,yy,seed^mark)>.12)body[i]=Math.min(body[i],Math.round(source[i]*Math.max(0,1-(rad+.35-d)*.94)));
+            }
+        }
+      }
+    }
+  }
+  // Fly-specks remain within a narrow halo and only attach near actual body pixels.
+  if(spatterAmount>0){
+    const count=Math.min(190,Math.ceil(scale*.48*spatterAmount/100));
+    const halo=Math.max(2,Math.round(scale*.05)),radius=Math.max(1,Math.round(scale*.02));
+    for(let mark=0;mark<count;mark++){
+      const x=Math.round(left-halo+rnd()*(right-left+halo*2));
+      const y=Math.round(top-halo+rnd()*(bottom-top+halo*2));
+      if(x<0||y<0||x>=width||y>=height||source[y*width+x])continue;
+      let near=false;
+      for(let tries=0;tries<8&&!near;tries++){
+        const a=tries*Math.PI/4;
+        const xx=Math.round(x+Math.cos(a)*halo),yy=Math.round(y+Math.sin(a)*halo);
+        near=xx>=0&&yy>=0&&xx<width&&yy<height&&source[yy*width+xx]>96;
+      }
+      if(!near)continue;
+      const dot=Math.max(.6,scale*(.002+rnd()*.007))*Math.min(1,spatterAmount/30);
+      for(let yy=Math.max(0,Math.floor(y-dot));yy<=Math.min(height-1,Math.ceil(y+dot));yy++)
+        for(let xx=Math.max(0,Math.floor(x-dot));xx<=Math.min(width-1,Math.ceil(x+dot));xx++){
+          const i=yy*width+xx,d=Math.hypot(xx-x,yy-y);
+          if(d<=dot+.2&&!source[i])speckles[i]=Math.max(speckles[i],Math.round(210*Math.min(1,dot+.2-d)));
+        }
+    }
+  }
+  for(let i=0;i<body.length;i++)knockout[i]=Math.max(0,source[i]-body[i]);
+  return {body,speckles,knockout};
+}
