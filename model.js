@@ -17,7 +17,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('キャプションの本文・書体設定が不正');
     const alignX=input.alignX===undefined?(version<6?'right':'center'):input.alignX,alignY=input.alignY===undefined?(version<6?'top':'center'):input.alignY;
     if(!Object.hasOwn(CAPTION_ALIGNMENTS.alignX,alignX)||!Object.hasOwn(CAPTION_ALIGNMENTS.alignY,alignY))throw new Error('キャプションの揃える方向が不正');
-    return {id:crypto.randomUUID(),kind:'caption',alignX,alignY,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
+    return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
   }
   if(input?.kind==='balloon'){
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
@@ -26,7 +26,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     for(const key of ['color','borderColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('吹き出しの色が不正');
     for(const [key,[min,max]] of Object.entries(BALLOON_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('吹き出しの設定が範囲外');
     if(typeof input.tail!=='boolean'||!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しのテール・重なり設定が不正');
-    return {id:crypto.randomUUID(),kind:'balloon',...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
+    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
   }
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
   const legacy = version === 1;
@@ -100,7 +100,7 @@ function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight)
 
 export function pasteSelection(clipboard, width, height, offset=20) {
   const layer=scaledCopy(clipboard.layer,clipboard.width,clipboard.height,width,height);
-  layer.x+=offset;layer.y+=offset;if(['dialogue','sfx'].includes(layer.kind))layer.presetId=null;
+  layer.x+=offset;layer.y+=offset;layer.presetId=null;
   return layer;
 }
 

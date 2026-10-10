@@ -1,14 +1,16 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder } from './renderer.js';
 import { BALLOON_LIMITS } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
-import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
+import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
-import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
+import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
 import { FONT_CATALOG, FONT_STYLES, fontDescription } from './fonts.js';
 
 const $ = id => document.getElementById(id);
+const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
+const presetLabels={dialogue:'セリフ',sfx:'効果音',balloon:'吹き出し',caption:'キャプション'};
 const fontStyles=document.createElement('style');fontStyles.textContent=FONT_STYLES;document.head.append(fontStyles);
 for(const select of $('pageTemplate').content.querySelectorAll('[data-field=font]')){
   const groups=new Map();
@@ -91,8 +93,9 @@ function updateGlobal() {
   $('nextBatch').disabled = busy || batchEnd >= pages.length;
   $('thumbnailProgress').textContent = `現在 ${index < 0 ? 0 : index + 1} / ${pages.length} · 確認済み ${pages.filter(p=>p.done).length}`;
   $('temporarySave').disabled=busy||!pages.length;
-  $('savePreset').disabled=busy||!active()||!selected(active())||!['dialogue','sfx'].includes(selected(active()).kind);
-  for(const id of ['defaultDialogue','defaultSfx','autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy;
+  $('savePreset').disabled=busy||!active()||!selected(active())||!PRESET_KINDS.includes(selected(active()).kind);
+  for(const id of [...presetControls.map(([id])=>id),'autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy;
+  for(const b of document.querySelectorAll('[data-delete-preset]'))b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
   updateDraftUI();
   pages.forEach((p, i) => {
     if (p.thumbnail) {
@@ -293,31 +296,27 @@ function button(action, text, title) {
   return b;
 }
 
-function updateSwapOptions(p) {
-  for (const card of p.row.querySelectorAll('.layer-card')) {
-    const select = card.querySelector('[data-swap-target]');if(!select)continue;
-    const old = select.value,others=p.layers.filter(l=>['dialogue','sfx'].includes(l.kind)&&l.id!==card.dataset.layerId);
-    select.replaceChildren();
-    for (const other of others) {
-      const option = element('option', '', `${other.kind === 'sfx' ? '✦' : other.speaker === 'female' ? '女性' : '男性'} ${other.text || '（未入力）'}`);
-      option.value = other.id; select.append(option);
-    }
-    if ([...select.options].some(o => o.value === old)) select.value = old;
-    select.disabled = !others.length;
-    card.querySelector('[data-action=swap]').disabled = !others.length;
-  }
-}
-
 function renderCards(p) {
   if (!p.row) return;
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
-    const header = element('div', 'card-header');
-    header.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
+    const header = element('div', 'card-header'),heading=element('div','card-heading');
+    heading.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
+    if (l.kind === 'dialogue') {
+      const roles = element('div', 'role-switch');roles.setAttribute('role','group');roles.setAttribute('aria-label','話者の切替');
+      for (const [speaker, label] of [['male', '男性・黒'], ['female', '女性・ピンク']]) {
+        const b = button(`speaker-${speaker}`, label);b.classList.toggle('chosen', l.speaker === speaker);b.setAttribute('aria-pressed',String(l.speaker===speaker));roles.append(b);
+      }
+      heading.append(roles);
+    }
+    header.append(heading);
     const mini = element('div', 'card-mini-actions');
     mini.append(button('duplicate', '複製'), button('drop-layer', '×', 'このレイヤーを削除')); header.append(mini); card.append(header);
+    const presetLine=element('div','preset-controls'),presetSelect=element('select');
+    presetSelect.dataset.presetSelect='';presetSelect.setAttribute('aria-label',`${presetLabels[l.kind]}プリセット`);
+    presetLine.append(presetSelect,button('save-preset','保存','この設定に名前を付けてプリセットを保存'),button('delete-preset','削除','選択中の保存プリセットを削除'));card.append(presetLine);
     if(l.kind==='balloon'){
       const grid=element('div','effect-grid');
       for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number']]){
@@ -344,15 +343,6 @@ function renderCards(p) {
       const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
       card.append(grid,autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
     }
-    if (l.kind === 'dialogue') {
-      const roles = element('div', 'role-switch');
-      for (const [speaker, label] of [['male', '男性・黒'], ['female', '女性・ピンク']]) {
-        const b = button(`speaker-${speaker}`, label); b.classList.toggle('chosen', l.speaker === speaker); roles.append(b);
-      }
-      card.append(roles);
-    }
-    const presetLine=element('div','preset-controls'),presetSelect=element('select');
-    presetSelect.dataset.presetSelect='';presetSelect.setAttribute('aria-label',l.kind==='sfx'?'効果音プリセット':'セリフプリセット');presetLine.append(presetSelect);card.append(presetLine);
     const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.wrap='off';fitTextInput(text);
     text.placeholder = l.kind === 'sfx' ? 'ドーン！' : 'セリフを入力';
     text.setAttribute('aria-label', l.kind === 'sfx' ? '効果音テキスト' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ');
@@ -378,11 +368,9 @@ function renderCards(p) {
       for(const [value,label] of Object.entries(WARP_CHOICES)){const option=element('option','',label);option.value=value;warpSelect.append(option);}warpSelect.value=l.warp;warpLabel.append(warpSelect);grid.append(warpLabel);
       details.append(grid,element('p','effect-note','手描きの揺れはサイズ±5%・左右±3%から調整。左右は文字幅が基準。0で追加のばらつきなし。文字ごとの変化は保存・再読込でも固定。'),element('p','effect-note','感情・緊張はプリセット「感情／緊張の掠れ」から開始。縦ブラーは300px、滲みは400%まで。「文字の芯」で読みやすさを調整。掠れ・ハネは文字の形に直接適用。'));card.append(details);
     }
-    const swap = element('div', 'swap-controls'), target = element('select'); target.dataset.swapTarget = '';
-    target.setAttribute('aria-label', 'セリフを入れ替える相手'); swap.append(target, button('swap', 'セリフ交換')); card.append(swap);
     container.append(card);
   }
-  refreshPresetMenus(); updateSwapOptions(p); updateControls(p); updateGlobal();
+  refreshPresetMenus(); updateControls(p); updateGlobal();
 }
 
 function mountPage(p) {
@@ -462,8 +450,7 @@ $('deck').addEventListener('input', event => {
   else if(field==='tail'||field==='autoFit')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field!=='text'&&['dialogue','sfx'].includes(l.kind))l.presetId=null;markChanged(p);drawPage(p);updateControls(p);refreshPresetMenus();
-  if (field === 'text') updateSwapOptions(p);
+  l[field] = value;if(field!=='text')l.presetId=null;markChanged(p);drawPage(p);updateControls(p);refreshPresetMenus();
 });
 
 $('deck').addEventListener('click', event => {
@@ -483,16 +470,18 @@ $('deck').addEventListener('click', event => {
     p.row.querySelector(`.layer-card[data-layer-id="${p.selectedId}"] ${kind==='balloon'?'input':'textarea'}`).focus({ preventScroll: true });
   } else if (action.startsWith('speaker-') && l?.kind === 'dialogue') {
     edit(p, () => l.speaker = action.slice(8));
+  } else if (action === 'save-preset' && l) {
+    saveSelectedPreset();
+  } else if (action === 'delete-preset' && l) {
+    deletePreset(card.querySelector('[data-preset-select]').value);
   } else if (action === 'duplicate' && l) {
     edit(p, () => { const copy = duplicateLayer(l); p.layers.push(copy); p.selectedId = copy.id; });
   } else if (action === 'drop-layer' && l) {
     edit(p, () => { p.layers = p.layers.filter(item => item.id !== l.id); p.selectedId = p.layers[0]?.id || null; });
-  } else if (action === 'swap' && l) {
-    if (swapText(p, l.id, card.querySelector('[data-swap-target]').value)) { markChanged(p); renderCards(p); drawPage(p); }
   } else if (['backward', 'forward'].includes(action) && l) {
-    edit(p, () => {if(l.kind==='balloon'){l.sfxOrder=action==='forward'?'above':'behind';return;} const i = p.layers.indexOf(l), j = clamp(i + (action === 'forward' ? 1 : -1), 0, p.layers.length - 1); [p.layers[i], p.layers[j]] = [p.layers[j], p.layers[i]]; });
+    edit(p, () => {if(l.kind==='balloon'){l.sfxOrder=action==='forward'?'above':'behind';l.presetId=null;return;} const i = p.layers.indexOf(l), j = clamp(i + (action === 'forward' ? 1 : -1), 0, p.layers.length - 1); [p.layers[i], p.layers[j]] = [p.layers[j], p.layers[i]]; });
   } else if (action === 'center' && l) {
-    edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2; }, false);
+    edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2;l.presetId=null; }, false);refreshPresetMenus();
   } else if (['undo', 'redo'].includes(action)) {
     if (restore(p, action)) { dirty(); renderCards(p); drawPage(p); updateGlobal(); }
   } else if (action === 'save-image') {
@@ -567,9 +556,9 @@ function connectCanvas(p) {
     if (Object.entries(updates).every(([key, value]) => l[key] === value)) return;
     if (!drag.checkpointed) { checkpoint(p); drag.checkpointed = true; }
     Object.assign(l, updates);
-    dirty(); if(['dialogue','sfx'].includes(l.kind))l.presetId=null; p.done = false;p.edited=true; drawPage(p); updateControls(p); updateGlobal();
+    dirty(); l.presetId=null; p.done = false;p.edited=true; drawPage(p); updateControls(p); updateGlobal();
   });
-  const end = () => { if (drag?.page === p) { drag = null; updateControls(p); } };
+  const end = () => { if (drag?.page === p) { drag = null; updateControls(p);refreshPresetMenus(); } };
   p.canvas.addEventListener('pointerup', end); p.canvas.addEventListener('pointercancel', end);
 }
 
@@ -736,8 +725,8 @@ $('projectInput').onchange = event => {
       loaded.push(createPage({ name: p.name, src: p.src, img: await decode(p.src), layers: p.layers.map(l => normalizeLayer(l, data.version)), done: p.done === true,edited:p.edited===true }));
     }
     pages.push(...loaded);
-    mergePresets(data.preferences);dirty();refreshJump();activate(loaded[0], loaded[0].selectedId, true);
-    status(data.version === 1 ? '旧データを追加。吹き出しは白縁の男性セリフへ変換した。' : '編集データを追加。元ファイルとの接続がないため元画像削除は無効。');
+    const presetNotice=mergePresets(data.preferences);dirty();refreshJump();activate(loaded[0], loaded[0].selectedId, true);
+    status((data.version === 1 ? '旧データを追加。吹き出しは白縁の男性セリフへ変換した。' : '編集データを追加。元ファイルとの接続がないため元画像削除は無効。')+presetNotice);
   });
 };
 
@@ -777,12 +766,16 @@ function fillPresetSelect(select,kind,current,custom=false) {
   select.value=current||'';
 }
 function refreshPresetMenus() {
-  fillPresetSelect($('defaultDialogue'),'dialogue',preferences.defaults.dialogue);
-  fillPresetSelect($('defaultSfx'),'sfx',preferences.defaults.sfx);
+  for(const [id,kind] of presetControls)fillPresetSelect($(id),kind,preferences.defaults[kind]);
   for(const p of pages)if(p.row)for(const card of p.row.querySelectorAll('.layer-card')){
-    const layer=p.layers.find(l=>l.id===card.dataset.layerId),select=card.querySelector('[data-preset-select]');if(layer&&select)fillPresetSelect(select,layer.kind,layer.presetId,true);
+    const layer=p.layers.find(l=>l.id===card.dataset.layerId),select=card.querySelector('[data-preset-select]');
+    if(layer&&select){
+      fillPresetSelect(select,layer.kind,layer.presetId,true);
+      const preset=preferences.presets.find(p=>p.id===layer.presetId&&p.kind===layer.kind);
+      card.querySelector('[data-action=delete-preset]').disabled=busy||!preset||preset.builtin;
+    }
   }
-  for(const b of document.querySelectorAll('[data-delete-preset]'))b.disabled=!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
+  for(const b of document.querySelectorAll('[data-delete-preset]'))b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
 }
 function persistPreferences() {
   let remembered=true;
@@ -792,32 +785,45 @@ function persistPreferences() {
   return remembered;
 }
 function mergePresets(input) {
-  if(!input)return;
+  if(!input)return '';
   const imported=normalizePreferences(input);
-  for(const preset of imported.presets.filter(p=>!p.builtin))if(!preferences.presets.some(p=>p.id===preset.id))preferences.presets.push(preset);
-  for(const kind of ['dialogue','sfx'])if(preferences.presets.some(p=>p.id===imported.defaults[kind]&&p.kind===kind))preferences.defaults[kind]=imported.defaults[kind];
+  let count=preferences.presets.filter(p=>!p.builtin).length,skipped=0;
+  for(const preset of imported.presets.filter(p=>!p.builtin)){
+    if(preferences.presets.some(p=>p.id===preset.id))continue;
+    if(count>=MAX_USER_PRESETS){skipped++;continue;}
+    preferences.presets.push(preset);count++;
+  }
+  for(const kind of PRESET_KINDS)if(preferences.presets.some(p=>p.id===imported.defaults[kind]&&p.kind===kind))preferences.defaults[kind]=imported.defaults[kind];
   persistPreferences();
+  return skipped?` プリセットの上限${MAX_USER_PRESETS}件のため${skipped}件は未登録。配置済みの見た目は保持。`:'';
 }
-for(const [id,kind] of [['defaultDialogue','dialogue'],['defaultSfx','sfx']])$(id).onchange=()=>{
+for(const [id,kind] of presetControls)$(id).onchange=()=>{
   preferences.defaults[kind]=$(id).value;persistPreferences();dirty();updateGlobal();
 };
-$('savePreset').onclick=()=>{
-  const p=active(),layer=p&&selected(p);if(!layer||!['dialogue','sfx'].includes(layer.kind))return;
-  const name=prompt('この設定のプリセット名（文字内容・話者は保存せず、書式と配置を記憶）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
+function saveSelectedPreset() {
+  const p=active(),layer=p&&selected(p);if(busy||!layer||!PRESET_KINDS.includes(layer.kind))return;
+  const name=prompt('この設定のプリセット名（本文・話者は保持し、書式と配置を保存）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
   if(!name?.trim())return;
+  if(name.trim().length>60){status('プリセット名は60文字以内で入力。');return;}
   const existing=preferences.presets.find(p=>!p.builtin&&p.kind===layer.kind&&p.name===name.trim());
+  if(existing&&!confirm(`同じ名前のプリセット「${existing.name}」を上書きする？`))return;
+  if(!existing&&preferences.presets.filter(p=>!p.builtin).length>=MAX_USER_PRESETS){status(`保存できるプリセットは${MAX_USER_PRESETS}件まで。不要なプリセットを削除してから保存。`);return;}
   const preset=createPreset(name,layer,p.img.width,p.img.height);
   if(existing){preset.id=existing.id;preferences.presets.splice(preferences.presets.indexOf(existing),1,preset);}else preferences.presets.push(preset);
   layer.presetId=preset.id;preferences.defaults[layer.kind]=preset.id;const remembered=persistPreferences();dirty();updateGlobal();
   status(remembered?`「${preset.name}」を記憶。＋ボタンと次の画像でもこの設定を使う。`:'設定はこのタブに適用済み。ブラウザへの記憶は失敗したため、編集データを書き出して保管。');
-};
-for(const button of document.querySelectorAll('[data-delete-preset]'))button.onclick=()=>{
-  const kind=button.dataset.deletePreset,preset=preferences.presets.find(p=>p.id===preferences.defaults[kind]);
-  if(!preset||preset.builtin||!confirm(`プリセット「${preset.name}」を削除する？ 配置済みの文字は残る。`))return;
-  preferences.presets=preferences.presets.filter(p=>p.id!==preset.id);preferences.defaults[kind]=defaultPreferences().defaults[kind];
+}
+$('savePreset').onclick=saveSelectedPreset;
+function deletePreset(id) {
+  const preset=preferences.presets.find(p=>p.id===id);
+  if(busy||!preset||preset.builtin||!confirm(`プリセット「${preset.name}」を削除する？ 配置済みのオブジェクトは残る。`))return;
+  preferences.presets=preferences.presets.filter(p=>p.id!==preset.id);
+  if(preferences.defaults[preset.kind]===preset.id)preferences.defaults[preset.kind]=defaultPreferences().defaults[preset.kind];
   for(const p of pages)for(const l of p.layers)if(l.presetId===preset.id)l.presetId=null;
-  persistPreferences();dirty();updateGlobal();
-};
+  const remembered=persistPreferences();dirty();updateGlobal();
+  status(remembered?`プリセット「${preset.name}」を削除した。配置済みのオブジェクトは保持。`:'このタブでプリセットを削除した。ブラウザへの記憶は失敗。編集データを保存して保管。');
+}
+for(const button of document.querySelectorAll('[data-delete-preset]'))button.onclick=()=>deletePreset(preferences.defaults[button.dataset.deletePreset]);
 $('deck').addEventListener('change',event=>{
   if(busy||!event.target.matches('[data-preset-select]')||!event.target.value)return;
   const p=pageFrom(event.target),layer=p.layers.find(l=>l.id===event.target.closest('.layer-card').dataset.layerId);
@@ -886,8 +892,8 @@ $('restoreDraft').onclick=()=>guard(async()=>{
   }catch(error){for(const p of loaded)URL.revokeObjectURL(p.src);throw error;}
   for(const p of pages){unmountPage(p);if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);}
   $('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;
-  batchStart=0;mergePresets(meta.preferences);refreshJump();if(active())activate(active());
-  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。');
+  batchStart=0;const presetNotice=mergePresets(meta.preferences);refreshJump();if(active())activate(active());
+  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
 });
 $('clearDraft').onclick=()=>guard(async()=>{
   if(!confirm('このブラウザの一時保存を消去する？ 編集中の画像は残る。'))return;
