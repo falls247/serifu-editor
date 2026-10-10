@@ -1,6 +1,7 @@
 import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { fontDescription } from './fonts.js';
 import { newBalloon, balloonHit, paintBalloon, paintOrder } from './balloons.js';
+import { newCaption, paintCaption } from './captions.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -9,6 +10,7 @@ export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function newLayer(kind, width, height, speaker = 'male') {
   if(kind==='balloon')return newBalloon(width,height);
+  if(kind==='caption')return newCaption(width,height);
   const id=crypto.randomUUID();
   return {
     id, kind, speaker,
@@ -218,6 +220,7 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
   for (const l of paintOrder(layers)) {
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon')paintBalloon(ctx,l);
+    else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); paintText(ctx, l);}
     ctx.restore();
   }

@@ -257,7 +257,7 @@ try {
   const downloadPromise = page.waitForEvent('download'); await page.click('#projectSave');
   const download = await downloadPromise; await download.saveAs('artifacts/project.json');
   const project = JSON.parse(await readFile('artifacts/project.json', 'utf8'));
-  assert.equal(project.version, 4); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
+  assert.equal(project.version, 5); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
   assert.equal(project.pages[0].layers[0].thickness,2.5);assert.equal(project.pages[0].layers[2].thickness,3.5);
   assert.equal(project.pages[0].layers[2].sizeVariation,8.5);assert.equal(project.pages[0].layers[2].horizontalJitter,3.5);assert.ok(Number.isInteger(project.pages[0].layers[2].glyphSeed));
   assert.equal(project.pages[2].layers[2].font,'brush');assert.equal(project.pages[2].layers[2].blurY,96);assert.equal(project.pages[2].layers[2].dryInk,90);assert.equal(project.pages[2].layers[2].brushTails,90);
@@ -335,7 +335,7 @@ try {
   assert.equal(await rows.nth(6).locator('.layer-card').count(),1+savedBatchTexts.length,'batch clipboard survives deleting its source image');
   await page.click('#save'); await page.waitForFunction(() => document.querySelector('#status').textContent.includes('7 枚と編集データ'));
   const saved = await page.evaluate(() => window.saved);
-  assert.equal(Object.keys(saved).length, 8); assert.equal(saved['serifu-project.json'].version, 4);
+  assert.equal(Object.keys(saved).length, 8); assert.equal(saved['serifu-project.json'].version, 5);
   const batchExport=saved['serifu-project.json'].pages[6].layers.slice(1);
   assert.deepEqual(batchExport.map(layer=>layer.text),savedBatchTexts);
   assert.deepEqual(batchExport.map(({id,...layer})=>layer),saved['serifu-project.json'].pages[0].layers.map(({id,...layer})=>layer),'export preserves every pasted style and position');
@@ -370,7 +370,7 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: 'artifacts/mobile.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile layout must not overflow horizontally');
   assert.deepEqual(errors, [], 'browser runtime errors');
-  console.log('Browser smoke passed: image-wide copy/cut/paste, landscape-to-portrait placement, cut undo/redo, independent repeated batches, styles in export/draft recovery after source deletion, per-letter variation, preview shortcuts, numeric ink thickness, 19 fonts, presets, drag and original-size export.');
+  console.log(`Browser smoke passed: image-wide copy/cut/paste, landscape-to-portrait placement, cut undo/redo, independent repeated batches, styles in export/draft recovery after source deletion, per-letter variation, preview shortcuts, numeric ink thickness, ${Object.keys(FONT_CATALOG).length} fonts, presets, drag and original-size export.`);
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/failure.png', fullPage: true }).catch(() => {}); }
   throw error;

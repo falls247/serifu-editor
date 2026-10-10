@@ -1,10 +1,20 @@
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
 import { inkSeed } from './ink.js';
 import { BALLOON_LIMITS } from './balloons.js';
+import { CAPTION_LIMITS } from './captions.js';
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
-export function normalizeLayer(input, version = 4) {
+export function normalizeLayer(input, version = 5) {
+  if(input?.kind==='caption'){
+    if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
+    for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
+    if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('キャプションの座標・サイズが範囲外');
+    for(const key of ['color','borderColor','textColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('キャプションの色が不正');
+    for(const [key,[min,max]] of Object.entries(CAPTION_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('キャプションの設定が範囲外');
+    if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('キャプションの本文・書体設定が不正');
+    return {id:crypto.randomUUID(),kind:'caption',...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
+  }
   if(input?.kind==='balloon'){
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('吹き出しの座標・サイズが不正');
@@ -72,6 +82,8 @@ function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight)
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
     borderWidth:clamp(layer.borderWidth*scale,0,80),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
+  if(layer.kind==='caption')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
+    size:clamp(layer.size*scale,...CAPTION_LIMITS.size),padding:clamp(layer.padding*scale,...CAPTION_LIMITS.padding),borderWidth:clamp(layer.borderWidth*scale,...CAPTION_LIMITS.borderWidth)};
   return {
     ...structuredClone(layer), id:crypto.randomUUID(), x:layer.x*sx, y:layer.y*sy,
     w:clamp(layer.w*sx,30,30000), h:clamp(layer.h*sy,30,30000),
@@ -84,7 +96,7 @@ function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight)
 
 export function pasteSelection(clipboard, width, height, offset=20) {
   const layer=scaledCopy(clipboard.layer,clipboard.width,clipboard.height,width,height);
-  layer.x+=offset;layer.y+=offset;if(layer.kind!=='balloon')layer.presetId=null;
+  layer.x+=offset;layer.y+=offset;if(['dialogue','sfx'].includes(layer.kind))layer.presetId=null;
   return layer;
 }
 
@@ -110,7 +122,7 @@ export function pasteLayers(clipboard, target, width, height) {
 
 export function swapText(page, firstId, secondId) {
   const first = page.layers.find(l => l.id === firstId), second = page.layers.find(l => l.id === secondId);
-  if (!first || !second || first === second || first.kind==='balloon' || second.kind==='balloon') return false;
+  if (!first || !second || first === second || !['dialogue','sfx'].includes(first.kind) || !['dialogue','sfx'].includes(second.kind)) return false;
   checkpoint(page); [first.text, second.text] = [second.text, first.text]; return true;
 }
 

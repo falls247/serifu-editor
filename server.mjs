@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { FONT_FILES } from './fonts.js';
-const assets=['index.html','app.js','renderer.js','balloons.js','ink.js','fonts.js','model.js','presets.js','storage.js','style.css',...FONT_FILES.map(font=>'assets/fonts/'+font.file)];
+const assets=['index.html','app.js','renderer.js','balloons.js', 'captions.js','ink.js','fonts.js','model.js','presets.js','storage.js','style.css',...FONT_FILES.map(font=>'assets/fonts/'+font.file)];
 const files={'/':'index.html',...Object.fromEntries(assets.map(path=>['/'+path,path]))};
 const port=Number(process.env.PORT)||5173;
 http.createServer(async(req,res)=>{

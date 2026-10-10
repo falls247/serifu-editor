@@ -1,5 +1,6 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder } from './renderer.js';
 import { BALLOON_LIMITS } from './balloons.js';
+import { CAPTION_LIMITS, captionLayout } from './captions.js';
 import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
@@ -62,7 +63,7 @@ function updateGlobal() {
   if ($('jump').value !== activeId) $('jump').value = activeId || '';
   $('deck').inert = busy;
   $('temporarySave').disabled=busy||!pages.length;
-  $('savePreset').disabled=busy||!active()||!selected(active())||selected(active()).kind==='balloon';
+  $('savePreset').disabled=busy||!active()||!selected(active())||!['dialogue','sfx'].includes(selected(active()).kind);
   for(const id of ['defaultDialogue','defaultSfx','autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy;
   updateDraftUI();
   pages.forEach((p, i) => {
@@ -82,7 +83,7 @@ function updateGlobal() {
     p.row.querySelector('[data-action=paste-all]').disabled = busy || !pageClipboard?.layers.length;
     p.row.querySelector('.batch-copy-hint').textContent = pageClipboard
       ? `${pageClipboard.cut?'カット':'コピー'}済み：${pageClipboard.name} · ${pageClipboard.layers.length}件。この画像に追加。カット・貼付けは各画像の「戻す」で取り消せる。`
-      : '台詞・効果音・吹き出しをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。';
+      : '台詞・効果音・吹き出し・キャプションをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。';
   });
 }
 
@@ -106,17 +107,25 @@ function updateControls(p) {
   if (!p?.row) return;
   const l = selected(p), controls = p.row.querySelector('.position-controls');
   controls.disabled = !l;
-  const balloon=l?.kind==='balloon';
-  controls.querySelector('legend').textContent = balloon?'吹き出し：楕円とテールの位置調整':l ? `${l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出しを選択して位置調整';
+  const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
+  controls.querySelector('legend').textContent = balloon?'吹き出し：楕円とテールの位置調整':l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=balloon;
-  controls.querySelector('.balloon-style-controls').hidden=!balloon;
+  for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=balloon||caption;
+  controls.querySelector('.balloon-style-controls').hidden=!balloon&&!caption;
+  controls.querySelector('.caption-controls').hidden=!caption;
+  controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
   controls.querySelector('.balloon-position-note').hidden=!balloon;
   controls.querySelector('[data-action=backward]').textContent=balloon?'効果音の下へ':'背面へ';
   controls.querySelector('[data-action=forward]').textContent=balloon?'効果音の上へ':'前面へ';
   for (const input of controls.querySelectorAll('[data-field]')) {
-    if (input !== document.activeElement) input.value = l?.[input.dataset.field]===undefined?'':String(l[input.dataset.field]);
+    if (input !== document.activeElement) {
+      if(input.type==='checkbox')input.checked=l?.[input.dataset.field]===true;
+      else input.value = l?.[input.dataset.field]===undefined?'':String(l[input.dataset.field]);
+    }
   }
+  const captionStatus=controls.querySelector('.caption-fit-status');captionStatus.hidden=!caption;
+  if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${layout.size}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
   const query=l&&!balloon&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
   fontStatus.textContent=query&&document.fonts&&!document.fonts.check(query)?fontErrors.has(query)?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
   fontStatus.hidden=!fontStatus.textContent;
@@ -125,7 +134,7 @@ function updateControls(p) {
   for (const card of p.row.querySelectorAll('.layer-card')) {
     card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
-    if(layer?.kind==='balloon')for(const input of card.querySelectorAll('[data-field]')){
+    if(layer?.kind==='balloon'||layer?.kind==='caption')for(const input of card.querySelectorAll('[data-field]')){
       if(input===document.activeElement)continue;
       if(input.type==='checkbox')input.checked=layer[input.dataset.field];
       else input.value=String(layer[input.dataset.field]);
@@ -160,7 +169,7 @@ function button(action, text, title) {
 function updateSwapOptions(p) {
   for (const card of p.row.querySelectorAll('.layer-card')) {
     const select = card.querySelector('[data-swap-target]');if(!select)continue;
-    const old = select.value,others=p.layers.filter(l=>l.kind!=='balloon'&&l.id!==card.dataset.layerId);
+    const old = select.value,others=p.layers.filter(l=>['dialogue','sfx'].includes(l.kind)&&l.id!==card.dataset.layerId);
     select.replaceChildren();
     for (const other of others) {
       const option = element('option', '', `${other.kind === 'sfx' ? '✦' : other.speaker === 'female' ? '女性' : '男性'} ${other.text || '（未入力）'}`);
@@ -178,7 +187,7 @@ function renderCards(p) {
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
     const header = element('div', 'card-header');
-    header.append(element('span', 'kind-label', l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
+    header.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
     const mini = element('div', 'card-mini-actions');
     mini.append(button('duplicate', '複製'), button('drop-layer', '×', 'このレイヤーを削除')); header.append(mini); card.append(header);
     if(l.kind==='balloon'){
@@ -192,6 +201,16 @@ function renderCards(p) {
       const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
       card.append(element('p','effect-note','25%透過＝不透明度75%。台詞より常に下。楕円の位置・幅・高さと、テールの先端・付根は右側で調整。'));
       container.append(card);continue;
+    }
+    if(l.kind==='caption'){
+      const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='モノローグ・説明を入力';text.setAttribute('aria-label','キャプションの本文');card.append(text);
+      const grid=element('div','effect-grid');
+      for(const [field,labelText,type] of [['textColor','文字色','color'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['padding','内側の余白（px）','number']]){
+        const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
+        if(type==='number'){[input.min,input.max]=CAPTION_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
+      }
+      const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
+      card.append(grid,autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
     }
     if (l.kind === 'dialogue') {
       const roles = element('div', 'role-switch');
@@ -282,16 +301,16 @@ $('deck').addEventListener('input', event => {
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
   const l = p.layers.find(item => item.id === id); if (!l) return;
   let value = input.value;
-  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [1, 80], ...EFFECT_LIMITS,...BALLOON_LIMITS };
+  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [1, 80], ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;
     value = Number(value);
     if (limits[field]) value = clamp(value, ...limits[field]);
   } else if (field === 'vertical') value = value === 'true';
-  else if(field==='tail')value=input.checked;
+  else if(field==='tail'||field==='autoFit')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field!=='text'&&l.kind!=='balloon')l.presetId=null;markChanged(p);drawPage(p);updateControls(p);refreshPresetMenus();
+  l[field] = value;if(field!=='text'&&['dialogue','sfx'].includes(l.kind))l.presetId=null;markChanged(p);drawPage(p);updateControls(p);refreshPresetMenus();
   if (field === 'text') updateSwapOptions(p);
 });
 
@@ -304,7 +323,7 @@ $('deck').addEventListener('click', event => {
   if (!action) return;
   const l = selected(p);
   if (action.startsWith('add-')) {
-    const kind = action === 'add-balloon'?'balloon':action === 'add-sfx' ? 'sfx' : 'dialogue', speaker = action === 'add-female' ? 'female' : 'male';
+    const kind = action === 'add-caption'?'caption':action === 'add-balloon'?'balloon':action === 'add-sfx' ? 'sfx' : 'dialogue', speaker = action === 'add-female' ? 'female' : 'male';
     edit(p, () => {
       const layer = makeLayer(kind,p.img.width,p.img.height,speaker);
       p.layers.push(layer); p.selectedId = layer.id;
@@ -333,11 +352,11 @@ $('deck').addEventListener('click', event => {
   } else if (action === 'copy-all' && p.layers.length) {
     pageClipboard = { ...copyLayers(p.layers,p.img.width,p.img.height), name:p.name };
     updateGlobal();
-    status(`「${p.name}」の台詞・効果音・吹き出し ${pageClipboard.layers.length}件をコピーした。別の画像の「文字を一括ペースト」で追加できる。`);
+    status(`「${p.name}」の台詞・効果音・吹き出し・キャプション ${pageClipboard.layers.length}件をコピーした。別の画像の「文字を一括ペースト」で追加できる。`);
   } else if (action === 'cut-all' && p.layers.length) {
     pageClipboard = { ...cutLayers(p,p.img.width,p.img.height), name:p.name, cut:true };
     markChanged(p); renderCards(p); drawPage(p);
-    status(`「${p.name}」の台詞・効果音・吹き出し ${pageClipboard.layers.length}件をカットした。「文字を一括ペースト」で追加、元画像の「戻す」で復元できる。`);
+    status(`「${p.name}」の台詞・効果音・吹き出し・キャプション ${pageClipboard.layers.length}件をカットした。「文字を一括ペースト」で追加、元画像の「戻す」で復元できる。`);
   } else if (action === 'paste-all') {
     const copies = pasteLayers(pageClipboard,p,p.img.width,p.img.height);
     if (copies.length) {
@@ -384,7 +403,7 @@ function connectCanvas(p) {
     if (drag.mode === 'move') { updates = { x: Math.round(pos.x - drag.dx), y: Math.round(pos.y - drag.dy) }; }
     else if (drag.mode === 'resize') {
       const local = localPoint(l, pos.x, pos.y), w = clamp(Math.round(local.x * 2), 30, 30000), h = clamp(Math.round(local.y * 2), 30, 30000);
-      updates = l.kind==='balloon'?{w,h,tailX:clamp(drag.start.tailX*w/drag.start.w,...BALLOON_LIMITS.tailX),tailY:clamp(drag.start.tailY*h/drag.start.h,...BALLOON_LIMITS.tailY),tailWidth:clamp(drag.start.tailWidth*Math.min(w/drag.start.w,h/drag.start.h),...BALLOON_LIMITS.tailWidth)}:{ w, h, size: clamp(Math.round(drag.start.size * Math.min(w / drag.start.w, h / drag.start.h)), 8, 500) };
+      updates = l.kind==='caption'?{w,h}:l.kind==='balloon'?{w,h,tailX:clamp(drag.start.tailX*w/drag.start.w,...BALLOON_LIMITS.tailX),tailY:clamp(drag.start.tailY*h/drag.start.h,...BALLOON_LIMITS.tailY),tailWidth:clamp(drag.start.tailWidth*Math.min(w/drag.start.w,h/drag.start.h),...BALLOON_LIMITS.tailWidth)}:{ w, h, size: clamp(Math.round(drag.start.size * Math.min(w / drag.start.w, h / drag.start.h)), 8, 500) };
     } else if(drag.mode==='tail'){
       const local=localPoint(l,pos.x,pos.y);updates={tailX:clamp(Math.round(local.x),...BALLOON_LIMITS.tailX),tailY:clamp(Math.round(local.y),...BALLOON_LIMITS.tailY),tailAngle:Math.round(Math.atan2(local.y/l.h,local.x/l.w)*180/Math.PI)};
     } else {
@@ -394,7 +413,7 @@ function connectCanvas(p) {
     if (Object.entries(updates).every(([key, value]) => l[key] === value)) return;
     if (!drag.checkpointed) { checkpoint(p); drag.checkpointed = true; }
     Object.assign(l, updates);
-    dirty(); if(l.kind!=='balloon')l.presetId=null; p.done = false;p.edited=true; drawPage(p); updateControls(p); updateGlobal();
+    dirty(); if(['dialogue','sfx'].includes(l.kind))l.presetId=null; p.done = false;p.edited=true; drawPage(p); updateControls(p); updateGlobal();
   });
   const end = () => { if (drag?.page === p) { drag = null; updateControls(p); } };
   p.canvas.addEventListener('pointerup', end); p.canvas.addEventListener('pointercancel', end);
@@ -479,7 +498,7 @@ async function write(directory, name, data) {
   try { await writer.write(data); await writer.close(); } catch (error) { await writer.abort().catch(() => {}); throw error; }
 }
 async function projectData(snapshot = pages) {
-  return { version: 4, preferences:structuredClone(preferences), pages: await Promise.all(snapshot.map(async p => ({ name: p.name, src: p.src.startsWith('data:') ? p.src : await dataURL(p.file), layers: p.layers, done: p.done,edited:p.edited===true }))) };
+  return { version: 5, preferences:structuredClone(preferences), pages: await Promise.all(snapshot.map(async p => ({ name: p.name, src: p.src.startsWith('data:') ? p.src : await dataURL(p.file), layers: p.layers, done: p.done,edited:p.edited===true }))) };
 }
 function snapshotPages() { return pages.map(p => ({ ...p, layers: structuredClone(p.layers) })); }
 function download(blob, name) {
@@ -538,7 +557,7 @@ $('projectInput').onchange = event => {
   const file = event.target.files[0]; event.target.value = ''; if (!file) return;
   guard(async () => {
     const data = JSON.parse(await file.text());
-    if (![1, 2, 3, 4].includes(data.version) || !Array.isArray(data.pages) || !data.pages.length) throw new Error('未対応または空の編集データ');
+    if (![1, 2, 3, 4, 5].includes(data.version) || !Array.isArray(data.pages) || !data.pages.length) throw new Error('未対応または空の編集データ');
     const loaded = [];
     for (const p of data.pages) {
       if (typeof p.name !== 'string' || typeof p.src !== 'string' || !/^data:image\/(png|jpeg|webp|gif|avif);base64,/.test(p.src) || !Array.isArray(p.layers)) throw new Error('画像データが不正');
@@ -611,7 +630,7 @@ for(const [id,kind] of [['defaultDialogue','dialogue'],['defaultSfx','sfx']])$(i
   preferences.defaults[kind]=$(id).value;persistPreferences();dirty();updateGlobal();
 };
 $('savePreset').onclick=()=>{
-  const p=active(),layer=p&&selected(p);if(!layer||layer.kind==='balloon')return;
+  const p=active(),layer=p&&selected(p);if(!layer||!['dialogue','sfx'].includes(layer.kind))return;
   const name=prompt('この設定のプリセット名（文字内容・話者は保存せず、書式と配置を記憶）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
   if(!name?.trim())return;
   const existing=preferences.presets.find(p=>!p.builtin&&p.kind===layer.kind&&p.name===name.trim());
@@ -652,7 +671,7 @@ async function temporarySave(manual=false) {
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
-  const meta={version:4,savedAt:Date.now(),preferences:prefs,pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true}))};
+  const meta={version:5,savedAt:Date.now(),preferences:prefs,pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true}))};
   delete $('draftStatus').dataset.error;
   draftTask=(async()=>{
     await storageReady;
@@ -684,7 +703,7 @@ $('autosaveMinutes').onchange=()=>{
 $('restoreDraft').onclick=()=>guard(async()=>{
   await storageReady;const meta=await getDraftMeta();if(!meta)return;
   if(pages.length&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
-  if(![3,4].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
+  if(![3,4,5].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
   const images=await getDraftImages(meta.pages.map(p=>p.id)),loaded=[];
   try {
     for(const [i,p] of meta.pages.entries()){

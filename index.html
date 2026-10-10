@@ -13,7 +13,7 @@
       <button id="open">フォルダを開く</button>
       <button id="files">画像を追加</button>
       <button id="save" class="primary">一括保存 ↗</button>
-      <button id="saveEdited" class="primary" title="台詞・効果音・吹き出しを編集した画像だけ新しいフォルダへ保存">編集済み画像一括保存</button>
+      <button id="saveEdited" class="primary" title="台詞・効果音・吹き出し・キャプションを編集した画像だけ新しいフォルダへ保存">編集済み画像一括保存</button>
     </div>
   </header>
   <div class="collection-bar">
@@ -58,13 +58,13 @@
           <p class="source-note"></p>
         </section>
         <section class="dialogue-pane" aria-label="セリフと効果音の編集">
-          <div class="add-actions"><button data-action="add-male"><span class="male-dot"></span>＋ 男性</button><button data-action="add-female"><span class="female-dot"></span>＋ 女性</button><button data-action="add-sfx">✦ 効果音</button><button data-action="add-balloon">○ 吹き出し</button></div>
-          <div class="batch-layer-actions" role="group" aria-label="この画像の台詞・効果音・吹き出しを一括コピー・カット・ペースト">
-            <button data-action="copy-all" title="この画像の台詞・効果音・吹き出しを、書式と位置も含めてすべてコピー">文字を一括コピー</button>
-            <button data-action="cut-all" title="この画像の台詞・効果音・吹き出しをすべてカット。「戻す」でまとめて復元。">文字を一括カット</button>
-            <button data-action="paste-all" title="コピー・カットした台詞・効果音・吹き出しをこの画像に追加。位置は画像サイズに合わせる。" disabled>文字を一括ペースト</button>
+          <div class="add-actions"><button data-action="add-male"><span class="male-dot"></span>＋ 男性</button><button data-action="add-female"><span class="female-dot"></span>＋ 女性</button><button data-action="add-sfx">✦ 効果音</button><button data-action="add-balloon">○ 吹き出し</button><button data-action="add-caption">▭ キャプション</button></div>
+          <div class="batch-layer-actions" role="group" aria-label="この画像の台詞・効果音・吹き出し・キャプションを一括コピー・カット・ペースト">
+            <button data-action="copy-all" title="この画像の台詞・効果音・吹き出し・キャプションを、書式と位置も含めてすべてコピー">文字を一括コピー</button>
+            <button data-action="cut-all" title="この画像の台詞・効果音・吹き出し・キャプションをすべてカット。「戻す」でまとめて復元。">文字を一括カット</button>
+            <button data-action="paste-all" title="コピー・カットした台詞・効果音・吹き出し・キャプションをこの画像に追加。位置は画像サイズに合わせる。" disabled>文字を一括ペースト</button>
           </div>
-          <p class="batch-copy-hint">台詞・効果音・吹き出しをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。</p>
+          <p class="batch-copy-hint">台詞・効果音・吹き出し・キャプションをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。</p>
           <div class="layer-cards"></div>
           <p class="no-layers">セリフ・効果音・吹き出しを追加して、<br>この画像の物語を書こう。</p>
         </section>
@@ -75,16 +75,19 @@
           <fieldset class="position-controls"><legend class="selected-name">文字を選択して位置調整</legend><div class="control-grid">
             <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
             <label data-text-control>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>
-            <label data-text-control>文字の太さ（px）<input data-field="thickness" type="number" min="-10" max="30" step="0.5" title="0は書体の標準。正の値で太く、負の値で細く。白い縁とは別に調整。"></label>
+            <label data-text-control data-ink-control>文字の太さ（px）<input data-field="thickness" type="number" min="-10" max="30" step="0.5" title="0は書体の標準。正の値で太く、負の値で細く。白い縁とは別に調整。"></label>
             <label>配置幅<input data-field="w" type="number" min="30" max="30000"></label><label>配置高さ<input data-field="h" type="number" min="30" max="30000"></label>
-            <label data-text-control>白い縁の太さ<input data-field="outline" type="number" min="1" max="80"></label><label data-text-control>文字方向<select data-field="vertical"><option value="true">縦書き</option><option value="false">横書き</option></select></label>
+            <label data-text-control data-ink-control>白い縁の太さ<input data-field="outline" type="number" min="1" max="80"></label><label data-text-control>文字方向<select data-field="vertical"><option value="true">縦書き</option><option value="false">横書き</option></select></label>
             <label data-text-control>書体<select data-field="font" aria-label="文字の書体"></select></label>
           </div><div class="balloon-style-controls control-grid" hidden>
             <label>枠線の色<input data-field="borderColor" type="color"></label><label>枠線の太さ（px）<input data-field="borderWidth" type="number" min="0" max="80" step="0.5"></label>
+          </div><div class="caption-controls" hidden><div class="control-grid">
+            <label>キャプションの文字色<input data-field="textColor" type="color"></label><label>内側の余白（px）<input data-field="padding" type="number" min="0" max="2000" step="1"></label>
+          </div><label class="tail-toggle"><input data-field="autoFit" type="checkbox">文字サイズをボックスに合わせる</label><p class="caption-fit-status effect-note"></p>
           </div><div class="balloon-tail-controls control-grid" hidden>
             <label>テール先端X（中心からpx）<input data-field="tailX" type="number" min="-30000" max="30000" step="1"></label><label>テール先端Y（中心からpx）<input data-field="tailY" type="number" min="-30000" max="30000" step="1"></label>
             <label>テール付根の角度 °<input data-field="tailAngle" type="number" min="-180" max="180" step="1"></label><label>テール付根の幅（px）<input data-field="tailWidth" type="number" min="1" max="1000" step="1"></label>
-          </div><p class="balloon-position-note effect-note" hidden>楕円は画像の外へはみ出して配置できる。テールありなら水色の点で先端を移動。先端X/Yは楕円の中心からの距離。</p><p class="effect-note" data-text-control>太さ：負の値で細く／0で書体の標準／正の値で太く。</p><p class="font-note effect-note" hidden></p><p class="font-status" role="status" hidden></p><div class="layer-actions"><button data-action="backward">背面へ</button><button data-action="forward">前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
+          </div><p class="balloon-position-note effect-note" hidden>楕円は画像の外へはみ出して配置できる。テールありなら水色の点で先端を移動。先端X/Yは楕円の中心からの距離。</p><p class="effect-note" data-text-control data-ink-control>太さ：負の値で細く／0で書体の標準／正の値で太く。</p><p class="font-note effect-note" hidden></p><p class="font-status" role="status" hidden></p><div class="layer-actions"><button data-action="backward">背面へ</button><button data-action="forward">前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
         </section>
       </div>
     </article>

@@ -38,10 +38,10 @@ export function paintBalloon(ctx,layer) {
   if(layer.borderWidth>0){ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='round';ctx.stroke();}
 }
 
-// Every balloon stays below dialogue. Front balloons also require SFX below them.
+// Every balloon stays below dialogue and captions. Front balloons also require SFX below them.
 export function paintOrder(layers) {
   const behind=layers.filter(layer=>layer.kind==='balloon'&&layer.sfxOrder!=='above');
   const above=layers.filter(layer=>layer.kind==='balloon'&&layer.sfxOrder==='above');
   const text=layers.filter(layer=>layer.kind!=='balloon');
-  return above.length?[...behind,...text.filter(layer=>layer.kind==='sfx'),...above,...text.filter(layer=>layer.kind==='dialogue')]:[...behind,...text];
+  return above.length?[...behind,...text.filter(layer=>layer.kind==='sfx'),...above,...text.filter(layer=>layer.kind!=='sfx')]:[...behind,...text];
 }
