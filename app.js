@@ -220,6 +220,8 @@ function updateGlobal() {
     p.row.querySelector('[data-action=save-image]').disabled = busy;
     p.row.querySelector('[data-action=move-up]').disabled = busy || i === 0;
     p.row.querySelector('[data-action=move-down]').disabled = busy || i === pages.length - 1;
+    p.row.querySelector('[data-action=move-after]').disabled=busy||pages.length<2;
+    const destination=p.row.querySelector('[data-page-destination]');destination.max=String(pages.length);destination.disabled=busy||pages.length<2;
     const copy = p.row.querySelector('[data-action=copy-next]');
     if (copy) copy.disabled = busy || !p.layers.length || i === pages.length - 1;
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
@@ -649,6 +651,7 @@ function renderCards(p) {
 
 function mountPage(p) {
   const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;
+  row.querySelector('[data-page-destination]').value=p.moveAfterPage??'';
   addNumericControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
   row.querySelector('.dimensions').textContent = `${p.img.width} × ${p.img.height}`;
@@ -677,17 +680,30 @@ function refreshJump() {
   updateGlobal();
 }
 
-function movePage(p, offset) {
+function movePageTo(p,destination,focusAction) {
   if(busy)return;
-  const index = pages.indexOf(p), destination = index + offset;
+  const index = pages.indexOf(p);
   if (index < 0 || destination < 0 || destination >= pages.length) return;
-  const neighbor = pages[destination];
-  [pages[index], pages[destination]] = [neighbor, p];
+  if(destination===index){status(`「${p.name}」は指定位置に配置済み`);return;}
+  pages.splice(index,1);pages.splice(destination,0,p);
   dirty(); refreshJump(); activate(p, p.selectedId, true);
-  const focusTarget = p.row.querySelector(`[data-action=move-${offset < 0 ? 'up' : 'down'}]:enabled`)
+  const focusTarget = p.row.querySelector(`[data-action=${focusAction}]:enabled`)
     || p.row.querySelector('.page-actions button:enabled');
   focusTarget?.focus({ preventScroll: true });
   status(`「${p.name}」を ${destination + 1} / ${pages.length} ページへ移動した`);
+}
+
+function movePage(p,offset){
+  const index=pages.indexOf(p);if(index>=0)movePageTo(p,index+offset,`move-${offset<0?'up':'down'}`);
+}
+
+function movePageAfter(p){
+  if(busy)return;
+  const input=p.row.querySelector('[data-page-destination]');if(!input.reportValidity())return;
+  const after=input.valueAsNumber,index=pages.indexOf(p);
+  if(index<0||!Number.isInteger(after)||after<0||after>pages.length)return;
+  // Resolve the target in the current order, before removing the moving page.
+  movePageTo(p,after>index?after-1:after,'move-after');
 }
 
 function markChanged(p) {
@@ -714,6 +730,7 @@ $('deck').addEventListener('focusout', event => {
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
+  if(event.target.matches('[data-page-destination]')){const p=pageFrom(event.target);if(p)p.moveAfterPage=event.target.value;return;}
   const input = event.target, field = controlField(input);
   if (!field) return;
   if(field==='text')fitTextInput(input);
@@ -742,7 +759,7 @@ $('deck').addEventListener('click', event => {
   const card = event.target.closest('.layer-card'), cardId = card?.dataset.layerId;
   activate(p, cardId || p.selectedId);
   const action = event.target.closest('[data-action]')?.dataset.action;
-  if (!action || (busy&&['move-up','move-down','remove','delete','complete','copy-next','copy-all','cut-all','paste-all','save-image'].includes(action))) return;
+  if (!action || (busy&&['move-up','move-down','move-after','remove','delete','complete','copy-next','copy-all','cut-all','paste-all','save-image'].includes(action))) return;
   const l = selected(p);
   if (action.startsWith('add-')) {
     const kind = action === 'add-caption'?'caption':action === 'add-balloon'?'balloon':action === 'add-sfx' ? 'sfx' : 'dialogue', speaker = action === 'add-female' ? 'female' : 'male';
@@ -781,6 +798,8 @@ $('deck').addEventListener('click', event => {
     guard(task=>saveImage(p,task),'PNG保存',2);
   } else if (action === 'move-up' || action === 'move-down') {
     movePage(p, action === 'move-up' ? -1 : 1);
+  } else if (action === 'move-after') {
+    event.preventDefault();movePageAfter(p);
   } else if (action === 'complete') {
     p.done = true; dirty(); updateGlobal();
     const next = pages[pages.indexOf(p) + 1];

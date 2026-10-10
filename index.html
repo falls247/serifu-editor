@@ -77,6 +77,10 @@
       <div class="row-header">
         <div><span class="page-number"></span><strong class="page-name"></strong><span class="dimensions"></span><span class="edited-badge" hidden>編集済み</span></div>
         <div class="page-actions" role="group" aria-label="ページ順の変更と編集完了">
+          <form class="page-move-control" aria-label="指定ページの後へ移動">
+            <label><input data-page-destination type="number" min="0" step="1" required placeholder="番号" aria-label="移動先の現在のページ番号。0で先頭" title="現在のページ番号を指定。そのページの直後へ移動。0で先頭。">ページの後へ</label>
+            <button data-action="move-after" type="submit" title="指定したページの直後へ移動。0で先頭。">移動</button>
+          </form>
           <button data-action="move-up" title="このページを1つ前へ移動">ページ移動↑</button>
           <button data-action="move-down" title="このページを1つ後へ移動">ページ移動↓</button>
           <button data-action="complete" class="complete-button">編集完了・次へ ↓</button>
