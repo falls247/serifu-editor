@@ -267,7 +267,7 @@ try {
   const downloadPromise = page.waitForEvent('download'); await page.click('#projectSave');
   const download = await downloadPromise; await download.saveAs('artifacts/project.json');
   const project = JSON.parse(await readFile('artifacts/project.json', 'utf8'));
-  assert.equal(project.version, 6); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
+  assert.equal(project.version, 7); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
   assert.equal(project.pages[0].layers[0].thickness,2.5);assert.equal(project.pages[0].layers[2].thickness,3.5);
   assert.equal(project.pages[0].layers[2].sizeVariation,8.5);assert.equal(project.pages[0].layers[2].horizontalJitter,3.5);assert.ok(Number.isInteger(project.pages[0].layers[2].glyphSeed));
   assert.equal(project.pages[2].layers[2].font,'brush');assert.equal(project.pages[2].layers[2].blurY,96);assert.equal(project.pages[2].layers[2].dryInk,90);assert.equal(project.pages[2].layers[2].brushTails,90);
@@ -345,7 +345,7 @@ try {
   assert.equal(await rows.nth(6).locator('.layer-card').count(),1+savedBatchTexts.length,'batch clipboard survives deleting its source image');
   await page.click('#save'); await page.waitForFunction(() => document.querySelector('#status').textContent.includes('7 枚と編集データ'));
   const saved = await page.evaluate(() => window.saved);
-  assert.equal(Object.keys(saved).length, 8); assert.equal(saved['serifu-project.json'].version, 6);
+  assert.equal(Object.keys(saved).length, 8); assert.equal(saved['serifu-project.json'].version, 7);
   const batchExport=saved['serifu-project.json'].pages[6].layers.slice(1);
   assert.deepEqual(batchExport.map(layer=>layer.text),savedBatchTexts);
   assert.deepEqual(batchExport.map(({id,...layer})=>layer),saved['serifu-project.json'].pages[0].layers.map(({id,...layer})=>layer),'export preserves every pasted style and position');
