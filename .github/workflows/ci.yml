@@ -13,4 +13,6 @@ jobs:
       - run: npm run build
       - run: npm install --no-save playwright
       - run: npx playwright install chromium --with-deps
-      - run: npm run test:grunge-browser
+      - run: npm run fonts
+      - run: npm run test:browser
+      - run: npm run test:bulk
