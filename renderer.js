@@ -165,6 +165,12 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   const depth=l.size*((l.effect==='impact'||l.effect==='burst')?.13:['none','taper','tension'].includes(l.effect)?0:.05);
   if(depth)out.drawImage(tintedMask(ctx,edge,width,height,'#111111'),depth,depth);
   out.drawImage(border,0,0);out.drawImage(foreground,0,0);
+  if(texture){
+    // Carve ink defects through keyline and cast shadow, never paint them white.
+    out.globalCompositeOperation='destination-out';out.globalAlpha=1;
+    out.drawImage(tintedMask(ctx,texture.knockout,width,height,'#000000'),0,0);
+    out.globalCompositeOperation='source-over';
+  }
   const value={surface:result,drawWidth,drawHeight,width,height};
   if(width*height>5000000)return value;
   glyphCache.set(key,value); cachePixels += width*height;
@@ -238,7 +244,7 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon'){
       paintBalloon(ctx,l);
-      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,{...l,w:l.w*.84,h:l.h*.84});ctx.restore();}
+      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,{...l,w:l.w*(l.shape==='spiky'?.70:.84),h:l.h*(l.shape==='spiky'?.70:.84)});ctx.restore();}
     }
     else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); paintText(ctx, l);}
