@@ -16,3 +16,11 @@ jobs:
       - run: npm run fonts
       - run: npm run test:browser
       - run: npm run test:bulk
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: manga-ink-balloon-previews
+          path: |
+            artifacts/grunge-ink-preview.png
+            artifacts/spiky-balloon-preview.png
+          if-no-files-found: ignore
