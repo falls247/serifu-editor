@@ -317,6 +317,7 @@ function updateControls(p) {
   controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??55}%`;
   controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
+  controls.querySelector('.text-position-controls').hidden=!balloon&&!caption;
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
   controls.querySelector('.balloon-position-note').hidden=!balloon;
@@ -478,10 +479,20 @@ function settingNumber(field,title,limits,value,step='1'){
   const label=element('label','',title),input=element('input');input.type='number';input.dataset.field=field;
   [input.min,input.max]=limits;input.step=step;input.value=String(value);label.append(input);return label;
 }
+function textPositionControls(layer){
+  const grid=element('div','text-position-controls effect-grid'),limits=layer.kind==='balloon'?BALLOON_LIMITS:CAPTION_LIMITS;
+  for(const [field,title] of [['textOffsetX','文字の横位置（px）'],['textOffsetY','文字の縦位置（px）'],['padding','内側の余白（px）']])grid.append(settingNumber(field,title,limits[field],layer[field]??0,field==='padding'?'1':'0.5'));
+  return grid;
+}
 const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
 function controlField(input){return input.dataset.field??input.dataset.numericField;}
 function syncControlValue(input,value,p){
   const field=controlField(input);
+  if(input.type==='range'&&['textOffsetX','textOffsetY'].includes(field)){
+    const dimension=field==='textOffsetY'?p.img.height:p.img.width;
+    input.min=String(Math.max(-30000,Math.min(-dimension,value??0)));
+    input.max=String(Math.min(30000,Math.max(dimension,value??0)));
+  }
   if(input.type==='range'&&['x','y','w','h'].includes(field)){
     const dimension=['y','h'].includes(field)?p.img.height:p.img.width;
     input.min=String(['w','h'].includes(field)?30:Math.min(-dimension,value??0));
@@ -566,7 +577,7 @@ function renderCards(p) {
     presetLine.append(presetSelect,button('save-preset','保存','この設定に名前を付けてプリセットを保存'),button('delete-preset','削除','選択中の保存プリセットを削除'));card.append(presetLine);
     if(l.kind==='balloon'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='吹き出しのセリフを入力';text.setAttribute('aria-label',l.speaker==='female'?'女性の吹き出しセリフ':'男性の吹き出しセリフ');card.append(text);
-      card.append(speechStyleControls(l));
+      card.append(speechStyleControls(l),textPositionControls(l),element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。枠は動かさず本文を移動。余白を減らすと改行までの長さが広がる。'));
       const grid=element('div','effect-grid');
       for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
@@ -591,7 +602,7 @@ function renderCards(p) {
     if(l.kind==='caption'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='モノローグ・説明を入力';text.setAttribute('aria-label','キャプションの本文');card.append(text);
       const grid=element('div','effect-grid');
-      for(const [field,labelText,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['textOutlineWidth','文字の輪郭の太さ（px）','number'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['padding','内側の余白（px）','number']]){
+      for(const [field,labelText,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['textOutlineWidth','文字の輪郭の太さ（px）','number'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=CAPTION_LIMITS[field];input.step=['borderWidth','textOutlineWidth'].includes(field)?'0.5':'1';}label.append(input);grid.append(label);
       }
@@ -600,7 +611,7 @@ function renderCards(p) {
         for(const [value,text] of Object.entries(CAPTION_ALIGNMENTS[field])){const option=element('option','',text);option.value=value;select.append(option);}select.value=l[field];label.append(select);grid.append(label);
       }
       const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
-      card.append(grid,brushControls(l),autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));appendCard(card,l);continue;
+      card.append(grid,textPositionControls(l),brushControls(l),autoLabel,element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。自動追従ONでも文字位置だけ調整できる。25%透過＝背景の不透明度75%。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));appendCard(card,l);continue;
     }
     const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.wrap='off';fitTextInput(text);
     text.placeholder = l.kind === 'sfx' ? 'ドーン！' : 'セリフを入力';

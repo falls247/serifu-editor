@@ -51,7 +51,7 @@ function spikeRadius(layer,angle) {
   return (u*u*a.x+2*u*t*c.x+t*t*b.x)*cosine+(u*u*a.y+2*u*t*c.y+t*t*b.y)*sine;
 }
 
-export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],spikeCount:[6,60],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
+export const BALLOON_LIMITS=Object.freeze({textOffsetX:[-30000,30000],textOffsetY:[-30000,30000],padding:[0,2000],transparency:[0,100],borderWidth:[0,80],distortion:[0,100],spikeCount:[6,60],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
 export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形',spiky:'尖り形'});
 
 export function balloonSeedFromId(id) {
@@ -69,11 +69,17 @@ export function newBalloon(width,height,speaker='male') {
   const id=crypto.randomUUID();
   return {
     id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
-    text:'',speaker,textColor:null,textOutlineColor:'#ffffff',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',
+    text:'',speaker,textColor:null,textOutlineColor:'#ffffff',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',textOffsetX:0,textOffsetY:0,padding:0,
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
     ...brushDefaults(id),shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
     shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
+}
+
+// Wrap within the frame, reserving only the requested padding and visible strokes.
+export function balloonContentBox(layer) {
+  const inset=(layer.padding??0)+(layer.borderWidth??0)/2+(layer.outline??0)+Math.max(0,layer.thickness??0);
+  return {width:Math.max(1,layer.w-inset*2),height:Math.max(1,layer.h-inset*2)};
 }
 
 function boundaryScale(layer,angle) {

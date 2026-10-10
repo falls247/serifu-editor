@@ -33,6 +33,7 @@ try {
   };
   const balloonPairs=await assertNumericPairs(balloon),balloonSlider=name=>balloon.locator(`[data-numeric-field=${name}]`);
   await balloon.locator('textarea').fill('吹き出しの文字');await field('vertical').selectOption('false');await field('x').fill('400');await field('y').fill('415');await field('w').fill('570');await field('h').fill('330');await field('size').fill('48');await field('thickness').fill('2.5');
+  await field('lineAlign').selectOption('center');
   await balloon.locator('[data-field=textColor]').fill('#007755');await field('textOutlineColor').fill('#cc3300');await field('outline').fill('6.5');
   assert.equal(await field('textColor').inputValue(),'#007755');assert.equal(await balloon.locator('[data-field=textOutlineColor]').inputValue(),'#cc3300');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'6.5');
   assert.equal(await balloonSlider('outline').inputValue(),'6.5');
@@ -79,7 +80,8 @@ try {
     }
     const b={...newLayer('balloon',600,600),x:300,y:300,w:350,h:350,distortion:85,shapeSeed:0,spikeCount:12};
     const rect=render(b),rectSeed=diff(rect,render({...b,shapeSeed:1})),spiky=render({...b,shape:'spiky'}),spikeSeed=diff(spiky,render({...b,shape:'spiky',shapeSeed:1})),spikeCount=diff(spiky,render({...b,shape:'spiky',spikeCount:24})),repeat=diff(spiky,render({...b,shape:'spiky'}));
-    const styled={...b,shape:'spiky',spikeCount:24,text:'指定色',textColor:'#2468aa',textOutlineColor:'#cc3300',outline:5,thickness:2.5},html=render(styled),offscreen=new OffscreenCanvas(600,600);draw(offscreen.getContext('2d'),base,[styled]);
+    // Keep this color/outline parity fixture inside the spikes; top alignment now reaches the frame edge.
+    const styled={...b,shape:'spiky',spikeCount:24,text:'指定色',lineAlign:'center',textColor:'#2468aa',textOutlineColor:'#cc3300',outline:5,thickness:2.5},html=render(styled),offscreen=new OffscreenCanvas(600,600);draw(offscreen.getContext('2d'),base,[styled]);
     return {samples,rectSeed,spikeSeed,spikeCount,repeat,offscreenDiff:diff(html,offscreen.getContext('2d').getImageData(0,0,600,600).data)};
   });
   for(const sample of pixels.samples){assert.ok(sample.body>20);assert.ok(sample.outline>20);assert.ok(sample.recolored>20);assert.equal(sample.oldOutline,0);assert.equal(sample.bareOutline,0);}
@@ -88,7 +90,7 @@ try {
   const copied=portrait.locator('[data-kind=balloon]').first();assert.equal(await copied.locator('[data-field=shapeSeed]').inputValue(),'4321');assert.equal(await copied.locator('[data-field=spikeCount]').inputValue(),'24');assert.equal(await copied.locator('[data-field=textColor]').inputValue(),'#007755');assert.equal(await copied.locator('[data-field=outline]').inputValue(),'3.25');
   await portrait.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);const preview=await source.locator('canvas').evaluate(canvas=>canvas.toDataURL());
   let saving=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();const png=await saving;
-  const pngPixels=await page.evaluate(async base64=>{const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;canvas.getContext('2d').drawImage(img,0,0);return canvas.toDataURL();},(await readFile(await png.path())).toString('base64'));assert.equal(pngPixels,preview);
+  const pngPixels=await page.evaluate(async base64=>{const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;canvas.getContext('2d').drawImage(img,0,0);return canvas.toDataURL();},(await readFile(await png.path())).toString('base64'));assert.ok(pngPixels===preview,'saved PNG must match the unselected color/outline preview');
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);saving=page.waitForEvent('download');await page.click('#projectSave');const download=await saving,projectBytes=await readFile(await download.path()),project=JSON.parse(projectBytes.toString());
   assert.equal(project.version,9);assert.equal(project.pages[0].layers[0].textColor,'#2468aa');assert.equal(project.pages[0].layers[0].textOutlineColor,'#cc3300');assert.equal(project.pages[0].layers[0].outline,5.5);assert.equal(project.pages[0].layers[1].shapeSeed,4321);assert.equal(project.pages[0].layers[1].spikeCount,24);
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');const meta=await getDraftMeta();return meta?.version===9&&meta.pages[0].layers[1].spikeCount===24;});

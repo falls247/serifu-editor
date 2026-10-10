@@ -10,20 +10,20 @@ export const MAX_USER_PRESETS = 100;
 const styleKeys = ['vertical','rotation','color','effect','font','warp','distortion','skew','stretchX','stretchY','blurStrength','inkCore','roughness','dryInk','brushTails','inkTexture','grungeAmount','scratchLength','scratchAngle','spatterAmount','sizeVariation','horizontalJitter','taperRate',...Object.keys(PLACEMENT_DEFAULTS).filter(key=>key!=='minimumGlyphGap'),'glyphSeed'];
 const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRatio',outline:'outlineRatio',blur:'blurRatio',motionBlur:'motionRatio',blurX:'blurXRatio',blurY:'blurYRatio',minimumGlyphGap:'minimumGlyphGapRatio'};
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
-const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio'};
+const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
   balloon:['shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
-  if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio',shadowBlur:'shadowBlurRatio',shadowOffsetX:'shadowOffsetXRatio',shadowOffsetY:'shadowOffsetYRatio'}};
+  if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',padding:'paddingRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio',shadowBlur:'shadowBlurRatio',shadowOffsetX:'shadowOffsetXRatio',shadowOffsetY:'shadowOffsetYRatio'}};
   if(kind==='caption')return {styles:boxStyles.caption,ratios:{...boxRatioKeys,size:'sizeRatio',padding:'paddingRatio',textOutlineWidth:'textOutlineWidthRatio'}};
   return {styles:[...styleKeys,'blurAngle','textOutlineColor',...(kind==='dialogue'?['textColor']:[])],ratios:ratioKeys};
 }
 function presetDimension(kind,key,width,height) {
   if(['balloon','caption'].includes(kind)){
     if(['borderWidth','tailWidth','size','outline','thickness','padding','textOutlineWidth'].includes(key))return Math.min(width,height);
-    if(key==='tailY')return height;
+    if(['tailY','textOffsetY'].includes(key))return height;
   }
   return dimension(key,width,height);
 }
@@ -59,7 +59,9 @@ export function applyPreset(layer,preset,width,height) {
   const {styles,ratios}=presetFields(layer.kind);
   const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]===undefined&&(layer.kind==='balloon'||['textColor','textOutlineColor','glyphSeed','brushSeed'].includes(k))?layer[k]:preset.style[k]])),presetId:preset.id};
   for(const [key,ratio] of Object.entries(ratios)){
-    const value=preset.style[ratio]??(layer.kind==='balloon'?layer[key]/presetDimension(layer.kind,key,width,height):key==='minimumGlyphGap'?2/width:['thickness','blurX','blurY'].includes(key)?0:NaN);
+    const preservePosition=['textOffsetX','textOffsetY'].includes(key)||layer.kind==='balloon'&&key==='padding';
+    const fallback=preservePosition?(layer[key]??0)/presetDimension(layer.kind,key,width,height):layer.kind==='balloon'?layer[key]/presetDimension(layer.kind,key,width,height):key==='minimumGlyphGap'?2/width:['thickness','blurX','blurY'].includes(key)?0:NaN;
+    const value=preset.style[ratio]??fallback;
     if(!Number.isFinite(value))throw new Error('プリセットの寸法が不正');
     next[key]=value*presetDimension(layer.kind,key,width,height);
   }

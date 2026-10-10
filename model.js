@@ -17,7 +17,7 @@ function speechColors(input) {
 
 export function normalizeLayer(input, version = PROJECT_VERSION) {
   if(input?.kind==='caption'){
-    input={...input,...normalizeBrush(input),textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
+    input={textOffsetX:0,textOffsetY:0,...input,...normalizeBrush(input),textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('キャプションの座標・サイズが範囲外');
@@ -31,7 +31,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   }
   if(input?.kind==='balloon'){
     const shapeSeed=input.shapeSeed??balloonSeedFromId(input.id);
-    input={...input,...normalizeBrush(input),distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
+    input={textOffsetX:0,textOffsetY:0,padding:0,...input,...normalizeBrush(input),distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
       spikeCount:input.spikeCount===undefined?defaultSpikeCount(shapeSeed):input.spikeCount,...speechColors(input),
       size:input.size===undefined?40:input.size,outline:input.outline===undefined?4:input.outline,thickness:input.thickness===undefined?0:input.thickness,
       vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font,shadowEnabled:input.shadowEnabled??false,shadowColor:input.shadowColor??'#222222',shadowBlur:input.shadowBlur??12,shadowOffsetX:input.shadowOffsetX??6,shadowOffsetY:input.shadowOffsetY??6,shadowOpacity:input.shadowOpacity??45,borderStyle:input.borderStyle??'solid',brushRoughness:input.brushRoughness??50};
@@ -112,8 +112,10 @@ export function copySelection(layer, width, height) {
 export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
+    textOffsetX:clamp((layer.textOffsetX??0)*sx,...BALLOON_LIMITS.textOffsetX),textOffsetY:clamp((layer.textOffsetY??0)*sy,...BALLOON_LIMITS.textOffsetY),padding:clamp((layer.padding??0)*scale,...BALLOON_LIMITS.padding),
     size:clamp(layer.size*scale,8,500),outline:clamp(layer.outline*scale,0,80),thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),borderWidth:clamp(layer.borderWidth*scale,0,80),shadowBlur:clamp((layer.shadowBlur??12)*scale,0,100),shadowOffsetX:clamp((layer.shadowOffsetX??6)*sx,-100,100),shadowOffsetY:clamp((layer.shadowOffsetY??6)*sy,-100,100),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
   if(layer.kind==='caption')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
+    textOffsetX:clamp((layer.textOffsetX??0)*sx,...CAPTION_LIMITS.textOffsetX),textOffsetY:clamp((layer.textOffsetY??0)*sy,...CAPTION_LIMITS.textOffsetY),
     size:clamp(layer.size*scale,...CAPTION_LIMITS.size),padding:clamp(layer.padding*scale,...CAPTION_LIMITS.padding),borderWidth:clamp(layer.borderWidth*scale,...CAPTION_LIMITS.borderWidth),textOutlineWidth:clamp((layer.textOutlineWidth??0)*scale,...CAPTION_LIMITS.textOutlineWidth)};
   return {
     ...structuredClone(layer), id:crypto.randomUUID(), x:layer.x*sx, y:layer.y*sy,

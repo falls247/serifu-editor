@@ -2,7 +2,7 @@ import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
 import { fontDescription, glyphFontDescription } from './fonts.js';
 import { graphemes, verticalRotation, punctuationCenter } from './typography.js';
 
-export const CAPTION_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
+export const CAPTION_LIMITS=Object.freeze({textOffsetX:[-30000,30000],textOffsetY:[-30000,30000],transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
 export const CAPTION_ALIGNMENTS=Object.freeze({alignX:{left:'左',center:'中央',right:'右'},alignY:{top:'上',center:'中央',bottom:'下'}});
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const alignedStart=(available,used,alignment)=>alignment==='left'||alignment==='top'?-available/2:alignment==='right'||alignment==='bottom'?available/2-used:-used/2;
@@ -13,7 +13,7 @@ export function newCaption(width,height) {
     w:limit(width*.32,30,30000),h:limit(height*.4,30,30000),rotation:0,text:'',
     ...brushDefaults(id),color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
     textColor:'#111111',textOutlineColor:'#ffffff',textOutlineWidth:0,font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,
-    autoFit:true,padding:0,alignX:'center',alignY:'center'};
+    autoFit:true,padding:0,alignX:'center',alignY:'center',textOffsetX:0,textOffsetY:0};
 }
 
 function seedFromId(id) {
@@ -88,6 +88,7 @@ export function captionLayout(ctx,layer,sizeOverride) {
         const startY=alignedStart(textHeight,height,layer.alignY??'center');
         rows.forEach((row,i)=>{let x=alignedStart(textWidth,row.reduce((sum,m)=>sum+m.width,0),layer.alignX??'center');for(const m of row){glyphs.push({...m,x:x+m.width/2,y:startY+(i+.5)*advance});x+=m.width;}});
       }
+      for(const glyph of glyphs){glyph.x+=layer.textOffsetX??0;glyph.y+=layer.textOffsetY??0;}
       width+=outline*2;height+=outline*2;
       return {size,font,glyphs,width,height,innerWidth:box.width,innerHeight:box.height,fits:width<=box.width+.001&&height<=box.height+.001};
     };
@@ -107,7 +108,7 @@ export function paintCaption(ctx,layer) {
     else {captionPath(ctx,layer);ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='miter';ctx.stroke();}
   }
   const layout=captionLayout(ctx,layer);
-  ctx.save();captionPath(ctx,{...layer,w:layout.innerWidth,h:layout.innerHeight});ctx.clip();
+  ctx.save();captionPath(ctx,{...layer,w:Math.max(1,layer.w-layer.borderWidth),h:Math.max(1,layer.h-layer.borderWidth)});ctx.clip();
   ctx.font=layout.font;ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle=layer.textColor;
   const outline=layer.textOutlineWidth??0;
   ctx.strokeStyle=layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.lineJoin='round';

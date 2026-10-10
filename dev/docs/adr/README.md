@@ -25,3 +25,4 @@
 - [ADR-0013: セリフの文字色・輪郭と吹き出しの形状パラメータ](0013-speech-colors-and-balloon-parameters.md)
 - [ADR-0014: 変形後の文字輪郭と共通の可変線幅ブラシ](0014-optical-lettering-and-brush-strokes.md)
 - [ADR-0015: 数値調整UIの連動と空字形のフォールバック](0015-numeric-controls-and-glyph-fallback.md)
+- [ADR-0016: 吹き出し・キャプションの文字位置と改行領域](0016-text-position-and-balloon-content.md)

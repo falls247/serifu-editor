@@ -1,6 +1,6 @@
 import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { glyphFontDescription, clearFontCache } from './fonts.js';
-import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder } from './balloons.js';
+import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
@@ -169,6 +169,7 @@ export function textGlyphs(ctx,layer) {
   try {
     if(layer.kind==='sfx'&&((layer.kerningMode==='optical'&&layer.kerningStrength>0)||layer.rotationJitter||layer.verticalJitter||layer.spacingJitter||layer.glyphOverlap))return opticalTextGlyphs(ctx,layer,glyphFontSize);
     const sfx=layer.kind==='sfx',sx=sfx?layer.stretchX/100:1,sy=sfx?layer.stretchY/100:1;
+    const balloon=layer.kind==='balloon',box=balloon?balloonContentBox(layer):{width:layer.w*.88,height:layer.h*.88};
     let index=0;
     const lines=layer.text.split('\n').map(line=>graphemes(line).map(char=>{
       const i=index++,baseSize=glyphFontSize(layer,i),variation=sfx?glyphVariation(layer.glyphSeed??inkSeed(layer.text),i,layer.sizeVariation||0,layer.horizontalJitter||0):{scale:1,shift:0};
@@ -181,19 +182,20 @@ export function textGlyphs(ctx,layer) {
       const columns=[];
       for(const line of lines){
         let column=[],height=0;
-        for(const glyph of line){const advance=glyph.baseSize*1.12*sy;if(column.length&&height+advance>layer.h*.88+.001){columns.push(column);column=[];height=0;}column.push({...glyph,advance});height+=advance;}
+        for(const glyph of line){const advance=glyph.baseSize*1.12*sy;if(column.length&&height+advance>box.height+.001){columns.push(column);column=[];height=0;}column.push({...glyph,advance});height+=advance;}
         columns.push(column);
       }
       const widths=columns.map(column=>Math.max(column.length?0:glyphFontSize(layer,0),...column.map(glyph=>glyph.baseSize))*1.3*sx);
       let x=widths.reduce((a,b)=>a+b,0)/2;
-      columns.forEach((column,i)=>{x-=widths[i]/2;let y=columns.length>1&&topAligned?-layer.h*.44:-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
+      columns.forEach((column,i)=>{x-=widths[i]/2;let y=(balloon||columns.length>1)&&topAligned?-box.height/2:-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
     }else{
       const rows=[];
-      for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>layer.w*.88){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
+      for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>box.width){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
       const heights=rows.map(row=>Math.max(row.length?0:layer.size,...row.map(glyph=>glyph.baseSize))*1.3*sy);
-      let y=rows.length>1&&topAligned?-layer.h*.44:-heights.reduce((a,b)=>a+b,0)/2;
+      let y=(balloon||rows.length>1)&&topAligned?-box.height/2:-heights.reduce((a,b)=>a+b,0)/2;
       rows.forEach((row,i)=>{let x=-row.reduce((sum,glyph)=>sum+glyph.width,0)/2;for(const glyph of row){glyphs.push({...glyph,x:x+glyph.width/2,y:y+heights[i]/2});x+=glyph.width;}y+=heights[i];});
     }
+    if(balloon)for(const glyph of glyphs){glyph.x+=layer.textOffsetX??0;glyph.y+=layer.textOffsetY??0;}
     return glyphs;
   } finally {ctx.restore();}
 }
@@ -228,7 +230,7 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon'){
       paintBalloon(ctx,l);
-      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,{...l,w:l.w*(l.shape==='spiky'?.70:.84),h:l.h*(l.shape==='spiky'?.70:.84)});ctx.restore();}
+      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,l);ctx.restore();}
     }
     else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); paintText(ctx, l);}

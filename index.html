@@ -123,8 +123,11 @@
             <label data-shape-seed-control hidden>形状seed<input data-field="shapeSeed" type="number" min="0" max="4294967295" step="1"></label><label class="balloon-spike-count-control" hidden>尖りの頂点数<input data-field="spikeCount" type="number" min="6" max="60" step="1"></label>
             <button data-shape-seed-control data-action="regenerate-shape" hidden>形状を再生成</button>
             <label>枠線の色<input data-field="borderColor" type="color"></label><label>枠線の太さ（px）<input data-field="borderWidth" type="number" min="0" max="80" step="0.5"></label>
-          </div><div class="caption-controls" hidden><div class="control-grid">
+          </div><div class="text-position-controls" hidden><div class="control-grid">
+            <label>文字の横位置（px）<input data-field="textOffsetX" type="number" min="-30000" max="30000" step="0.5" title="＋で右、−で左へ本文だけ移動"></label>
+            <label>文字の縦位置（px）<input data-field="textOffsetY" type="number" min="-30000" max="30000" step="0.5" title="＋で下、−で上へ本文だけ移動"></label>
             <label>内側の余白（px）<input data-field="padding" type="number" min="0" max="2000" step="1"></label>
+          </div><p class="effect-note">文字位置：横は＋で右／−で左、縦は＋で下／−で上。余白は改行までの長さを調整。楕円・尖り形の端や、枠からはみ出す本文は隠れるため、位置・余白・文字サイズで調整。</p></div><div class="caption-controls" hidden><div class="control-grid">
             <label>文字の輪郭の太さ（px）<input data-field="textOutlineWidth" type="number" min="0" max="80" step="0.5" title="0で輪郭なし"></label>
             <label>左右の揃え方<select data-field="alignX"><option value="left">左</option><option value="center">中央</option><option value="right">右</option></select></label>
             <label>上下の揃え方<select data-field="alignY"><option value="top">上</option><option value="center">中央</option><option value="bottom">下</option></select></label>
