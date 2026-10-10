@@ -120,7 +120,7 @@ try {
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===1&&window.outputs[0].files['serifu-project.json']&&!document.querySelector('#deck').inert);
   const editedOutput=await page.evaluate(()=>window.outputs[0]);const editedProject=editedOutput.files['serifu-project.json'];
   assert.ok(editedOutput.name.startsWith('serifu_'));assert.equal(Object.keys(editedOutput.files).length,2);
-  assert.equal(editedProject.pages.length,1);assert.equal(editedProject.pages[0].name,'01-source.png');assert.equal(editedProject.version,5);
+  assert.equal(editedProject.pages.length,1);assert.equal(editedProject.pages[0].name,'01-source.png');assert.equal(editedProject.version,6);
   const exportedBalloon=editedProject.pages[0].layers.find(layer=>layer.kind==='balloon');
   assert.equal(exportedBalloon.tail,true);assert.equal(exportedBalloon.transparency,45);assert.equal(exportedBalloon.sfxOrder,'above');
   assert.equal(exportedBalloon.borderColor,'#e25822');assert.equal(editedProject.pages[0].layers.find(layer=>layer.kind==='sfx').font,'gekifude');
@@ -142,7 +142,7 @@ try {
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===3&&window.outputs[2].files['serifu-project.json']&&!document.querySelector('#deck').inert);
   const filtered=await page.evaluate(()=>window.outputs[2].files['serifu-project.json']);assert.deepEqual(filtered.pages.map(page=>page.name),['01-source.png','03-portrait.png']);
   await source.locator('[data-action=cut-all]').click();assert.equal(await source.locator('.layer-card').count(),0);
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');const meta=await getDraftMeta();return meta?.version===5&&meta.pages[0].edited&&meta.pages[0].layers.length===0;});
+  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');const meta=await getDraftMeta();return meta?.version===6&&meta.pages[0].edited&&meta.pages[0].layers.length===0;});
   await source.locator('[data-action=undo]').click();assert.equal(await source.locator('[data-kind=balloon]').count(),1);
   await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta())?.pages[0].layers.some(layer=>layer.kind==='balloon');});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');

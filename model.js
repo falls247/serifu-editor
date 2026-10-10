@@ -1,11 +1,12 @@
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
 import { inkSeed } from './ink.js';
 import { BALLOON_LIMITS } from './balloons.js';
-import { CAPTION_LIMITS } from './captions.js';
+import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
+export const PROJECT_VERSION=6;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
-export const EFFECT_LIMITS = Object.freeze({ sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
+export const EFFECT_LIMITS = Object.freeze({ taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
-export function normalizeLayer(input, version = 5) {
+export function normalizeLayer(input, version = PROJECT_VERSION) {
   if(input?.kind==='caption'){
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
@@ -13,7 +14,9 @@ export function normalizeLayer(input, version = 5) {
     for(const key of ['color','borderColor','textColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('キャプションの色が不正');
     for(const [key,[min,max]] of Object.entries(CAPTION_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('キャプションの設定が範囲外');
     if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('キャプションの本文・書体設定が不正');
-    return {id:crypto.randomUUID(),kind:'caption',...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
+    const alignX=input.alignX===undefined?(version<6?'right':'center'):input.alignX,alignY=input.alignY===undefined?(version<6?'top':'center'):input.alignY;
+    if(!Object.hasOwn(CAPTION_ALIGNMENTS.alignX,alignX)||!Object.hasOwn(CAPTION_ALIGNMENTS.alignY,alignY))throw new Error('キャプションの揃える方向が不正');
+    return {id:crypto.randomUUID(),kind:'caption',alignX,alignY,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
   }
   if(input?.kind==='balloon'){
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
@@ -38,7 +41,7 @@ export function normalizeLayer(input, version = 5) {
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < 1 || outline > 80) throw new Error('白い縁の太さが不正');
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
-  const extras = { sizeVariation:0, horizontalJitter:0, thickness:0, font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, distortion:0, skew:0, stretchX:100, stretchY:100 };
+  const extras = { taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
   if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
   if (!Number.isFinite(extras.thickness) || extras.thickness<THICKNESS_LIMIT[0] || extras.thickness>THICKNESS_LIMIT[1]) throw new Error('文字の太さが範囲外');

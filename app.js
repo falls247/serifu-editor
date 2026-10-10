@@ -1,7 +1,7 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder } from './renderer.js';
 import { BALLOON_LIMITS } from './balloons.js';
-import { CAPTION_LIMITS, captionLayout } from './captions.js';
-import { normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
+import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
+import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers, swapText, copyToNext, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset } from './presets.js';
 import { getDraftMeta, getDraftImages, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
@@ -134,6 +134,10 @@ function updateControls(p) {
   for (const card of p.row.querySelectorAll('.layer-card')) {
     card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
+    if(layer?.kind==='sfx'){
+      card.querySelector('.taper-controls').hidden=layer.effect!=='taper';
+      const rate=card.querySelector('[data-field=taperRate]');if(rate!==document.activeElement)rate.value=String(layer.taperRate);
+    }
     if(layer?.kind==='balloon'||layer?.kind==='caption')for(const input of card.querySelectorAll('[data-field]')){
       if(input===document.activeElement)continue;
       if(input.type==='checkbox')input.checked=layer[input.dataset.field];
@@ -209,8 +213,12 @@ function renderCards(p) {
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=CAPTION_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
+      for(const [field,labelText] of [['alignX','左右の揃え方'],['alignY','上下の揃え方']]){
+        const label=element('label','',labelText),select=element('select');select.dataset.field=field;
+        for(const [value,text] of Object.entries(CAPTION_ALIGNMENTS[field])){const option=element('option','',text);option.value=value;select.append(option);}select.value=l[field];label.append(select);grid.append(label);
+      }
       const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
-      card.append(grid,autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
+      card.append(grid,autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
     }
     if (l.kind === 'dialogue') {
       const roles = element('div', 'role-switch');
@@ -232,6 +240,10 @@ function renderCards(p) {
       select.value = l.effect; label.append(select); options.append(label);
       const colorLabel = element('label', '', '文字色'), color = element('input');
       color.type = 'color'; color.dataset.field = 'color'; color.value = l.color; colorLabel.append(color); options.append(colorLabel); card.append(options);
+      const taper=element('div','taper-controls'),rateLabel=element('label','','先細りの変化率（%／文字）'),rate=element('input');
+      rate.type='number';rate.dataset.field='taperRate';[rate.min,rate.max]=EFFECT_LIMITS.taperRate;rate.step='0.5';rate.value=String(l.taperRate);rateLabel.append(rate);
+      taper.hidden=l.effect!=='taper';taper.append(rateLabel,element('p','effect-note','初期値10%。基準100pxなら100→90→80px。最小8px。改行しても縮小を継続。ばらつき0なら指定率どおり。'));card.append(taper);
+      card.append(element('p','effect-note','「なし」「先細り」は集中線・立体影なし。ブラー・掠れ・歪みは下のパラメータで独立調整。'));
     }
     if(l.kind==='sfx') {
       const details=element('details','effect-details');details.append(element('summary','','文字のばらつき・ブラー・掠れ・歪みの調整'));
@@ -498,7 +510,7 @@ async function write(directory, name, data) {
   try { await writer.write(data); await writer.close(); } catch (error) { await writer.abort().catch(() => {}); throw error; }
 }
 async function projectData(snapshot = pages) {
-  return { version: 5, preferences:structuredClone(preferences), pages: await Promise.all(snapshot.map(async p => ({ name: p.name, src: p.src.startsWith('data:') ? p.src : await dataURL(p.file), layers: p.layers, done: p.done,edited:p.edited===true }))) };
+  return { version: PROJECT_VERSION, preferences:structuredClone(preferences), pages: await Promise.all(snapshot.map(async p => ({ name: p.name, src: p.src.startsWith('data:') ? p.src : await dataURL(p.file), layers: p.layers, done: p.done,edited:p.edited===true }))) };
 }
 function snapshotPages() { return pages.map(p => ({ ...p, layers: structuredClone(p.layers) })); }
 function download(blob, name) {
@@ -557,7 +569,7 @@ $('projectInput').onchange = event => {
   const file = event.target.files[0]; event.target.value = ''; if (!file) return;
   guard(async () => {
     const data = JSON.parse(await file.text());
-    if (![1, 2, 3, 4, 5].includes(data.version) || !Array.isArray(data.pages) || !data.pages.length) throw new Error('未対応または空の編集データ');
+    if (![1, 2, 3, 4, 5, 6].includes(data.version) || !Array.isArray(data.pages) || !data.pages.length) throw new Error('未対応または空の編集データ');
     const loaded = [];
     for (const p of data.pages) {
       if (typeof p.name !== 'string' || typeof p.src !== 'string' || !/^data:image\/(png|jpeg|webp|gif|avif);base64,/.test(p.src) || !Array.isArray(p.layers)) throw new Error('画像データが不正');
@@ -671,7 +683,7 @@ async function temporarySave(manual=false) {
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
-  const meta={version:5,savedAt:Date.now(),preferences:prefs,pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true}))};
+  const meta={version:PROJECT_VERSION,savedAt:Date.now(),preferences:prefs,pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true}))};
   delete $('draftStatus').dataset.error;
   draftTask=(async()=>{
     await storageReady;
@@ -703,7 +715,7 @@ $('autosaveMinutes').onchange=()=>{
 $('restoreDraft').onclick=()=>guard(async()=>{
   await storageReady;const meta=await getDraftMeta();if(!meta)return;
   if(pages.length&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
-  if(![3,4,5].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
+  if(![3,4,5,6].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
   const images=await getDraftImages(meta.pages.map(p=>p.id)),loaded=[];
   try {
     for(const [i,p] of meta.pages.entries()){

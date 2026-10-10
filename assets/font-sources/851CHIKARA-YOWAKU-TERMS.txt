@@ -1,0 +1,17 @@
+851チカラヨワク Ver 0.02
+Copyright: 8:51:22 pm
+Original supplied file: 851CHIKARA-YOWAKU_002.ttf (unchanged)
+SHA-256: 0a11074b39d9ed5af63dfd4a208b8f02a22fff9b0695195064c8ace72cb8d3ce
+
+Official distribution: https://pm85122.onamae.jp/851ch-yw.html
+Official terms: https://pm85122.onamae.jp/851fontTerm.html
+Terms checked: 2026-10-10
+
+Summary of the author's terms (not an independent license):
+The author retains copyright. Commercial and noncommercial use, modification,
+redistribution, web fonts and embedded software fonts are permitted.
+Do not claim authorship or sell the unmodified font alone without permission.
+Selling modified font files requires prior permission. See the official terms
+for the font-collection exception and other details. Attribution and usage
+reports are optional. The author disclaims responsibility for losses caused
+by the font. This app distributes the original font free of charge.

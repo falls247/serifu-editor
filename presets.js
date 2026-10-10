@@ -1,7 +1,7 @@
 import { newLayer, clamp } from './renderer.js';
 import { normalizeLayer, THICKNESS_LIMIT } from './model.js';
 export const PREFS_KEY = 'serifu.preferences.v1';
-const styleKeys = ['vertical','rotation','color','effect','font','warp','distortion','skew','stretchX','stretchY','blurStrength','inkCore','roughness','dryInk','brushTails','sizeVariation','horizontalJitter'];
+const styleKeys = ['vertical','rotation','color','effect','font','warp','distortion','skew','stretchX','stretchY','blurStrength','inkCore','roughness','dryInk','brushTails','sizeVariation','horizontalJitter','taperRate'];
 const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRatio',outline:'outlineRatio',blur:'blurRatio',motionBlur:'motionRatio',blurX:'blurXRatio',blurY:'blurYRatio'};
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 export function styleFromLayer(layer,width,height) {

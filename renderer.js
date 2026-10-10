@@ -2,10 +2,11 @@ import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness,
 import { fontDescription } from './fonts.js';
 import { newBalloon, balloonHit, paintBalloon, paintOrder } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
+import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
-export const EFFECTS = Object.freeze({ impact: 'ドン！／立体', burst: 'バン！／集中線', speed: 'シュッ／スピード', rumble: 'ゴゴゴ／震え', tension: 'ゾワッ／感情・緊張' });
+export const EFFECTS = Object.freeze({ none:'なし', taper:'先細り', impact: 'ドン！／立体', burst: 'バン！／集中線', speed: 'シュッ／スピード', rumble: 'ゴゴゴ／震え', tension: 'ゾワッ／感情・緊張' });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function newLayer(kind, width, height, speaker = 'male') {
@@ -19,7 +20,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
     w: clamp(width * (kind === 'sfx' ? .34 : .36), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .46), 30, 30000),
     size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .04)), 16, 500),
     rotation: kind === 'sfx' ? -12 : 0, thickness:0, outline: clamp(Math.round(width * .006), 2, 80),
-    vertical: true, color: '#111111', effect: 'burst',
+    vertical: true, color: '#111111', effect: 'burst', taperRate:10,
     font: kind === 'sfx' ? 'comic' : 'sans', blur: 0, motionBlur: 0, blurAngle: 90,
     distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
     blurX: 0, blurY: 0, blurStrength: 200, inkCore: 80,
@@ -46,19 +47,6 @@ export function handleAt(layer, x, y, scale = 1) {
   if (Math.hypot(p.x - layer.w / 2, p.y - layer.h / 2) <= radius) return 'resize';
   if (Math.hypot(p.x, p.y + layer.h / 2 + 24 / scale) <= radius) return 'rotate';
   return null;
-}
-
-function textRows(ctx, text, maxWidth) {
-  const rows = [];
-  for (const line of text.split('\n')) {
-    let row = '';
-    for (const char of line) {
-      if (row && ctx.measureText(row + char).width > maxWidth) { rows.push(row); row = ''; }
-      row += char;
-    }
-    rows.push(row);
-  }
-  return rows;
 }
 
 function ornament(ctx, l) {
@@ -110,7 +98,7 @@ function fontFamily(l) {
   return fontDescription(l).family;
 }
 function drawInk(ctx, l, char, x, y) {
-  if (l.kind === 'sfx') {
+  if (l.kind === 'sfx' && !['none','taper','tension'].includes(l.effect)) {
     const depth = l.size * (l.effect === 'impact' || l.effect === 'burst' ? .13 : .05);
     ctx.strokeStyle = '#111111'; ctx.fillStyle = '#111111'; ctx.lineWidth = l.outline * 2 + l.size * .05;
     ctx.strokeText(char, x + depth, y + depth); ctx.fillText(char, x + depth, y + depth);
@@ -126,7 +114,7 @@ function tintedMask(ctx, alpha, width, height, color, strength=1) {
 }
 function warpedGlyph(ctx, l, char, glyphAngle=0) {
   if(l.kind!=='sfx')l={...l,color:DIALOGUE_COLORS[l.speaker],effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
-  const key = [char,glyphAngle,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore].join('|');
+  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore].join('|');
   if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
   const sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);
   const reach=l.size*(l.brushTails||0)/100*.65;
@@ -138,7 +126,8 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
   const width=Math.max(1,Math.round(drawWidth*quality)),height=Math.max(1,Math.round(drawHeight*quality));
   const ink = createSurface(ctx, width, height), c = ink.getContext('2d');
   c.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
-  c.translate(width/2,height/2);c.transform(1,0,shear,1,0,0);c.scale(sx,sy);c.rotate(glyphAngle);c.fillStyle='#ffffff';c.fillText(char,0,0);c.setTransform(1,0,0,1,0,0);
+  const corner=verticalPunctuationOffset(c,char,l.size,l.vertical);
+  c.translate(width/2,height/2);c.transform(1,0,shear,1,0,0);c.scale(sx,sy);c.rotate(glyphAngle);c.fillStyle='#ffffff';c.fillText(char,corner.x,corner.y);c.setTransform(1,0,0,1,0,0);
   let warped = ink;
   if (l.distortion > 0) {
     warped = createSurface(ctx, width, height); const out = warped.getContext('2d'), amount = l.distortion / 100;
@@ -166,7 +155,7 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
     out.drawImage(tintedMask(ctx,directionalBlur(alpha,width,height,l.blurX,l.blurY),width,height,l.color,strength),0,0);
     out.globalAlpha=(l.inkCore??80)/100;
   }
-  const depth=l.size*((l.effect==='impact'||l.effect==='burst')?.13:l.effect==='tension'?0:.05);
+  const depth=l.size*((l.effect==='impact'||l.effect==='burst')?.13:['none','taper','tension'].includes(l.effect)?0:.05);
   if(depth)out.drawImage(tintedMask(ctx,edge,width,height,'#111111'),depth,depth);
   out.drawImage(border,0,0);out.drawImage(foreground,0,0);
   const value={surface:result,drawWidth,drawHeight,width,height};
@@ -174,42 +163,61 @@ function warpedGlyph(ctx, l, char, glyphAngle=0) {
   while (cachePixels > 5000000 && glyphCache.size > 1) { const first= glyphCache.keys().next().value, old=glyphCache.get(first); cachePixels-=old.width*old.height; glyphCache.delete(first); }
   return value;
 }
-function paintText(ctx, l) {
-  const sfx = l.kind === 'sfx';
-  ctx.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
-  let sequence=0;
-  const paint = (char,x,y,glyphAngle=0) => {
-    if (!sfx && !l.thickness) {ctx.save();ctx.translate(x,y);ctx.rotate(glyphAngle);drawInk(ctx,l,char,0,0);ctx.restore();return;}
-    const i=sequence++,variation=sfx?glyphVariation(l.glyphSeed??inkSeed(l.text),i,l.sizeVariation||0,l.horizontalJitter||0):{scale:1,shift:0};
-    const glyph=warpedGlyph(ctx,variation.scale===1?l:{...l,size:l.size*variation.scale},char,glyphAngle),image=glyph.surface;
-    // Jitter follows the text box's horizontal axis, including rotated vertical punctuation.
-    ctx.save(); ctx.translate(x+(sfx?variation.shift*l.size*l.stretchX/100:0),y);
-    if (sfx && l.effect === 'rumble') { ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04); ctx.rotate((i%2?1:-1)*.07); }
-    const matrix=ctx.getTransform(), pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
-    ctx.filter=sfx && l.blur>0 ? `blur(${l.blur*pixelScale}px)` : 'none';
-    if (sfx && l.motionBlur>0) {
-      const angle=l.blurAngle*Math.PI/180;
-      const steps=Math.min(160,Math.max(12,Math.ceil(l.motionBlur/2)));
-      for (let step=steps;step>0;step--) { const distance=l.motionBlur*step/steps; ctx.globalAlpha=(.2+(1-step/steps)*.8)/Math.sqrt(steps); ctx.drawImage(image,-glyph.drawWidth/2-Math.cos(angle)*distance,-glyph.drawHeight/2-Math.sin(angle)*distance,glyph.drawWidth,glyph.drawHeight); }
-    }
-    ctx.globalAlpha=1; ctx.drawImage(image,-glyph.drawWidth/2,-glyph.drawHeight/2,glyph.drawWidth,glyph.drawHeight); ctx.restore();
-  };
-  if (l.vertical) {
-    const columns=[], advance=l.size*1.12*(sfx?l.stretchY/100:1), count=Math.max(1,Math.floor(l.h*.88/advance));
-    for (const line of l.text.split('\n')) { const chars=Array.from(line); if(!chars.length)columns.push([]); for(let i=0;i<chars.length;i+=count)columns.push(chars.slice(i,i+count)); }
-    const columnWidth=l.size*1.3*(sfx?l.stretchX/100:1);
-    columns.forEach((col,i)=>col.forEach((char,j)=>{
-      ctx.save(); ctx.translate(((columns.length-1)/2-i)*columnWidth,(j-(col.length-1)/2)*advance);
-      paint(char,0,0,'ー―…‥（）「」『』【】〈〉《》'.includes(char)?Math.PI/2:0); ctx.restore();
+export function glyphFontSize(layer,index) {
+  return layer.kind==='sfx'&&layer.effect==='taper'?Math.max(8,layer.size*(1-index*(layer.taperRate??10)/100)):layer.size;
+}
+
+// Pack variable-size letters using their own advances; shrinking letters do not leave full-size gaps.
+export function textGlyphs(ctx,layer) {
+  ctx.save();
+  try {
+    const sfx=layer.kind==='sfx',sx=sfx?layer.stretchX/100:1,sy=sfx?layer.stretchY/100:1,description=fontDescription(layer);
+    let index=0;
+    const lines=layer.text.split('\n').map(line=>graphemes(line).map(char=>{
+      const i=index++,baseSize=glyphFontSize(layer,i),variation=sfx?glyphVariation(layer.glyphSeed??inkSeed(layer.text),i,layer.sizeVariation||0,layer.horizontalJitter||0):{scale:1,shift:0};
+      ctx.font=`${description.weight} ${baseSize}px ${description.family}`;
+      return {char,index:i,baseSize,size:layer.effect==='taper'&&sfx?Math.max(8,baseSize*variation.scale):baseSize*variation.scale,shift:variation.shift,angle:layer.vertical?verticalRotation(char):0,width:ctx.measureText(char).width*sx};
     }));
-  } else {
-    const rows=textRows(ctx,l.text,l.w/(sfx?l.stretchX/100:1)*.88);
-    rows.forEach((text,row)=>{
-      const chars=Array.from(text), widths=chars.map(char=>ctx.measureText(char).width*(sfx?l.stretchX/100:1));
-      let x=-widths.reduce((a,b)=>a+b,0)/2;
-      chars.forEach((char,i)=>{ paint(char,x+widths[i]/2,(row-(rows.length-1)/2)*l.size*1.3*(sfx?l.stretchY/100:1)); x+=widths[i]; });
-    });
+    const glyphs=[];
+    if(layer.vertical){
+      const columns=[];
+      for(const line of lines){
+        let column=[],height=0;
+        for(const glyph of line){const advance=glyph.baseSize*1.12*sy;if(column.length&&height+advance>layer.h*.88+.001){columns.push(column);column=[];height=0;}column.push({...glyph,advance});height+=advance;}
+        columns.push(column);
+      }
+      const widths=columns.map(column=>Math.max(column.length?0:glyphFontSize(layer,0),...column.map(glyph=>glyph.baseSize))*1.3*sx);
+      let x=widths.reduce((a,b)=>a+b,0)/2;
+      columns.forEach((column,i)=>{x-=widths[i]/2;let y=-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
+    }else{
+      const rows=[];
+      for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>layer.w*.88){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
+      const heights=rows.map(row=>Math.max(row.length?0:layer.size,...row.map(glyph=>glyph.baseSize))*1.3*sy);
+      let y=-heights.reduce((a,b)=>a+b,0)/2;
+      rows.forEach((row,i)=>{let x=-row.reduce((sum,glyph)=>sum+glyph.width,0)/2;for(const glyph of row){glyphs.push({...glyph,x:x+glyph.width/2,y:y+heights[i]/2});x+=glyph.width;}y+=heights[i];});
+    }
+    return glyphs;
+  } finally {ctx.restore();}
+}
+
+function paintText(ctx, l) {
+  const sfx=l.kind==='sfx';
+  ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
+  for(const letter of textGlyphs(ctx,l)){
+    const {char,index:i,x,y,size,baseSize,shift,angle}=letter,layer=size===l.size?l:{...l,size};
+    ctx.font=`${fontDescription(layer).weight} ${size}px ${fontFamily(layer)}`;
+    if(!sfx&&!l.thickness){const corner=verticalPunctuationOffset(ctx,char,size,l.vertical);ctx.save();ctx.translate(x,y);ctx.rotate(angle);drawInk(ctx,layer,char,corner.x,corner.y);ctx.restore();continue;}
+    const glyph=warpedGlyph(ctx,layer,char,angle),image=glyph.surface;
+    // Jitter follows the text box's horizontal axis, including rotated vertical punctuation.
+    ctx.save();ctx.translate(x+(sfx?shift*baseSize*l.stretchX/100:0),y);
+    if(sfx&&l.effect==='rumble'){ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04);ctx.rotate((i%2?1:-1)*.07);}
+    const matrix=ctx.getTransform(),pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
+    ctx.filter=sfx&&l.blur>0?`blur(${l.blur*pixelScale}px)`:'none';
+    if(sfx&&l.motionBlur>0){
+      const blurAngle=l.blurAngle*Math.PI/180,steps=Math.min(160,Math.max(12,Math.ceil(l.motionBlur/2)));
+      for(let step=steps;step>0;step--){const distance=l.motionBlur*step/steps;ctx.globalAlpha=(.2+(1-step/steps)*.8)/Math.sqrt(steps);ctx.drawImage(image,-glyph.drawWidth/2-Math.cos(blurAngle)*distance,-glyph.drawHeight/2-Math.sin(blurAngle)*distance,glyph.drawWidth,glyph.drawHeight);}
+    }
+    ctx.globalAlpha=1;ctx.drawImage(image,-glyph.drawWidth/2,-glyph.drawHeight/2,glyph.drawWidth,glyph.drawHeight);ctx.restore();
   }
 }
 
