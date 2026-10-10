@@ -15,6 +15,28 @@ test('new captions contain an independent white box, black frame and editable te
   const rotated={...layer,x:100,y:100,w:200,h:40,rotation:90};assert.equal(hit(rotated,100,180),true);assert.equal(hit(rotated,180,100),false);
 });
 
+test('caption outlines retain legacy appearance, validate styles, and scale through copy and history',()=>{
+  const original={...newLayer('caption',1000,750),text:'輪郭付き',textOutlineWidth:6,textOutlineColor:'#ff3399'};
+  const legacy={...original};delete legacy.textOutlineWidth;delete legacy.textOutlineColor;
+  const restored=normalizeLayer(legacy,6);assert.equal(restored.textOutlineWidth,0);assert.equal(restored.textOutlineColor,'#ffffff');
+  for(const invalid of [{textOutlineWidth:-1},{textOutlineWidth:81},{textOutlineWidth:NaN},{textOutlineWidth:null},{textOutlineColor:'white'}])assert.throws(()=>normalizeLayer({...original,...invalid}));
+  const copy=pasteSelection(copySelection(original,1000,750),500,1000,0);
+  assert.equal(copy.textOutlineWidth,3);assert.equal(copy.textOutlineColor,'#ff3399');
+  const target=page([]);pasteLayers(copyLayers([original],1000,750),target,500,1000);
+  assert.equal(target.layers[0].textOutlineWidth,3);restore(target,'undo');assert.equal(target.layers.length,0);
+  restore(target,'redo');assert.equal(target.layers[0].textOutlineColor,'#ff3399');
+});
+
+test('automatic caption fitting reserves space for text outlines in either direction',()=>{
+  for(const vertical of [true,false]){
+    const layer={...newLayer('caption',1000,750),text:'本文の輪郭ABC'.repeat(3),w:260,h:230,padding:8,autoFit:true,vertical};
+    const plain=captionLayout(context(),layer),outlined=captionLayout(context(),{...layer,textOutlineWidth:12});
+    assert.equal(outlined.fits,true);assert.ok(outlined.size<=plain.size);
+    assert.ok(outlined.width<=outlined.innerWidth);assert.ok(outlined.height<=outlined.innerHeight);
+    assert.equal(captionLayout(context(),{...layer,textOutlineWidth:12},outlined.size+.5).fits,false);
+  }
+});
+
 test('manual caption font size remains fixed when its box changes, and overflow is detectable',()=>{
   const layer={...newLayer('caption',1000,750),text:'あいうえおかきくけこ'.repeat(3),size:40,w:140,h:120,padding:8};
   const small=captionLayout(context(),layer),large=captionLayout(context(),{...layer,w:500,h:500});
