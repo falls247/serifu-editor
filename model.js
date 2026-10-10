@@ -64,7 +64,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     id: crypto.randomUUID(), kind, speaker, text: input.text,
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
     rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
-    ...extras, glyphSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
+    ...extras, glyphSeed, inkTexture, textureSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }
 
