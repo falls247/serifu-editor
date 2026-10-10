@@ -5,3 +5,5 @@
 .font-status{font-size:10px;color:var(--lime);margin:10px 0 0}
 
 .batch-layer-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:10px}.batch-layer-actions button{min-width:0;padding:8px 5px;font-size:11px;white-space:normal}.batch-layer-actions [data-action=paste-all]{grid-column:1/-1}.batch-copy-hint{margin:7px 0 12px;font-size:10px;color:var(--muted);line-height:1.6;overflow-wrap:anywhere}
+
+.header-actions{flex-wrap:wrap;justify-content:flex-end}.edited-badge{font-size:9px;color:var(--lime);white-space:nowrap}.edited-badge[hidden],.balloon-tail-controls[hidden],.balloon-position-note[hidden],[data-text-control][hidden]{display:none}.balloon-tail-controls{margin-top:12px}.tail-toggle{display:flex;align-items:center;gap:6px;margin-top:12px;font-size:11px}.tail-toggle input{width:14px;height:14px;margin:0;accent-color:var(--lime)}.layer-card[data-kind=balloon] .kind-label{color:#cde5f4}.layer-card[data-kind=balloon] .effect-grid{padding-top:10px}.add-actions button{padding:8px 6px;gap:3px;font-size:10px}@media(max-width:520px){.row-header>div{flex-wrap:wrap;gap:5px}}

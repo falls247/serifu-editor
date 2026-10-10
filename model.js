@@ -1,9 +1,19 @@
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
 import { inkSeed } from './ink.js';
+import { BALLOON_LIMITS } from './balloons.js';
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
-export function normalizeLayer(input, version = 3) {
+export function normalizeLayer(input, version = 4) {
+  if(input?.kind==='balloon'){
+    if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
+    for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('吹き出しの座標・サイズが不正');
+    if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('吹き出しの座標・サイズが範囲外');
+    for(const key of ['color','borderColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('吹き出しの色が不正');
+    for(const [key,[min,max]] of Object.entries(BALLOON_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('吹き出しの設定が範囲外');
+    if(typeof input.tail!=='boolean'||!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しのテール・重なり設定が不正');
+    return {id:crypto.randomUUID(),kind:'balloon',...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
+  }
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
   const legacy = version === 1;
   const kind = legacy && input.kind === 'bubble' ? 'dialogue' : input.kind;
@@ -34,18 +44,18 @@ export function normalizeLayer(input, version = 3) {
 }
 
 export function checkpoint(page) {
-  page.undo.push(JSON.stringify({ layers: page.layers, done: page.done }));
+  page.undo.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.edited===true }));
   if (page.undo.length > 100) page.undo.shift();
-  page.redo = []; page.done = false;
+  page.redo = []; page.done = false;page.edited=true;
 }
 
 export function restore(page, direction) {
   const from = direction === 'undo' ? page.undo : page.redo;
   const to = direction === 'undo' ? page.redo : page.undo;
   if (!from.length) return false;
-  to.push(JSON.stringify({ layers: page.layers, done: page.done }));
+  to.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.edited===true }));
   const state = JSON.parse(from.pop());
-  page.layers = state.layers; page.done = state.done;
+  page.layers = state.layers; page.done = state.done;page.edited=state.edited===true;
   page.selectedId = page.layers.some(l => l.id === page.selectedId) ? page.selectedId : page.layers[0]?.id || null;
   return true;
 }
@@ -60,6 +70,8 @@ export function copySelection(layer, width, height) {
 
 function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
+  if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
+    borderWidth:clamp(layer.borderWidth*scale,0,80),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
   return {
     ...structuredClone(layer), id:crypto.randomUUID(), x:layer.x*sx, y:layer.y*sy,
     w:clamp(layer.w*sx,30,30000), h:clamp(layer.h*sy,30,30000),
@@ -72,7 +84,7 @@ function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight)
 
 export function pasteSelection(clipboard, width, height, offset=20) {
   const layer=scaledCopy(clipboard.layer,clipboard.width,clipboard.height,width,height);
-  layer.x+=offset;layer.y+=offset;layer.presetId=null;
+  layer.x+=offset;layer.y+=offset;if(layer.kind!=='balloon')layer.presetId=null;
   return layer;
 }
 
@@ -98,7 +110,7 @@ export function pasteLayers(clipboard, target, width, height) {
 
 export function swapText(page, firstId, secondId) {
   const first = page.layers.find(l => l.id === firstId), second = page.layers.find(l => l.id === secondId);
-  if (!first || !second || first === second) return false;
+  if (!first || !second || first === second || first.kind==='balloon' || second.kind==='balloon') return false;
   checkpoint(page); [first.text, second.text] = [second.text, first.text]; return true;
 }
 

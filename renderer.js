@@ -1,11 +1,14 @@
 import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { fontDescription } from './fonts.js';
+import { newBalloon, balloonHit, paintBalloon, paintOrder } from './balloons.js';
+export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
 export const EFFECTS = Object.freeze({ impact: 'ドン！／立体', burst: 'バン！／集中線', speed: 'シュッ／スピード', rumble: 'ゴゴゴ／震え', tension: 'ゾワッ／感情・緊張' });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function newLayer(kind, width, height, speaker = 'male') {
+  if(kind==='balloon')return newBalloon(width,height);
   const id=crypto.randomUUID();
   return {
     id, kind, speaker,
@@ -31,11 +34,13 @@ export function localPoint(layer, x, y) {
 
 export function hit(layer, x, y) {
   const p = localPoint(layer, x, y);
+  if(layer.kind==='balloon')return balloonHit(layer,p);
   return Math.abs(p.x) <= layer.w / 2 && Math.abs(p.y) <= layer.h / 2;
 }
 
 export function handleAt(layer, x, y, scale = 1) {
   const p = localPoint(layer, x, y), radius = 12 / scale;
+  if(layer.kind==='balloon'&&layer.tail&&Math.hypot(p.x-layer.tailX,p.y-layer.tailY)<=radius)return 'tail';
   if (Math.hypot(p.x - layer.w / 2, p.y - layer.h / 2) <= radius) return 'resize';
   if (Math.hypot(p.x, p.y + layer.h / 2 + 24 / scale) <= radius) return 'rotate';
   return null;
@@ -210,17 +215,22 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
-  for (const l of layers) {
+  for (const l of paintOrder(layers)) {
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
-    ornament(ctx, l); paintText(ctx, l);
-    if (l.id === selected) {
+    if(l.kind==='balloon')paintBalloon(ctx,l);
+    else {ornament(ctx, l); paintText(ctx, l);}
+    ctx.restore();
+  }
+  const l=layers.find(layer=>layer.id===selected);
+  if(l){
+      ctx.save();ctx.translate(l.x,l.y);ctx.rotate(l.rotation*Math.PI/180);
       ctx.strokeStyle = '#b2dd78'; ctx.fillStyle = '#c8ee91'; ctx.lineWidth = 1.5 / selectionScale;
       ctx.setLineDash([5 / selectionScale, 4 / selectionScale]); ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(0, -l.h / 2); ctx.lineTo(0, -l.h / 2 - 24 / selectionScale); ctx.stroke();
       ctx.fillRect(l.w / 2 - 5 / selectionScale, l.h / 2 - 5 / selectionScale, 10 / selectionScale, 10 / selectionScale);
       ctx.beginPath(); ctx.arc(0, -l.h / 2 - 24 / selectionScale, 5 / selectionScale, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.restore();
+      if(l.kind==='balloon'&&l.tail){ctx.fillStyle='#80d7ee';ctx.beginPath();ctx.arc(l.tailX,l.tailY,6/selectionScale,0,Math.PI*2);ctx.fill();}
+      ctx.restore();
   }
   ctx.restore();
 }
