@@ -1,7 +1,7 @@
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const FULL_TURN=Math.PI*2;
 
-export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000]});
+export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
 export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形',spiky:'尖り形'});
 
 export function balloonSeedFromId(id) {
@@ -17,6 +17,7 @@ export function newBalloon(width,height) {
     id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
     text:'',speaker:'male',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
+    shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
     shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
 }
@@ -25,10 +26,14 @@ function boundaryScale(layer,angle) {
   const phase=(layer.shapeSeed>>>0)/4294967296*FULL_TURN;
   const amount=(layer.distortion??50)/100;
   if(layer.shape==='spiky'){
-    const bentAngle=7*(angle-phase+.045*Math.sin(3*angle+phase));
-    const spike=1-amount*.76*(1-Math.cos(bentAngle))/2;
-    const wobble=1+amount*(.07*Math.sin(2*angle+phase)+.035*Math.sin(5*angle-phase*1.3));
-    return spike*wobble;
+    // Narrow radial peaks create distinct sharp points; valleys retain a large
+    // central core so vertical or horizontal dialogue remains readable.
+    const count=9,period=FULL_TURN/count;
+    const phaseAngle=((angle-phase)/period)%1;
+    const fraction=Math.abs(phaseAngle-Math.round(phaseAngle));
+    const peak=Math.max(0,1-fraction*2);
+    const irregular=1+amount*.035*Math.sin(3*angle+phase);
+    return (1-amount*.14+amount*.36*peak)*irregular;
   }
   if(layer.shape!=='distorted-rect')return 1;
   const cosine=Math.cos(angle),sine=Math.sin(angle),power=5;
