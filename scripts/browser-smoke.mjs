@@ -18,11 +18,12 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.clock.install();
   await page.goto(`http://127.0.0.1:${port}`);
+  await page.selectOption('#projectFormat','json');
   assert.equal(await page.locator('#autosaveMinutes').inputValue(),'2');
   assert.equal(await page.locator('#autosaveEnabled').isChecked(),true);
   await page.evaluate(()=>document.fonts.ready);
   await page.click('#demo');
-  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 3 && !document.querySelector('#deck').inert);
+  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 3 && !document.querySelector('#projectLoad').disabled);
   const rows = page.locator('.image-row'), first = rows.nth(0), second = rows.nth(1);
   assert.equal(await first.locator('[data-action=copy-all]').isEnabled(),true);
   assert.equal(await first.locator('[data-action=cut-all]').isEnabled(),true);
@@ -38,10 +39,9 @@ try {
   await first.locator('textarea').nth(0).fill('男性の編集テスト');
   await second.locator('textarea').nth(0).fill('二枚目の編集');
   assert.equal(await first.locator('textarea').nth(0).inputValue(), '男性の編集テスト');
-  const female = await first.locator('textarea').nth(1).inputValue();
-  await first.locator('[data-action=swap]').first().click();
-  assert.equal(await first.locator('textarea').nth(0).inputValue(), female);
-  assert.equal(await first.locator('textarea').nth(1).inputValue(), '男性の編集テスト');
+  // Current UI uses duplication; swapping text is covered by model unit tests.
+  await first.locator('.layer-card').first().locator('[data-action=duplicate]').click();
+  assert.equal(await first.locator('textarea').last().inputValue(),'男性の編集テスト');
   await first.locator('[data-action=undo]').click();
   assert.equal(await first.locator('textarea').nth(0).inputValue(), '男性の編集テスト');
   assert.equal(await second.locator('textarea').nth(0).inputValue(), '二枚目の編集');
@@ -152,7 +152,7 @@ try {
     return canvas.toDataURL().split(',')[1];
   });
   await page.locator('#fileInput').setInputFiles({name:'portrait.png',mimeType:'image/png',buffer:Buffer.from(portraitPng,'base64')});
-  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===4&&!document.querySelector('#deck').inert);
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===4&&!document.querySelector('#projectLoad').disabled);
   const portrait=rows.nth(3);
   assert.equal(await portrait.locator('.dimensions').textContent(),'500 × 1000');
   await portrait.locator('[data-action=paste-all]').click();
@@ -291,14 +291,14 @@ try {
   assert.equal(new Set(fontPictures).size,addedFonts.length,'added font choices must produce distinct letter shapes');
   await fontSelect.selectOption(originalFont);
   await page.locator('#projectInput').setInputFiles('artifacts/project.json');
-  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 6 && !document.querySelector('#deck').inert);
+  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 6 && !document.querySelector('#projectLoad').disabled);
   assert.equal(await rows.nth(3).locator('textarea').first().inputValue(), 'MEN');
   await rows.nth(3).locator('textarea').first().focus();assert.equal(await rows.nth(3).locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
   assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=blurY]').inputValue(),'96');
   assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'9');assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'4');
   const old = { version: 1, pages: [{ ...project.pages[0], layers: [{ ...project.pages[0].layers[0], kind: 'bubble', shape: 'ellipse', fill: '#ffffff', tailX: 0, tailY: 0 }] }] };
   await writeFile('artifacts/old.json', JSON.stringify(old)); await page.locator('#projectInput').setInputFiles('artifacts/old.json');
-  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#deck').inert);
+  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#projectLoad').disabled);
   assert.equal(await rows.nth(6).locator('.layer-card').first().getAttribute('data-speaker'), 'male');
   assert.equal(await rows.nth(6).locator('[data-action=delete]').isDisabled(), true);
   await page.evaluate(src => {
@@ -306,19 +306,19 @@ try {
     const data = Uint8Array.from(atob(src.split(',')[1]), c => c.charCodeAt(0));
     const file = new File([data], 'original.png', { type: 'image/png' });
     const directory = {
-      async *values() { yield { kind: 'file', getFile: async () => file }; },
+      async *values() { yield { kind: 'file', name: file.name, getFile: async () => file }; },
       removeEntry: async name => window.removed.push(name),
       getDirectoryHandle: async () => directory,
-      getFileHandle: async name => ({ createWritable: async () => ({
+      getFileHandle: async name => ({ createWritable: async () => { const parts=[]; return ({
         write: async value => {
           if (value instanceof Blob) { const bitmap = await createImageBitmap(value); window.saved[name] = { width: bitmap.width, height: bitmap.height, bytes: value.size }; bitmap.close(); }
-          else window.saved[name] = JSON.parse(value);
-        }, close: async () => {}, abort: async () => {},
-      }) }),
+          else parts.push(value);
+        }, close: async () => {if(parts.length)window.saved[name]=JSON.parse(parts.join(''));}, abort: async () => {},
+      });} }),
     };
     window.showDirectoryPicker = async () => directory;
   }, project.pages[0].src);
-  await page.click('#open'); await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 8 && !document.querySelector('#deck').inert);
+  await page.click('#open'); await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 8 && !document.querySelector('#projectLoad').disabled);
   assert.equal(await rows.nth(7).locator('[data-action=copy-all]').isDisabled(),true,'an empty image has nothing to copy');
   await first.locator('[data-action=copy-all]').click();
   const savedBatchTexts=await first.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value));
@@ -329,7 +329,7 @@ try {
   page.once('dialog', dialog => dialog.dismiss()); await rows.nth(7).locator('[data-action=delete]').click();
   assert.deepEqual(await page.evaluate(() => window.removed), []);
   page.once('dialog', dialog => dialog.accept()); await rows.nth(7).locator('[data-action=delete]').click();
-  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#deck').inert);
+  await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#projectLoad').disabled);
   assert.deepEqual(await page.evaluate(() => window.removed), ['original.png']);
   await rows.nth(6).locator('[data-action=paste-all]').click();
   assert.equal(await rows.nth(6).locator('.layer-card').count(),1+savedBatchTexts.length,'batch clipboard survives deleting its source image');
@@ -355,7 +355,7 @@ try {
   assert.equal(await page.locator('#defaultSfx').inputValue(),effectPreset);
   assert.equal(await page.locator('#autosaveMinutes').inputValue(),'0.1');
   await page.click('#restoreDraft');
-  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===7&&!document.querySelector('#deck').inert);
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===7&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await page.locator('.image-row').first().locator('textarea').first().inputValue(),'短周期の保存');
   assert.equal(await page.locator('.image-row').first().locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
   assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'3.5');

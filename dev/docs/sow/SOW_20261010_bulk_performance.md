@@ -1,12 +1,12 @@
 # SOW：数百枚の一括処理の高速化と進捗表示
 
 - 作成日：2026-10-10（日本時間）
-- 状態：実装前の提案
+- 状態：実装計画。実装結果・受入判定は[実装後報告](../bulk-performance-report.md)へ記録。以下の提案差分は立案時の記録として保持。
 - 対象：Serifu Editor、約500枚を扱うブラウザ内の編集・読込・保存
 - 調査時HEAD：`b35abd5`
 - 調査時ブランチ：`feat/paged-thumbnail-editor`
 - 調査範囲：上記HEADと作業ツリーの追加実装。ページ分割・サムネイル・キャプション輪郭の変更が未コミットで存在するため、実装着手時は最新状態を確認する。
-- 関連設計：[提案ADR-0009](../docs/adr/0009-bulk-processing-and-progress.md)、[ADR-0008](../docs/adr/0008-paged-editor-and-caption-outlines.md)、[ADR-0001](../docs/adr/0001-static-app-and-export.md)、[ADR-0004](../docs/adr/0004-edit-data-and-drafts.md)
+- 関連設計：[採用ADR-0010](../adr/0010-bulk-processing-and-progress.md)、[ADR-0008](../adr/0008-paged-editor-and-caption-outlines.md)、[ADR-0001](../adr/0001-static-app-and-export.md)、[ADR-0004](../adr/0004-edit-data-and-drafts.md)
 - 依頼解釈：各一括処理に進捗表示を追加する。
 
 ## 1. 目的
@@ -190,7 +190,7 @@ manifestは `{containerVersion:1, projectVersion:6, preferences, pages, assets}`
 
 従来JSONのversion 1〜6とキャプション追加項目を維持する。JSONの出力はページごとに逐次エンコードし、書込み先にバックプレッシャーを掛ける。巨大な全体オブジェクトへの `JSON.stringify` と無制限のFileReader並列実行を避ける。JSON読込の `JSON.parse` は専用のWorkerジョブへ移し、失敗時は一覧を変更しない。
 
-高速形式では編集モデルの `PROJECT_VERSION=6` を維持し、コンテナ版を独立管理する。既存版のアプリは `.serifu` を読めないため、従来JSONの出力を残す。この形式変更は提案ADR-0009の主要判断として記録する。
+高速形式では編集モデルの `PROJECT_VERSION=6` を維持し、コンテナ版を独立管理する。既存版のアプリは `.serifu` を読めないため、従来JSONの出力を残す。この形式変更は採用ADR-0010の主要判断として記録する。
 
 ### 5.7 一時保存と自動保存
 

@@ -82,7 +82,7 @@ export function copySelection(layer, width, height) {
   return { layer:structuredClone(layer), width, height };
 }
 
-function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
+export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
     borderWidth:clamp(layer.borderWidth*scale,0,80),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};

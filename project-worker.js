@@ -1,0 +1,1 @@
+self.onmessage=async({data:{operationId,jobId,kind,payload}})=>{try{const value=kind==='parse'?JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(await payload.arrayBuffer())):JSON.stringify(payload);self.postMessage({operationId,jobId,value});}catch(error){self.postMessage({operationId,jobId,error:error.message});}};

@@ -1,0 +1,9 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {ZipArchive} from '../zip.js';
+test('ZIP stores UTF-8 filenames and original bytes with standard CRC32 and central references',async()=>{
+  const zip=new ZipArchive(new Date(2026,9,10,12,34,56));await zip.add('声.png',new Blob(['123456789']));await zip.add('empty.txt',new Blob([]));const bytes=new Uint8Array(await zip.blob().arrayBuffer()),view=new DataView(bytes.buffer),end=bytes.length-22;
+  assert.equal(view.getUint32(0,true),0x04034b50);assert.equal(view.getUint16(6,true),0x800);assert.equal(view.getUint32(14,true),0xcbf43926);const nameLength=view.getUint16(26,true);assert.equal(new TextDecoder().decode(bytes.slice(30,30+nameLength)),'声.png');assert.equal(new TextDecoder().decode(bytes.slice(30+nameLength,30+nameLength+9)),'123456789');assert.equal(view.getUint32(end,true),0x06054b50);assert.equal(view.getUint16(end+10,true),2);const central=view.getUint32(end+16,true);assert.equal(view.getUint32(central,true),0x02014b50);assert.equal(view.getUint32(central+42,true),0);assert.equal(central+view.getUint32(end+12,true),end);
+});
+test('ZIP cancellation leaves no partial entry and invalid paths or duplicate names are rejected',async()=>{const zip=new ZipArchive(),controller=new AbortController();controller.abort();await assert.rejects(zip.add('cancel.png',new Blob(['data']),controller.signal),{name:'AbortError'});assert.equal(zip.entries.length,0);for(const name of ['../escape.png','/absolute.png','a\\b.png'])await assert.rejects(zip.add(name,new Blob()),/ファイル名/);await zip.add('valid.png',new Blob());await assert.rejects(zip.add('valid.png',new Blob()),/重複/);});
+test('ZIP rejects ZIP64 size limits before reading a huge entry',async()=>{const zip=new ZipArchive();await assert.rejects(zip.add('huge.png',{size:0xffffffff,stream(){throw new Error('must not read');}}),/上限/);assert.equal(zip.entries.length,0);});

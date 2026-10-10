@@ -17,6 +17,10 @@
 
 続く追加実装：全4種類の名前付きプリセット。各カードで保存・選択し、種類別の既定へ反映する。[ADR-0009](adr/0009-named-layer-presets.md)を参照。追加前のHEADは `e1d7081`、作業ブランチは `feat/named-layer-presets`。
 
+続く追加実装：500枚の一括処理を初期2個・読込時最大4個のWorkerと容量制限付きキューへ移行。共通進捗と中断、画像追加中の先行編集、PNG生成と書込みの重なり、128MiB PNGキャッシュ、差分一時保存、高速 `.serifu` 形式を追加。[ADR-0010](adr/0010-bulk-processing-and-progress.md)と[実装後報告](bulk-performance-report.md)を参照。作業ブランチは `feat/bulk-performance`。コミット・push・公開は未実施。
+
+追加修正：進捗を暗色へ統一し、終了時に非表示。Braveなど保存先選択APIのない環境ではPNGと編集データをZIPでダウンロードする。全件／編集済み抽出、従来JSON／高速形式に対応。ZIPは全体4GiB未満・65535ファイルまでで、作成中の収録Blobを保持する。直接フォルダ保存の選択待ち・準備待ちにも中断を反映する。
+
 着手時は `git status --short --branch`、現在のHEAD、適用される `AGENTS.md` を確認し、既存変更を保ったまま作業する。この引継の作成時点で、リポジトリ内に `AGENTS.md` はない。
 
 先に [利用者向けREADME](../../README.md) と [ADR一覧](adr/README.md) を読む。動作と設計の詳細は対応するコードを確認する。
@@ -188,3 +192,16 @@ GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手�
 大画像・多数画像・強いエフェクトの処理性能を網羅するベンチマークは未実施。描画はメインスレッドで行い、極端な設定では中間字形画像の解像度を制限する。出力PNGの寸法は元解像度のまま。ブラウザ・端末書体をまたぐバイト一致は受入基準にしておらず、同じ環境で選択枠なしのプレビューとPNGが一致することを検証している。
 
 次の追加機能はユーザーの次の指示から決める。変更点、検証結果、実際に残った制約を報告し、機能・データ構造が変わった場合はこの引継書とADRの該当箇所を更新する。
+
+## 一括処理の引継（2026-10-10）
+
+- 編集データの初期保存形式は `.serifu`。同じ読込ボタンで旧JSON version 1〜6も読める。旧アプリへ渡す場合は「従来形式 (.json)」を明示選択する。一括PNGへ添付する形式も選択値に従う。
+- `bulk-task.js` は操作ID・段階・確定件数・中断・計測、`bulk-pool.js` は画像Workerの起動確認・上限・タイムアウト・代替経路を担当する。キューは投入順に結果を返し、生成と書込みを重ねる。
+- `image-worker.js` は画像準備・320px WebPサムネイル・PNGを共通 `draw` で生成する。`image-metadata.js` はPNG/JPEG/VP8Xのヘッダから割当用の寸法を取得し、未知の形式は単独処理する。
+- `export-cache.js` は描画状態による128MiBのLRU。表示倍率・ページ番号・選択はキーに含めない。書体状態の変更時に失効する。
+- `project-io.js` はコンテナ、旧JSONの逐次出力、writer abort、入力検証を担当する。外部プロジェクトのページID・ファイル参照・フォルダ情報は採用せず、新規画像IDを発行する。`project-worker.js` はJSONの解析・変換を担当する。
+- 画像追加中は採用済みページの編集と表示範囲移動を許可する。PNG・編集データ出力中は本文編集を禁止し、表示範囲移動を許可する。一括レイヤー操作は準備完了まで履歴・データを変更しない。
+- 手動一時保存は前景の進捗パネル、自動保存は `draftStatus` を使う。保存中も編集でき、開始revision以後の変更は未保存として残す。前景処理中は自動保存を延期する。
+- `window.serifuMetrics` は直近の前景操作、`window.serifuDraftMetrics` は手動一時保存の測定値。`poolDelta` は当該操作のWorker時間・件数、`pool` はセッション累計。容量の割当見積もりと実際の保留Blob byteを区別する。
+- 検証：`npm run check`、`npm test`、`npm run test:browser`、`npm run build`、`npm run test:bulk`。bulk検証は `_site/` を使うため先にビルドする。PlaywrightとChromiumが必要。
+- 性能測定：`npm run benchmark:bulk -- after`。初期値は3種類×500枚×3回、短い診断は `BULK_COUNT`・`BULK_RUNS` で変更する。出力はGit管理外の `artifacts/bulk-benchmark/`。書込みは2ms遅延の疑似writerであり、実ディスクの性能値として使わない。
