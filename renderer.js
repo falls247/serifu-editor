@@ -1,6 +1,6 @@
 import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { fontDescription } from './fonts.js';
-import { newBalloon, balloonHit, paintBalloon, paintOrder } from './balloons.js';
+import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 export { paintOrder } from './balloons.js';
@@ -228,7 +228,10 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
   ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
   for (const l of paintOrder(layers)) {
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
-    if(l.kind==='balloon')paintBalloon(ctx,l);
+    if(l.kind==='balloon'){
+      paintBalloon(ctx,l);
+      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,{...l,w:l.w*.84,h:l.h*.84});ctx.restore();}
+    }
     else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); paintText(ctx, l);}
     ctx.restore();

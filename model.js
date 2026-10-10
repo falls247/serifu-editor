@@ -20,7 +20,9 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
   }
   if(input?.kind==='balloon'){
-    input={...input,distortion:input.distortion===undefined?50:input.distortion};
+    input={...input,distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,
+      size:input.size===undefined?40:input.size,outline:input.outline===undefined?4:input.outline,thickness:input.thickness===undefined?0:input.thickness,
+      vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font};
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('吹き出しの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('吹き出しの座標・サイズが範囲外');
@@ -29,7 +31,9 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     if(typeof input.tail!=='boolean'||!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しのテール・重なり設定が不正');
     const shape=input.shape??'ellipse',shapeSeed=input.shapeSeed??balloonSeedFromId(input.id);
     if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295)throw new Error('吹き出しの形状が不正');
-    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
+    if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('吹き出しのセリフ設定が不正');
+    if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<1||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
+    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,text:input.text,speaker:input.speaker,size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
   }
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
   const legacy = version === 1;
@@ -88,7 +92,7 @@ export function copySelection(layer, width, height) {
 export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
-    borderWidth:clamp(layer.borderWidth*scale,0,80),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
+    size:clamp(layer.size*scale,8,500),outline:clamp(layer.outline*scale,1,80),thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),borderWidth:clamp(layer.borderWidth*scale,0,80),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
   if(layer.kind==='caption')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
     size:clamp(layer.size*scale,...CAPTION_LIMITS.size),padding:clamp(layer.padding*scale,...CAPTION_LIMITS.padding),borderWidth:clamp(layer.borderWidth*scale,...CAPTION_LIMITS.borderWidth),textOutlineWidth:clamp((layer.textOutlineWidth??0)*scale,...CAPTION_LIMITS.textOutlineWidth)};
   return {

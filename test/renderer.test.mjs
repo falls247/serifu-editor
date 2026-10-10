@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hit, handleAt, exportName, newLayer } from '../renderer.js';
+import { hit, handleAt, exportName, newLayer, draw } from '../renderer.js';
 import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers } from '../model.js';
 import { glyphVariation } from '../ink.js';
 
@@ -55,6 +55,13 @@ test('copying to a different image scales positions without sharing mutable laye
 test('new dialogue and effects default to vertical writing',()=>{
   assert.equal(newLayer('dialogue',1000,750).vertical,true);
   assert.equal(newLayer('sfx',1000,750).vertical,true);
+});
+test('balloon dialogue uses the existing text renderer while clipping letters to the balloon',()=>{
+  const calls=[],ctx=new Proxy({canvas:{width:320,height:200},globalAlpha:1},{get(target,key){if(key in target)return target[key];return (...args)=>{calls.push([key,...args]);if(key==='measureText')return {width:20};};},set(target,key,value){target[key]=value;return true;}});
+  const balloon={...newLayer('balloon',320,200),text:'中へ',vertical:false,w:220,h:120};
+  draw(ctx,{},[balloon]);
+  const clipIndex=calls.findIndex(([name])=>name==='clip'),textIndex=calls.findIndex(([name])=>name==='fillText');
+  assert.ok(clipIndex>=0);assert.ok(textIndex>clipIndex);assert.deepEqual(calls.filter(([name])=>name==='fillText').map(([,text])=>text),['中','へ']);
 });
 test('batch clipboard snapshots every layer and can paste repeatedly after the source changes or is removed',()=>{
   const source=page([

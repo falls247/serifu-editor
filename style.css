@@ -37,6 +37,7 @@
 .balloon-shape-control[hidden]{display:none}
 .balloon-distortion-control[hidden]{display:none}
 .layer-summary{display:none}
+.layer-card[data-speaker=female] .layer-summary-speaker{color:#ff85b9}
 .layer-card:not(.selected){padding:6px 10px}
 .layer-card:not(.selected)>:not(.layer-summary){display:none}
 .layer-card:not(.selected)>.layer-summary{display:-webkit-box;width:100%;text-align:left;padding:0;background:transparent;border:0;border-radius:0;color:#e9eaf0;white-space:normal;overflow-wrap:anywhere;line-height:1.5;font-size:13px;cursor:pointer;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}

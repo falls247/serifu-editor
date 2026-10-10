@@ -95,7 +95,7 @@ try {
   assert.deepEqual(await page.evaluate(() => window.outputs[0].files['serifu-project.json'].pages.map(p => p.name)), ['c.png', 'b.png', 'a.png']);
   assert.equal(await page.evaluate(() => window.pickerOptions.at(-1).startsAtSource), true);
   assert.equal(await page.locator('#bulkPanel').isHidden(),true,'finished export must hide progress');
-  assert.ok((await page.locator('#status').textContent()).includes('別の保存先/serifu_'));
+  assert.ok((await page.locator('#status').textContent()).includes('別の保存先/読込フォルダ_'));
 
   await page.evaluate(()=>{window.originalPicker=window.showDirectoryPicker;window.showDirectoryPicker=()=>new Promise(resolve=>{window.resolvePicker=resolve;});});
   await page.click('#saveEdited');await page.waitForSelector('#bulkPanel:not([hidden])');assert.ok((await page.locator('#bulkStage').textContent()).includes('保存先の選択と準備'));
@@ -135,7 +135,7 @@ try {
   assert.deepEqual((await names()).slice(0, 3), ['c.png', 'b.png', 'a.png']);
   await page.evaluate(() => window.showDirectoryPicker = undefined);
   await page.selectOption('#projectFormat','json');
-  const zipped=page.waitForEvent('download');await page.click('#saveEdited');const zipDownload=await zipped;assert.match(zipDownload.suggestedFilename(),/^serifu-edited_.*\.zip$/);await zipDownload.saveAs('artifacts/brave-edited.zip');await ready();assert.equal(await page.evaluate(()=>window.serifuMetrics.pngPacked),2);assert.equal(await page.evaluate(()=>window.serifuMetrics.archiveEntries),3);assert.equal(await page.locator('#bulkPanel').isHidden(),true);
+  const zipped=page.waitForEvent('download');await page.click('#saveEdited');const zipDownload=await zipped;assert.match(zipDownload.suggestedFilename(),/^追加フォルダ_\d{8}_\d{6}_\d{3}_edited\.zip$/);await zipDownload.saveAs('artifacts/brave-edited.zip');await ready();assert.equal(await page.evaluate(()=>window.serifuMetrics.pngPacked),2);assert.equal(await page.evaluate(()=>window.serifuMetrics.archiveEntries),3);assert.equal(await page.locator('#bulkPanel').isHidden(),true);
   const allZipped=page.waitForEvent('download');await page.click('#save');await (await allZipped).saveAs('artifacts/brave-all.zip');await ready();assert.equal(await page.evaluate(()=>window.serifuMetrics.pngPacked),10);assert.equal(await page.evaluate(()=>window.serifuMetrics.archiveEntries),11);
   await textDownload('female', '「女性C」\n「女性A1」\n「女性A2\n続き」\n');
   await page.setViewportSize({ width: 390, height: 844 });

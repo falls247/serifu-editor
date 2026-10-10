@@ -24,11 +24,12 @@ export async function projectJSON(kind,payload,{signal,operationId=crypto.random
     try{jsonWorker.postMessage({operationId,jobId,kind,payload});}catch(error){finish(error);}
   }).catch(async error=>{if(!error.workerUnavailable)throw error;await yieldToBrowser();checkAbort(signal);return kind==='parse'?JSON.parse(await payload.text()):JSON.stringify(payload);});
 }
-export async function* projectParts(pages,preferences,{format='serifu',task}={}){
+export async function* projectParts(pages,preferences,{format='serifu',task,sourceFolderName}={}){
   const signal=task?.signal;checkAbort(signal);
   task?.stage(format==='json'?'JSON変換':'原画像収録',pages.length);
   if(format==='json'){
-    yield `{"version":6,"preferences":${await projectJSON('stringify',preferences,{signal})},"pages":[`;
+    const folder=typeof sourceFolderName==='string'&&sourceFolderName?`,"sourceFolderName":${await projectJSON('stringify',sourceFolderName,{signal})}`:'';
+    yield `{"version":6,"preferences":${await projectJSON('stringify',preferences,{signal})}${folder},"pages":[`;
     for(let i=0;i<pages.length;i++){checkAbort(signal);const p=pages[i],src=p.src?.startsWith('data:')?p.src:await blobDataURL(await originalBlob(p),signal);
       yield (i?',':'')+await projectJSON('stringify',{name:p.name,src,layers:p.layers,done:p.done===true,edited:p.edited===true},{signal});task?.result(p.name);await yieldToBrowser();}
     yield ']}';return;
@@ -36,7 +37,9 @@ export async function* projectParts(pages,preferences,{format='serifu',task}={})
   const assets=[],blobs=[],records=[];
   for(const p of pages){checkAbort(signal);const blob=await originalBlob(p);if(!mimePattern.test(blob.type))throw new Error(`未対応の原画像形式: ${p.name}`);
     records.push({name:p.name,assetIndex:assets.length,layers:p.layers,done:p.done===true,edited:p.edited===true});assets.push({size:blob.size,mimeType:blob.type,width:p.img.width,height:p.img.height});blobs.push(blob);if(blobs.length%20===0)await yieldToBrowser();}
-  const manifest=new TextEncoder().encode(await projectJSON('stringify',{containerVersion:1,projectVersion:6,preferences,pages:records,assets},{signal}));
+  const manifestData={containerVersion:1,projectVersion:6,preferences,pages:records,assets};
+  if(typeof sourceFolderName==='string'&&sourceFolderName)manifestData.sourceFolderName=sourceFolderName;
+  const manifest=new TextEncoder().encode(await projectJSON('stringify',manifestData,{signal}));
   if(manifest.byteLength>MANIFEST_LIMIT)throw new Error('編集メタデータが16MiBを超える');
   const header=new Uint8Array(12);header.set(MAGIC);new DataView(header.buffer).setUint32(8,manifest.byteLength,true);yield header;yield manifest;
   for(let i=0;i<blobs.length;i++){checkAbort(signal);yield blobs[i];task?.result(pages[i].name);}
@@ -50,7 +53,7 @@ function validatePages(data,container=false){
 }
 export async function readProject(file,{signal}={}){
   checkAbort(signal);const head=new Uint8Array(await file.slice(0,12).arrayBuffer());
-  if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);return {version:data.version,preferences:data.preferences,pages:data.pages.map(({name,src,layers,done,edited})=>({name,src,layers,done,edited}))};}
+  if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);return {version:data.version,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages:data.pages.map(({name,src,layers,done,edited})=>({name,src,layers,done,edited}))};}
   if(head.length!==12||!MAGIC.every((b,i)=>head[i]===b))throw new Error('未対応の高速編集データ');
   const length=new DataView(head.buffer).getUint32(8,true);if(!length||length>MANIFEST_LIMIT||12+length>file.size)throw new Error('manifest長が不正');
   const data=await projectJSON('parse',file.slice(12,12+length),{signal});
@@ -59,7 +62,7 @@ export async function readProject(file,{signal}={}){
   for(const a of data.assets){checkAbort(signal);if(!a||!Number.isSafeInteger(a.size)||a.size<=0||!mimePattern.test(a.mimeType)||![a.width,a.height].every(n=>Number.isSafeInteger(n)&&n>0)||!Number.isSafeInteger(offset+a.size)||offset+a.size>file.size)throw new Error('asset範囲または画像形式が不正');blobs.push(file.slice(offset,offset+a.size,a.mimeType));offset+=a.size;}
   if(offset!==file.size)throw new Error('ファイル全長がasset総和と一致しない');
   for(const p of data.pages){if(!Number.isSafeInteger(p.assetIndex)||p.assetIndex<0||p.assetIndex>=blobs.length)throw new Error('画像参照が範囲外');}
-  return {version:data.projectVersion,preferences:data.preferences,pages:data.pages.map(p=>({name:p.name,layers:p.layers,done:p.done,edited:p.edited,blob:blobs[p.assetIndex],expectedSize:data.assets[p.assetIndex]}))};
+  return {version:data.projectVersion,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages:data.pages.map(p=>({name:p.name,layers:p.layers,done:p.done,edited:p.edited,blob:blobs[p.assetIndex],expectedSize:data.assets[p.assetIndex]}))};
 }
 export async function writeParts(directory,name,parts,signal,onWrite=()=>{},onClosing=()=>{}){
   checkAbort(signal);const file=await directory.getFileHandle(name,{create:true});checkAbort(signal);const writer=await file.createWritable();let closed=false;

@@ -2,7 +2,7 @@ import {draw,clearGlyphCache} from './renderer.js';
 import {FONT_CATALOG} from './fonts.js';
 const loadedFonts=new Map();
 async function loadFonts(layers){
-  for(const key of new Set(layers.filter(l=>l.kind!=='balloon').map(l=>l.font))){const font=FONT_CATALOG[key];if(!font?.file)continue;
+  for(const key of new Set(layers.map(l=>l.font))){const font=FONT_CATALOG[key];if(!font?.file)continue;
     if(!loadedFonts.has(key))loadedFonts.set(key,(async()=>{const face=new FontFace(font.family,`url("${new URL(`./assets/fonts/${font.file}`,import.meta.url)}")`,{weight:String(font.faceWeight||font.weight)});await face.load();self.fonts.add(face);clearGlyphCache();})());
     await loadedFonts.get(key);
   }

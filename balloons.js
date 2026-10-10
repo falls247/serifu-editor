@@ -15,6 +15,7 @@ export function newBalloon(width,height) {
   const id=crypto.randomUUID();
   return {
     id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
+    text:'',speaker:'male',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,font:'sans',
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
     shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
@@ -62,7 +63,7 @@ export function balloonHit(layer,point) {
   return sides.every(value=>value>=0)||sides.every(value=>value<=0);
 }
 
-export function paintBalloon(ctx,layer) {
+function balloonPath(ctx,layer) {
   const g=balloonGeometry(layer);
   ctx.beginPath();
   if(layer.shape==='distorted-rect'){
@@ -75,6 +76,15 @@ export function paintBalloon(ctx,layer) {
   }else if(g.hasTail){ctx.ellipse(0,0,g.rx,g.ry,0,g.start,g.end);ctx.lineTo(g.tip.x,g.tip.y);ctx.lineTo(g.a.x,g.a.y);}
   else ctx.ellipse(0,0,g.rx,g.ry,0,0,FULL_TURN);
   ctx.closePath();
+}
+
+export function clipBalloon(ctx,layer) {
+  balloonPath(ctx,layer);
+  ctx.clip();
+}
+
+export function paintBalloon(ctx,layer) {
+  balloonPath(ctx,layer);
   ctx.save();ctx.globalAlpha*=1-layer.transparency/100;ctx.fillStyle=layer.color;ctx.fill();ctx.restore();
   if(layer.borderWidth>0){ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='round';ctx.stroke();}
 }

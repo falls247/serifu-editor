@@ -23,7 +23,7 @@ const pages = [
     { kind: 'dialogue', speaker: 'female', text: '女性2\n続き' },
     { kind: 'dialogue', speaker: 'female', text: ' \n ' },
     { kind: 'sfx', text: 'ドン' },
-    { kind: 'balloon', text: '旧フィールド' },
+    { kind: 'balloon', text: '' },
   ] },
   { layers: [] },
   { layers: [{ kind: 'dialogue', speaker: 'female', text: '女性3' }] },
@@ -42,4 +42,18 @@ test('対象別に本文を抽出し、キャプションと効果音は括弧�
   assert.equal(textExport(pages, 'all'), '「女性1」\n「男性1」\n説明1\n説明2\n「女性2\n続き」\nドン\n「女性3」\n');
   assert.equal(textExport([]), '');
   assert.equal(textExport([{ layers: [{ kind: 'caption', text: '' }] }], 'caption'), '');
+});
+
+test('吹き出し内の台詞も話者別と全台詞の出力へ含める', () => {
+  const pages = [{ layers: [
+    { kind: 'balloon', speaker: 'female', text: '吹き出し女性～' },
+    { kind: 'balloon', speaker: 'male', text: '吹き出し男性' },
+    { kind: 'balloon', text: '既定の男性' },
+    { kind: 'balloon', speaker: 'female', text: ' \n ' },
+  ] }];
+  assert.equal(textExport(pages, 'female'), '「吹き出し女性～」\n');
+  assert.equal(textExport(pages, 'male'), '「吹き出し男性」\n「既定の男性」\n');
+  assert.equal(textExport(pages, 'dialogue'), '「吹き出し女性～」\n「吹き出し男性」\n「既定の男性」\n');
+  assert.equal(textExport(pages, 'all'), textExport(pages, 'dialogue'));
+  assert.equal(textExport(pages, 'caption'), '');
 });

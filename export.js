@@ -9,10 +9,11 @@ export function textExport(pages, target = 'female') {
   const lines = [];
   for (const page of pages) {
     for (const layer of page.layers) {
-      if (!['dialogue', 'caption', 'sfx'].includes(layer.kind) || !layer.text?.trim()) continue;
+      if (!['dialogue', 'balloon', 'caption', 'sfx'].includes(layer.kind) || !layer.text?.trim()) continue;
+      const dialogue = layer.kind === 'dialogue' || layer.kind === 'balloon';
       const matches = target === 'all' || target === layer.kind
-        || (layer.kind === 'dialogue' && target === layer.speaker);
-      if (matches) lines.push(layer.kind === 'dialogue' ? `「${layer.text}」` : layer.text);
+        || (dialogue && (target === 'dialogue' || target === (layer.speaker || 'male')));
+      if (matches) lines.push(dialogue ? `「${layer.text}」` : layer.text);
     }
   }
   return lines.length ? `${lines.join('\n')}\n` : '';
