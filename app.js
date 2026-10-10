@@ -1059,7 +1059,7 @@ $('autosaveMinutes').onchange=()=>{
 $('restoreDraft').onclick=()=>guard(async task=>{
   await storageReady;task.stage('メタ情報');const meta=await getDraftMeta();if(!meta)return;
   if(pages.length&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
-  if(![3,4,5,6].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
+  if(![3,4,5,6,7].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
   task.stage('画像取得',meta.pages.length);const images=await getDraftImages(meta.pages.map(p=>p.id));checkAbort(task.signal);
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
