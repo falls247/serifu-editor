@@ -56,6 +56,8 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
   if (!Number.isFinite(extras.thickness) || extras.thickness<THICKNESS_LIMIT[0] || extras.thickness>THICKNESS_LIMIT[1]) throw new Error('文字の太さが範囲外');
   for (const [key,[min,max]] of Object.entries(EFFECT_LIMITS)) if (!Number.isFinite(extras[key]) || extras[key]<min || extras[key]>max) throw new Error('効果音の設定が範囲外');
+  const inkTexture=input.inkTexture??'none',textureSeed=input.textureSeed??inkSeed((input.id??input.text)+':texture');
+  if(!['none','grunge'].includes(inkTexture)||!Number.isInteger(textureSeed)||textureSeed<0||textureSeed>4294967295)throw new Error('インク質感の設定が不正');
   const glyphSeed=input.glyphSeed??inkSeed(input.text);
   if (!Number.isInteger(glyphSeed) || glyphSeed<0 || glyphSeed>4294967295) throw new Error('文字のばらつき設定が不正');
   return {
