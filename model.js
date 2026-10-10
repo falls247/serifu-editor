@@ -50,7 +50,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < (kind==='sfx'?0:1) || outline > 80) throw new Error('白い縁の太さが不正');
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
-  const extras = { taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, distortion:0, skew:0, stretchX:100, stretchY:100 };
+  const extras = { taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, grungeAmount:65, scratchLength:55, scratchAngle:90, spatterAmount:40, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
   if(!['top','center'].includes(extras.lineAlign))throw new Error('改行の配置設定が不正');
   if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
