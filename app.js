@@ -505,6 +505,18 @@ function renderCards(p) {
       const taper=element('div','taper-controls'),rateLabel=element('label','','先細りの変化率（%／文字）'),rate=element('input');
       rate.type='number';rate.dataset.field='taperRate';[rate.min,rate.max]=EFFECT_LIMITS.taperRate;rate.step='0.5';rate.value=String(l.taperRate);rateLabel.append(rate);
       taper.hidden=l.effect!=='taper';taper.append(rateLabel,element('p','effect-note','初期値10%。基準100pxなら100→90→80px。最小8px。改行しても縮小を継続。ばらつき0なら指定率どおり。'));card.append(taper);
+      const inkWrap=element('div','ink-texture-panel'),inkLabel=element('label','','インク質感'),inkSelect=element('select');
+      inkSelect.dataset.field='inkTexture';
+      for(const [mode,title] of [['none','なし'],['grunge','かすれ印刷・荒れインク']]){const option=element('option','',title);option.value=mode;inkSelect.append(option);}
+      inkSelect.value=l.inkTexture??'none';inkLabel.append(inkSelect);
+      const grungeControls=element('div','grunge-controls effect-grid');
+      for(const [key,title] of [['grungeAmount','欠け・荒れの強さ（%）'],['scratchLength','擦れ筋の長さ（%）'],['scratchAngle','擦れ筋の角度（°）'],['spatterAmount','インク飛沫（%）']]){
+        const label=element('label','',title),input=element('input');input.type='number';input.dataset.field=key;
+        [input.min,input.max]=EFFECT_LIMITS[key];input.value=String(l[key]);label.append(input);grungeControls.append(label);
+      }
+      grungeControls.append(button('regenerate-texture','模様を再生成'),element('p','effect-note','透明な欠けから元画像が透ける。角度90°は下方向。筆の掠れと併用可能。'));
+      grungeControls.hidden=l.inkTexture!=='grunge';
+      inkWrap.append(inkLabel,grungeControls);card.append(inkWrap);
       card.append(element('p','effect-note','「なし」「先細り」は集中線・立体影なし。ブラー・掠れ・歪みは下のパラメータで独立調整。'));
     }
     if(l.kind==='sfx') {
