@@ -20,6 +20,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
   }
   if(input?.kind==='balloon'){
+    input={...input,distortion:input.distortion===undefined?50:input.distortion};
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('吹き出しの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('吹き出しの座標・サイズが範囲外');

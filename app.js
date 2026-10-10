@@ -181,6 +181,36 @@ function drawPage(p) {
   draw(p.canvas.getContext('2d'), p.img, p.layers, p.id === activeId ? p.selectedId : null, scale, displayScale);
 }
 
+function layerSummary(layer) {
+  if(layer.kind==='balloon')return `吹き出し：${layer.shape==='distorted-rect'?'歪み長方形':'楕円'}`;
+  return layer.text||'（未入力）';
+}
+
+function persistControlValue(p,input) {
+  if(!p?.row||!input?.matches('[data-field]'))return;
+  const field=input.dataset.field,card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
+  if(!layer)return;
+  let value=input.value;
+  const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[1,80],...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
+  if(field==='vertical')value=value==='true';
+  else if(input.type==='checkbox')value=input.checked;
+  else if(input.type==='number'||input.type==='range'){
+    if(value===''||!Number.isFinite(Number(value)))return;
+    value=Number(value);
+    if(Object.hasOwn(limits,field))value=clamp(value,...limits[field]);
+  }
+  if(Object.is(layer[field],value))return;
+  checkpoint(p);layer[field]=value;if(field!=='text')layer.presetId=null;
+  if(field==='text'){fitTextInput(input);const summary=card.querySelector('.layer-summary');if(summary)summary.textContent=layerSummary(layer);}
+  markChanged(p);
+  drawPage(p);
+  if(field!=='text')refreshPresetMenus(p);
+}
+
+function persistPageControl(p) {
+  if(p?.row?.contains(document.activeElement))persistControlValue(p,document.activeElement);
+}
+
 function sizePreview(p) {
   if (!p.row) return;
   const frame = p.row.querySelector('.preview-frame');
@@ -200,6 +230,8 @@ function updateControls(p) {
   for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=balloon||caption;
   controls.querySelector('.balloon-style-controls').hidden=!balloon&&!caption;
   controls.querySelector('.balloon-shape-control').hidden=!balloon;
+  controls.querySelector('.balloon-distortion-control').hidden=!balloon||l.shape!=='distorted-rect';
+  controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??50}%`;
   controls.querySelector('.caption-controls').hidden=!caption;
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
@@ -220,7 +252,7 @@ function updateControls(p) {
   const fontNote=controls.querySelector('.font-note');
   fontNote.textContent=l&&!balloon?FONT_CATALOG[l.font]?.note||'':'';fontNote.hidden=!fontNote.textContent;
   for (const card of p.row.querySelectorAll('.layer-card')) {
-    card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
+    card.classList.toggle('selected', p.id===activeId&&card.dataset.layerId === p.selectedId);
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
     if(layer?.kind==='sfx'){
       card.querySelector('.taper-controls').hidden=layer.effect!=='taper';
@@ -235,17 +267,20 @@ function updateControls(p) {
 }
 
 function activate(p, id = p.selectedId, scroll = false) {
-  const previous = active(); activeId = p.id; p.selectedId = id;
+  const previous = active();
+  if(previous&&previous!==p)persistPageControl(previous);
+  activeId = p.id; p.selectedId = id;
   const index = pages.indexOf(p);
   const nextStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
   if (!p.row || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
-  if (previous && previous !== p) drawPage(previous);
+  if (previous && previous !== p) { updateControls(previous); drawPage(previous); }
   updateControls(p); drawPage(p); updateGlobal();
   if (scroll) p.row.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function unmountPage(p) {
   if (!p.row) return;
+  persistPageControl(p);
   p.resizeObserver?.disconnect();
   p.canvas.width = 1; p.canvas.height = 1;
   p.row.remove(); p.row = null; p.canvas = null; p.resizeObserver = null;
@@ -340,6 +375,7 @@ function renderCards(p) {
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
+    const summary=element('button','layer-summary',layerSummary(l));summary.type='button';summary.title='クリックして編集';card.append(summary);
     const header = element('div', 'card-header'),heading=element('div','card-heading');
     heading.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
     if (l.kind === 'dialogue') {
@@ -364,7 +400,7 @@ function renderCards(p) {
       const orderLabel=element('label','','効果音との重なり'),order=element('select');order.dataset.field='sfxOrder';
       for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);card.append(grid);
       const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
-      card.append(element('p','effect-note','25%透過＝不透明度75%。台詞より常に下。楕円の位置・幅・高さと、テールの先端・付根は右側で調整。'));
+      card.append(element('p','effect-note','25%透過＝不透明度75%。台詞より常に下。形状・歪み度・位置・幅・高さと、テールの先端・付根は右側で調整。'));
       container.append(card);continue;
     }
     if(l.kind==='caption'){
@@ -472,7 +508,7 @@ $('deck').addEventListener('focusin', event => {
 $('deck').addEventListener('focusout', event => {
   editing.delete(event.target);
   const p = pageFrom(event.target);
-  if (p) queueMicrotask(() => updateControls(p));
+  if (p) { persistControlValue(p,event.target); queueMicrotask(() => updateControls(p)); }
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
@@ -491,7 +527,9 @@ $('deck').addEventListener('input', event => {
   else if(field==='tail'||field==='autoFit')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field!=='text')l.presetId=null;markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
+  l[field] = value;if(field!=='text')l.presetId=null;
+  if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)summary.textContent=layerSummary(l);}
+  markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
 
 $('deck').addEventListener('click', event => {

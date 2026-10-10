@@ -10,7 +10,7 @@ const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio'};
 const boxStyles={
-  balloon:['shape','rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder'],
+  balloon:['shape','distortion','rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder'],
   caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY'],
 };
 function presetFields(kind) {
@@ -49,7 +49,7 @@ export function defaultPreferences() {
 export function applyPreset(layer,preset,width,height) {
   if(!preset||preset.kind!==layer.kind) return layer;
   const {styles,ratios}=presetFields(layer.kind);
-  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]])),presetId:preset.id};
+  const next={...layer,...Object.fromEntries(styles.map(k=>[k,layer.kind==='balloon'&&['shape','distortion'].includes(k)&&preset.style[k]===undefined?layer[k]:preset.style[k]])),presetId:preset.id};
   for(const [key,ratio] of Object.entries(ratios)){
     const value=preset.style[ratio]??(['thickness','blurX','blurY'].includes(key)?0:NaN);
     if(!Number.isFinite(value))throw new Error('プリセットの寸法が不正');

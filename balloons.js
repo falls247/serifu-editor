@@ -1,7 +1,7 @@
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const FULL_TURN=Math.PI*2;
 
-export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000]});
+export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000]});
 export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形'});
 
 export function balloonSeedFromId(id) {
@@ -16,7 +16,7 @@ export function newBalloon(width,height) {
   return {
     id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
-    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
+    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
 }
 
@@ -25,7 +25,8 @@ function boundaryScale(layer,angle) {
   const cosine=Math.cos(angle),sine=Math.sin(angle),power=5;
   const roundedRect=(Math.abs(cosine)**power+Math.abs(sine)**power)**(-1/power);
   const phase=(layer.shapeSeed>>>0)/4294967296*FULL_TURN;
-  const wobble=1+.035*Math.sin(3*angle+phase)+.022*Math.sin(7*angle-phase*1.3)+.012*Math.sin(11*angle+phase*.7);
+  const amount=(layer.distortion??50)/100;
+  const wobble=1+amount*(.07*Math.sin(3*angle+phase)+.04*Math.sin(7*angle-phase*1.3)+.02*Math.sin(11*angle+phase*.7));
   return roundedRect*wobble;
 }
 
