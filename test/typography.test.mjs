@@ -47,7 +47,7 @@ test('taper packs shrinking glyphs in both directions and continues through wrap
   for(const vertical of [true,false]){
     const layer={...newLayer('sfx',1000,750),effect:'taper',taperRate:10,size:100,text:'ドド\nドドド',w:180,h:240,vertical,stretchX:100,stretchY:100,sizeVariation:0,horizontalJitter:0};
     const glyphs=textGlyphs(context(),layer);assert.deepEqual(glyphs.map(g=>Math.round(g.size)),[100,90,80,70,60]);assert.deepEqual(glyphs.map(g=>g.index),[0,1,2,3,4]);
-    if(vertical){assert.ok(Math.abs(glyphs[3].y-glyphs[2].y)>Math.abs(glyphs[4].y-glyphs[3].y));assert.notEqual(glyphs[4].x,glyphs[0].x);}
+    if(vertical){assert.equal(glyphs[2].x,glyphs[3].x,'two consecutive shrinking glyphs share their column');assert.ok(glyphs[3].y>glyphs[2].y);assert.notEqual(glyphs[4].x,glyphs[0].x);}
     else assert.notEqual(glyphs[1].y,glyphs[0].y,'horizontal wrapping should use the actual changing advances');
     const tiny=textGlyphs(context(),{...layer,size:8,taperRate:100,text:'ド'.repeat(100)});assert.ok(tiny.every(g=>g.size===8&&Number.isFinite(g.x)&&Number.isFinite(g.y)));
   }
