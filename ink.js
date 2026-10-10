@@ -161,7 +161,7 @@ export function printDistressMask(source,width,height,{size=100,grungeAmount=65,
       const intensity=(n*.65+grit*.35)*(.55+cloud*.9);
       const isEdge=(x===0||y===0||x===width-1||y===height-1||source[i-1]<96||source[i+1]<96||source[i-width]<96||source[i+width]<96);
       const threshold=(isEdge?.17:.075)*amount;
-      if(intensity<threshold)body[i]=Math.round(v*(.08+grit*.24));
+      if(intensity<threshold)body[i]=grit>.18?0:Math.round(v*.2);
     }
     if(scratchLength>0){
       const count=Math.min(180,Math.ceil(6+scale*.23*amount));
