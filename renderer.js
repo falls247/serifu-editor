@@ -114,9 +114,11 @@ function tintedMask(ctx, alpha, width, height, color, strength=1) {
   for(let i=0;i<alpha.length;i++){pixels.data[i*4]=rgb[0];pixels.data[i*4+1]=rgb[1];pixels.data[i*4+2]=rgb[2];pixels.data[i*4+3]=Math.min(255,alpha[i]*strength);}
   c.putImageData(pixels,0,0);return surface;
 }
-function warpedGlyph(ctx, l, char, glyphAngle=0) {
+function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   if(l.kind!=='sfx')l={...l,color:DIALOGUE_COLORS[l.speaker],effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
-  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore].join('|');
+  const textured=l.kind==='sfx'&&l.inkTexture==='grunge'&&(l.grungeAmount>0||l.spatterAmount>0);
+  const textureKey=textured?[l.inkTexture,l.grungeAmount,l.scratchLength,l.scratchAngle,l.spatterAmount,l.textureSeed,glyphIndex]:[];
+  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore,...textureKey].join('|');
   if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
   const sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);
   const reach=l.size*(l.brushTails||0)/100*.65;
@@ -211,7 +213,7 @@ function paintText(ctx, l) {
     const {char,index:i,x,y,size,baseSize,shift,angle}=letter,layer=size===l.size?l:{...l,size};
     ctx.font=`${fontDescription(layer).weight} ${size}px ${fontFamily(layer)}`;
     if(!sfx&&!l.thickness){const corner=verticalPunctuationOffset(ctx,char,size,l.vertical);ctx.save();ctx.translate(x,y);ctx.rotate(angle);drawInk(ctx,layer,char,corner.x,corner.y);ctx.restore();continue;}
-    const glyph=warpedGlyph(ctx,layer,char,angle),image=glyph.surface;
+    const glyph=warpedGlyph(ctx,layer,char,angle,i),image=glyph.surface;
     // Jitter follows the text box's horizontal axis, including rotated vertical punctuation.
     ctx.save();ctx.translate(x+(sfx?shift*baseSize*l.stretchX/100:0),y);
     if(sfx&&l.effect==='rumble'){ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04);ctx.rotate((i%2?1:-1)*.07);}
