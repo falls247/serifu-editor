@@ -5,7 +5,7 @@
 - 提案配置先：`dev/docs/sow/SOW_20261010_manga_distressed_ink.md`
 - 基準ブランチ：`main`（GitHubを2026-10-10に確認。実装開始時にローカルHEAD・差分を再確認）
 - 基準ツリー：`6dc8134d5d403f5eee9b538a1014648c4945a08d`
-- 状態：**開発エージェント向け実装仕様。未実装・未検証**
+- 状態：**実装済み（feat/manga-ink-balloon-styles-20261010）。静的・単体・Chromium画素テスト成功。全受入条件の計測と人手の画質確認は継続事項**
 - 視覚参照：ユーザー添付画像（同梱する場合：`assets/manga-distressed-ink-reference.png`）。参照画像そのものや使用文字列をコピーする要求ではない。
 - 関連文書：`dev/docs/HANDOFF.md`、`dev/docs/adr/0002-layer-model-and-caption-layout.md`、`0004-edit-data-and-drafts.md`、`0005-fonts-and-manga-typography.md`、`0006-test-and-delivery.md`、`0009-named-layer-presets.md`、`0010-bulk-processing-and-progress.md`
 
