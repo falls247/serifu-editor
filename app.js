@@ -240,7 +240,7 @@ function drawPage(p) {
 }
 
 function layerSummary(layer) {
-  if(layer.kind==='balloon')return `吹き出し：${layer.shape==='distorted-rect'?'歪み長方形':'楕円'}`;
+  if(layer.kind==='balloon')return `吹き出し：${layer.shape==='distorted-rect'?'歪み長方形':layer.shape==='spiky'?'尖り形':'楕円'}`;
   return layer.text||'（未入力）';
 }
 
@@ -294,11 +294,17 @@ function updateControls(p) {
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
   controls.querySelector('legend').textContent = balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=!l;
+  controls.querySelector('.multiline-align-control').hidden=!l||!['dialogue','balloon'].includes(l.kind);
   for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=!l||caption;
   controls.querySelector('.balloon-style-controls').hidden=!balloon&&!caption;
-  controls.querySelector('.balloon-shape-control').hidden=!balloon;
-  controls.querySelector('.balloon-distortion-control').hidden=!balloon||l.shape!=='distorted-rect';
-  controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??50}%`;
+  const shapeControl=controls.querySelector('.balloon-shape-control'),shapeSelect=shapeControl.querySelector('select');
+  shapeControl.hidden=!balloon&&!caption;
+  shapeControl.firstChild.textContent=caption?'キャプション形状':'吹き出し形状';
+  for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!['ellipse','distorted-rect','spiky'].includes(option.value);
+  const showDistortion=balloon?['distorted-rect','spiky'].includes(l.shape):caption&&l.shape==='spiky';
+  controls.querySelector('.balloon-distortion-control').hidden=!showDistortion;
+  controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??55}%`;
+  controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;

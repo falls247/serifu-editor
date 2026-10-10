@@ -8,7 +8,7 @@ export const EFFECT_LIMITS = Object.freeze({ taperRate:[0,100], sizeVariation:[0
 
 export function normalizeLayer(input, version = PROJECT_VERSION) {
   if(input?.kind==='caption'){
-    input={...input,textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor};
+    input={...input,textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('キャプションの座標・サイズが範囲外');
@@ -17,10 +17,11 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('キャプションの本文・書体設定が不正');
     const alignX=input.alignX===undefined?(version<6?'right':'center'):input.alignX,alignY=input.alignY===undefined?(version<6?'top':'center'):input.alignY;
     if(!Object.hasOwn(CAPTION_ALIGNMENTS.alignX,alignX)||!Object.hasOwn(CAPTION_ALIGNMENTS.alignY,alignY))throw new Error('キャプションの揃える方向が不正');
-    return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
+    if(!['rect','spiky'].includes(input.shape)||!Number.isInteger(input.shapeSeed)||input.shapeSeed<0||input.shapeSeed>4294967295||!Number.isFinite(input.distortion)||input.distortion<0||input.distortion>100)throw new Error('キャプションの形状設定が不正');
+    return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,shape:input.shape,shapeSeed:input.shapeSeed,distortion:input.distortion,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
   }
   if(input?.kind==='balloon'){
-    input={...input,distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,
+    input={...input,distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
       size:input.size===undefined?40:input.size,outline:input.outline===undefined?4:input.outline,thickness:input.thickness===undefined?0:input.thickness,
       vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font};
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
@@ -31,9 +32,9 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     if(typeof input.tail!=='boolean'||!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しのテール・重なり設定が不正');
     const shape=input.shape??'ellipse',shapeSeed=input.shapeSeed??balloonSeedFromId(input.id);
     if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295)throw new Error('吹き出しの形状が不正');
-    if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('吹き出しのセリフ設定が不正');
+    if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font)||!['top','center'].includes(input.lineAlign))throw new Error('吹き出しのセリフ設定が不正');
     if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<1||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
-    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,text:input.text,speaker:input.speaker,size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
+    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,text:input.text,speaker:input.speaker,size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
   }
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
   const legacy = version === 1;
@@ -49,8 +50,9 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < 1 || outline > 80) throw new Error('白い縁の太さが不正');
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
-  const extras = { taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, distortion:0, skew:0, stretchX:100, stretchY:100 };
+  const extras = { taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
+  if(!['top','center'].includes(extras.lineAlign))throw new Error('改行の配置設定が不正');
   if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
   if (!Number.isFinite(extras.thickness) || extras.thickness<THICKNESS_LIMIT[0] || extras.thickness>THICKNESS_LIMIT[1]) throw new Error('文字の太さが範囲外');
   for (const [key,[min,max]] of Object.entries(EFFECT_LIMITS)) if (!Number.isFinite(extras[key]) || extras[key]<min || extras[key]>max) throw new Error('効果音の設定が範囲外');
@@ -59,7 +61,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   return {
     id: crypto.randomUUID(), kind, speaker, text: input.text,
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
-    rotation: input.rotation, vertical: input.vertical, outline, effect, color: input.color,
+    rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
     ...extras, glyphSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }

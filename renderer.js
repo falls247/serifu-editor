@@ -16,6 +16,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
   return {
     id, kind, speaker,
     text: kind === 'sfx' ? 'ドーン！' : '',
+    lineAlign:'top',
     x: width * .5, y: height * .4,
     w: clamp(width * (kind === 'sfx' ? .34 : .28), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .62), 30, 30000),
     size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .055)), 16, 500),
@@ -180,6 +181,7 @@ export function textGlyphs(ctx,layer) {
       return {char,index:i,baseSize,size:layer.effect==='taper'&&sfx?Math.max(8,baseSize*variation.scale):baseSize*variation.scale,shift:variation.shift,angle:layer.vertical?verticalRotation(char):0,width:ctx.measureText(char).width*sx};
     }));
     const glyphs=[];
+    const topAligned=layer.lineAlign!=='center';
     if(layer.vertical){
       const columns=[];
       for(const line of lines){
@@ -189,12 +191,12 @@ export function textGlyphs(ctx,layer) {
       }
       const widths=columns.map(column=>Math.max(column.length?0:glyphFontSize(layer,0),...column.map(glyph=>glyph.baseSize))*1.3*sx);
       let x=widths.reduce((a,b)=>a+b,0)/2;
-      columns.forEach((column,i)=>{x-=widths[i]/2;let y=-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
+      columns.forEach((column,i)=>{x-=widths[i]/2;let y=columns.length>1&&topAligned?-layer.h*.44:-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
     }else{
       const rows=[];
       for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>layer.w*.88){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
       const heights=rows.map(row=>Math.max(row.length?0:layer.size,...row.map(glyph=>glyph.baseSize))*1.3*sy);
-      let y=-heights.reduce((a,b)=>a+b,0)/2;
+      let y=rows.length>1&&topAligned?-layer.h*.44:-heights.reduce((a,b)=>a+b,0)/2;
       rows.forEach((row,i)=>{let x=-row.reduce((sum,glyph)=>sum+glyph.width,0)/2;for(const glyph of row){glyphs.push({...glyph,x:x+glyph.width/2,y:y+heights[i]/2});x+=glyph.width;}y+=heights[i];});
     }
     return glyphs;

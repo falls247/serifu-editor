@@ -10,8 +10,8 @@ const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio'};
 const boxStyles={
-  balloon:['shape','distortion','rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder','vertical','font'],
-  caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY'],
+  balloon:['shape','distortion','rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
+  caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
   if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio'}};
