@@ -10,13 +10,13 @@ const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio'};
 const boxStyles={
-  balloon:['shape','distortion','rotation','color','borderColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushRoughness','transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
+  balloon:['shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushRoughness','transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
   caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
   if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio',shadowBlur:'shadowBlurRatio',shadowOffsetX:'shadowOffsetXRatio',shadowOffsetY:'shadowOffsetYRatio'}};
   if(kind==='caption')return {styles:boxStyles.caption,ratios:{...boxRatioKeys,size:'sizeRatio',padding:'paddingRatio',textOutlineWidth:'textOutlineWidthRatio'}};
-  return {styles:[...styleKeys,'blurAngle'],ratios:ratioKeys};
+  return {styles:[...styleKeys,'blurAngle',...(kind==='dialogue'?['textColor','textOutlineColor']:[])],ratios:ratioKeys};
 }
 function presetDimension(kind,key,width,height) {
   if(['balloon','caption'].includes(kind)){
@@ -31,7 +31,7 @@ export function styleFromLayer(layer,width,height) {
   for(const [key,ratio] of Object.entries(ratios))style[ratio]=(key==='thickness'?(layer[key]??0):layer[key])/presetDimension(layer.kind,key,width,height);
   return style;
 }
-function builtin(id,name,kind,changes={}) { const layer={...newLayer(kind,1000,750),...changes}; return {id,name,kind,builtin:true,style:styleFromLayer(layer,1000,750)}; }
+function builtin(id,name,kind,changes={}) { const layer={...newLayer(kind,1000,750),...changes},style=styleFromLayer(layer,1000,750);if(kind==='balloon')delete style.shapeSeed;return {id,name,kind,builtin:true,style}; }
 export function defaultPreferences() {
   const presets=[
     builtin('dialogue-standard','縦書き・標準セリフ','dialogue'),
@@ -50,7 +50,7 @@ export function defaultPreferences() {
 export function applyPreset(layer,preset,width,height) {
   if(!preset||preset.kind!==layer.kind) return layer;
   const {styles,ratios}=presetFields(layer.kind);
-  const next={...layer,...Object.fromEntries(styles.map(k=>[k,layer.kind==='balloon'&&preset.style[k]===undefined?layer[k]:preset.style[k]])),presetId:preset.id};
+  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]===undefined&&(layer.kind==='balloon'||['textColor','textOutlineColor'].includes(k))?layer[k]:preset.style[k]])),presetId:preset.id};
   for(const [key,ratio] of Object.entries(ratios)){
     const value=preset.style[ratio]??(layer.kind==='balloon'?layer[key]/presetDimension(layer.kind,key,width,height):['thickness','blurX','blurY'].includes(key)?0:NaN);
     if(!Number.isFinite(value))throw new Error('プリセットの寸法が不正');
@@ -60,9 +60,9 @@ export function applyPreset(layer,preset,width,height) {
   if(layer.kind==='balloon'||layer.kind==='caption'){
     const limits=layer.kind==='balloon'?BALLOON_LIMITS:CAPTION_LIMITS;
     for(const key of Object.keys(ratios))if(limits[key])next[key]=clamp(next[key],...limits[key]);
-    if(layer.kind==='balloon'){next.size=clamp(next.size,8,500);next.outline=clamp(next.outline,1,80);next.thickness=clamp(next.thickness,...THICKNESS_LIMIT);}
+    if(layer.kind==='balloon'){next.size=clamp(next.size,8,500);next.outline=clamp(next.outline,0,80);next.thickness=clamp(next.thickness,...THICKNESS_LIMIT);}
   }else{
-    next.size=clamp(next.size,8,500);next.outline=clamp(next.outline,layer.kind==='sfx'?0:1,80);next.blur=clamp(next.blur,0,30);next.motionBlur=clamp(next.motionBlur,0,300);next.blurX=clamp(next.blurX,0,150);next.blurY=clamp(next.blurY,0,300);
+    next.size=clamp(next.size,8,500);next.outline=clamp(next.outline,0,80);next.blur=clamp(next.blur,0,30);next.motionBlur=clamp(next.motionBlur,0,300);next.blurX=clamp(next.blurX,0,150);next.blurY=clamp(next.blurY,0,300);
     next.thickness=clamp(next.thickness,...THICKNESS_LIMIT);
   }
   Object.assign(layer,normalizeLayer(next,PROJECT_VERSION),{id:layer.id});return layer;

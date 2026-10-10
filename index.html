@@ -61,7 +61,7 @@
       <p class="eyebrow">IMAGE → WORDS → STORY</p>
       <h1>何枚でも、物語をつなごう。</h1>
       <p>元画像を見ながらセリフを書いて、右のプレビューで位置を調整。<br>次の画像も、そのまま下へスクロール。</p>
-      <div class="speaker-legend"><span class="male-dot"></span>男性：黒文字<span class="female-dot"></span>女性：ピンク文字<span class="outline-dot"></span>白い縁取り</div>
+      <div class="speaker-legend"><span class="male-dot"></span>初期色：男性は黒<span class="female-dot"></span>女性はピンク<span class="outline-dot"></span>輪郭は白（変更可）</div>
       <button id="demo">3枚のサンプルで試す ↗</button>
     </section>
     <div id="deck"></div>
@@ -106,18 +106,21 @@
           <fieldset class="position-controls"><legend class="selected-name">文字を選択して位置調整</legend><div class="control-grid">
             <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
             <label data-text-control>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>
-            <label data-text-control data-ink-control>文字の太さ（px）<input data-field="thickness" type="number" min="-10" max="30" step="0.5" title="0は書体の標準。正の値で太く、負の値で細く。白い縁とは別に調整。"></label>
+            <label data-text-control data-ink-control>文字の太さ（px）<input data-field="thickness" type="number" min="-10" max="30" step="0.5" title="0は書体の標準。正の値で太く、負の値で細く。文字の輪郭とは別に調整。"></label>
             <label>配置幅<input data-field="w" type="number" min="30" max="30000"></label><label>配置高さ<input data-field="h" type="number" min="30" max="30000"></label>
-            <label data-text-control data-ink-control>白い縁の太さ<input data-field="outline" type="number" min="1" max="80"></label><label data-text-control>文字方向<select data-field="vertical"><option value="true">縦書き</option><option value="false">横書き</option></select></label>
+            <label data-text-control data-ink-control>文字の輪郭の太さ（px）<input data-field="outline" type="number" min="0" max="80" step="0.5" title="0で輪郭なし"></label><label data-text-control>文字方向<select data-field="vertical"><option value="true">縦書き</option><option value="false">横書き</option></select></label>
+            <label data-text-control data-text-color-control>文字色<input data-field="textColor" type="color"></label><label data-text-control data-text-color-control>文字の輪郭色<input data-field="textOutlineColor" type="color"></label>
             <label class="multiline-align-control" data-text-control>改行位置<select data-field="lineAlign"><option value="top">上付き</option><option value="center">中央揃え</option></select></label>
             <label data-text-control>書体<select data-field="font" aria-label="文字の書体"></select></label>
           </div><div class="balloon-style-controls control-grid" hidden>
             <label class="balloon-shape-control">吹き出し形状<select data-field="shape"><option value="ellipse">楕円</option><option value="distorted-rect">歪み長方形</option><option value="spiky">尖り形</option><option value="rect">長方形</option></select></label>
             <label class="balloon-distortion-control" hidden>歪み度（<output>55%</output>）<input data-field="distortion" type="range" min="0" max="100" step="1"></label>
+            <label data-shape-seed-control hidden>形状seed<input data-field="shapeSeed" type="number" min="0" max="4294967295" step="1"></label><label class="balloon-spike-count-control" hidden>尖りの頂点数<input data-field="spikeCount" type="number" min="6" max="60" step="1"></label>
+            <button data-shape-seed-control data-action="regenerate-shape" hidden>形状を再生成</button>
             <label>枠線の色<input data-field="borderColor" type="color"></label><label>枠線の太さ（px）<input data-field="borderWidth" type="number" min="0" max="80" step="0.5"></label>
           </div><div class="caption-controls" hidden><div class="control-grid">
-            <label>キャプションの文字色<input data-field="textColor" type="color"></label><label>内側の余白（px）<input data-field="padding" type="number" min="0" max="2000" step="1"></label>
-            <label>文字の輪郭色<input data-field="textOutlineColor" type="color"></label><label>文字の輪郭の太さ（px）<input data-field="textOutlineWidth" type="number" min="0" max="80" step="0.5" title="0で輪郭なし"></label>
+            <label>内側の余白（px）<input data-field="padding" type="number" min="0" max="2000" step="1"></label>
+            <label>文字の輪郭の太さ（px）<input data-field="textOutlineWidth" type="number" min="0" max="80" step="0.5" title="0で輪郭なし"></label>
             <label>左右の揃え方<select data-field="alignX"><option value="left">左</option><option value="center">中央</option><option value="right">右</option></select></label>
             <label>上下の揃え方<select data-field="alignY"><option value="top">上</option><option value="center">中央</option><option value="bottom">下</option></select></label>
           </div><label class="tail-toggle"><input data-field="autoFit" type="checkbox">文字サイズをボックスに合わせる</label><p class="caption-fit-status effect-note"></p>

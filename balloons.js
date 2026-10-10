@@ -14,9 +14,9 @@ function grain(seed,index,strand=0) {
 }
 
 function spikeShape(layer) {
-  const seed=layer.shapeSeed>>>0,amount=(layer.distortion??50)/100,key=seed+':'+amount;
+  const seed=layer.shapeSeed>>>0,amount=(layer.distortion??50)/100,count=layer.spikeCount??defaultSpikeCount(seed),key=seed+':'+amount+':'+count;
   if(spikeCache.has(key))return spikeCache.get(key);
-  const random=seededRandom(seed),phase=random()*FULL_TURN,count=10+Math.floor(random()*5);
+  const random=seededRandom(seed),phase=random()*FULL_TURN;random();
   const gaps=Array.from({length:count},()=>.55+random()*.95),sum=gaps.reduce((a,b)=>a+b,0);
   let angle=0;
   const tips=gaps.map(gap=>{
@@ -29,7 +29,7 @@ function spikeShape(layer) {
     const b=tips[index+1],mx=(a.x+b.x)/2,my=(a.y+b.y)/2;
     // Put each control point toward the centre: every span bends inward
     // from its tip-to-tip chord, including when distortion is low.
-    const depth=(.05+amount*.17)*(.65+random()*.65),inset=1-2*depth/Math.hypot(mx,my);
+    const depth=Math.min((.05+amount*.17)*(.65+random()*.65),Math.hypot(mx,my)*.3),inset=1-2*depth/Math.hypot(mx,my);
     return {a,b,c:{x:mx*inset,y:my*inset}};
   });
   const shape={phase,tips,segments};spikeCache.set(key,shape);
@@ -50,7 +50,7 @@ function spikeRadius(layer,angle) {
   return (u*u*a.x+2*u*t*c.x+t*t*b.x)*cosine+(u*u*a.y+2*u*t*c.y+t*t*b.y)*sine;
 }
 
-export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
+export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],spikeCount:[6,60],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
 export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形',spiky:'尖り形'});
 
 export function balloonSeedFromId(id) {
@@ -59,20 +59,24 @@ export function balloonSeedFromId(id) {
   return hash>>>0;
 }
 
-export function newBalloon(width,height) {
+export function defaultSpikeCount(seed) {
+  const random=seededRandom(seed);random();return 10+Math.floor(random()*5);
+}
+
+export function newBalloon(width,height,speaker='male') {
   const w=limit(width*.64,30,30000),h=limit(height*.56,30,30000);
   const id=crypto.randomUUID();
   return {
     id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
-    text:'',speaker:'male',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',
+    text:'',speaker,textColor:null,textOutlineColor:'#ffffff',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
     shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
-    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
+    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
 }
 
 function boundaryScale(layer,angle) {
-  const phase=(layer.shapeSeed>>>0)/4294967296*FULL_TURN;
+  const phase=grain(layer.shapeSeed>>>0,0,71)*FULL_TURN;
   const amount=(layer.distortion??50)/100;
   if(layer.shape==='spiky'){
     return spikeRadius(layer,angle);

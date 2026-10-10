@@ -37,7 +37,7 @@ test('balloon projects validate their geometry, speech, colors, transparency and
   const original={...newLayer('balloon',1000,750),text:'おはよう',speaker:'female',size:52,outline:5,thickness:1.5,vertical:false,font:'round',tail:true,tailX:-50,tailY:440,tailAngle:100,sfxOrder:'above'};
   const restored=normalizeLayer(JSON.parse(JSON.stringify(original)),4);
   assert.notEqual(restored.id,original.id);assert.deepEqual({...restored,id:original.id},original);
-  for(const invalid of [{transparency:101},{borderWidth:-1},{tail:'true'},{sfxOrder:'other'},{tailX:NaN},{tailWidth:0},{color:'white'},{w:0},{rotation:181},{speaker:'other'},{text:1},{vertical:'true'},{font:'other'},{size:501},{outline:0},{thickness:31}])assert.throws(()=>normalizeLayer({...original,...invalid},4));
+  for(const invalid of [{transparency:101},{borderWidth:-1},{tail:'true'},{sfxOrder:'other'},{tailX:NaN},{tailWidth:0},{color:'white'},{w:0},{rotation:181},{speaker:'other'},{text:1},{vertical:'true'},{font:'other'},{size:501},{outline:-1},{thickness:31}])assert.throws(()=>normalizeLayer({...original,...invalid},4));
   assert.throws(()=>normalizeLayer(original,3));
   const p=page([original,newLayer('dialogue',1000,750)]);assert.equal(swapText(p,original.id,p.layers[1].id),false);assert.equal(p.undo.length,0);
 });

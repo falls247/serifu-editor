@@ -45,7 +45,7 @@ test('balloon presets clamp text settings for very small and very large pages',(
   const source={...newLayer('balloon',1000,750),size:100,outline:3,thickness:20};
   const preset=createPreset('寸法範囲外の吹き出し',source,1000,750);
   const small=newLayer('balloon',30,30);applyPreset(small,preset,30,30);
-  assert.equal(small.size,8);assert.equal(small.outline,1);assert.ok(small.thickness>=-10&&small.thickness<=30);
+  assert.equal(small.size,8);assert.equal(small.outline,.12);assert.ok(small.thickness>=-10&&small.thickness<=30);
   const large=newLayer('balloon',30000,30000);applyPreset(large,preset,30000,30000);
   assert.equal(large.size,500);assert.equal(large.outline,80);assert.equal(large.thickness,30);
 });

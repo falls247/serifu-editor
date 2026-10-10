@@ -22,3 +22,4 @@
 新たな判断は次の番号で記録し、背景、決定、代替案、結果、関連コードと検証を含める。既存の判断を置き換える場合は旧ADRを削除せず、置換先を示す。軽微な現状訂正は既存ADRを更新し、実装と文書を揃える。
 
 - [ADR-0012: 印刷かすれと吹き出し装飾のCanvas実装](0012-distressed-ink-and-balloon-effects.md)
+- [ADR-0013: セリフの文字色・輪郭と吹き出しの形状パラメータ](0013-speech-colors-and-balloon-parameters.md)

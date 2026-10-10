@@ -45,7 +45,7 @@ try {
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '3');
   await first().locator('[data-kind=caption] [data-field=textOutlineWidth]').fill('4.5');
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '4.5');
-  await first().locator('.caption-controls [data-field=textOutlineColor]').fill('#ff6600');
+  await first().locator('.position-controls [data-field=textOutlineColor]').fill('#ff6600');
   assert.equal(await first().locator('[data-kind=caption] [data-field=textOutlineColor]').inputValue(), '#ff6600');
   const colored = await first().locator('canvas').evaluate(canvas => {
     const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;

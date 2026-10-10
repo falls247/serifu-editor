@@ -6,11 +6,12 @@ import { graphemes, verticalRotation, verticalPunctuationOffset } from './typogr
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
+export const dialogueColor = layer => layer.textColor??DIALOGUE_COLORS[layer.speaker];
 export const EFFECTS = Object.freeze({ none:'なし', taper:'先細り', impact: 'ドン！／立体', burst: 'バン！／集中線', speed: 'シュッ／スピード', rumble: 'ゴゴゴ／震え', tension: 'ゾワッ／感情・緊張' });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function newLayer(kind, width, height, speaker = 'male') {
-  if(kind==='balloon')return newBalloon(width,height);
+  if(kind==='balloon')return newBalloon(width,height,speaker);
   if(kind==='caption')return newCaption(width,height);
   const id=crypto.randomUUID();
   return {
@@ -22,6 +23,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
     size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .055)), 16, 500),
     rotation: kind === 'sfx' ? -12 : 0, thickness:0, outline: clamp(Math.round(width * .006), 2, 80),
     vertical: true, color: '#111111', effect: 'burst', taperRate:10,
+    ...(kind==='dialogue'?{textColor:null,textOutlineColor:'#ffffff'}:{}),
     font: kind === 'sfx' ? 'comic' : 'sans', blur: 0, motionBlur: 0, blurAngle: 90,
     distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
     blurX: 0, blurY: 0, blurStrength: 200, inkCore: 80,
@@ -105,8 +107,8 @@ function drawInk(ctx, l, char, x, y) {
     ctx.strokeStyle = '#111111'; ctx.fillStyle = '#111111'; ctx.lineWidth = l.outline * 2 + l.size * .05;
     ctx.strokeText(char, x + depth, y + depth); ctx.fillText(char, x + depth, y + depth);
   }
-  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = l.outline * 2; ctx.strokeText(char, x, y);
-  ctx.fillStyle = l.kind === 'sfx' ? l.color : DIALOGUE_COLORS[l.speaker]; ctx.fillText(char, x, y);
+  if(l.outline>0){ctx.strokeStyle=l.textOutlineColor??'#ffffff';ctx.lineWidth=l.outline*2;ctx.strokeText(char,x,y);}
+  ctx.fillStyle = l.kind === 'sfx' ? l.color : dialogueColor(l); ctx.fillText(char, x, y);
 }
 function tintedMask(ctx, alpha, width, height, color, strength=1) {
   const surface=createSurface(ctx,width,height),c=surface.getContext('2d'),pixels=c.createImageData(width,height);
@@ -115,10 +117,11 @@ function tintedMask(ctx, alpha, width, height, color, strength=1) {
   c.putImageData(pixels,0,0);return surface;
 }
 function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
-  if(l.kind!=='sfx')l={...l,color:DIALOGUE_COLORS[l.speaker],effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
+  if(l.kind!=='sfx')l={...l,color:dialogueColor(l),effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
+  const outlineColor=l.textOutlineColor??'#ffffff';
   const textured=l.kind==='sfx'&&l.inkTexture==='grunge'&&(l.grungeAmount>0||l.spatterAmount>0);
   const textureKey=textured?[l.inkTexture,l.grungeAmount,l.scratchLength,l.scratchAngle,l.spatterAmount,l.textureSeed,glyphIndex]:[];
-  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore,...textureKey].join('|');
+  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,outlineColor,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore,...textureKey].join('|');
   if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
   const sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);
   const reach=l.size*(l.brushTails||0)/100*.65;
@@ -154,17 +157,17 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   if(texture)for(let i=0;i<alpha.length;i++)alpha[i]=Math.max(alpha[i],texture.speckles[i]);
   const edge=dilateMask(texturedBody,width,height,l.outline),fibreEdge=dilateMask(alpha,width,height,Math.min(l.outline,1));
   for(let i=0;i<edge.length;i++)edge[i]=Math.max(edge[i],fibreEdge[i]);
-  const foreground=tintedMask(ctx,alpha,width,height,l.color),border=tintedMask(ctx,edge,width,height,'#ffffff');
+  const foreground=tintedMask(ctx,alpha,width,height,l.color),border=tintedMask(ctx,edge,width,height,outlineColor);
   const result=createSurface(ctx,width,height),out=result.getContext('2d'),hasBlur=l.blurX>0||l.blurY>0;
   if(hasBlur){
     const strength=(l.blurStrength??200)/100;
-    out.drawImage(tintedMask(ctx,directionalBlur(edge,width,height,l.blurX,l.blurY),width,height,'#ffffff',strength),0,0);
+    if(l.outline>0)out.drawImage(tintedMask(ctx,directionalBlur(edge,width,height,l.blurX,l.blurY),width,height,outlineColor,strength),0,0);
     out.drawImage(tintedMask(ctx,directionalBlur(alpha,width,height,l.blurX,l.blurY),width,height,l.color,strength),0,0);
     out.globalAlpha=(l.inkCore??80)/100;
   }
   const depth=l.size*((l.effect==='impact'||l.effect==='burst')?.13:['none','taper','tension'].includes(l.effect)?0:.05);
   if(depth)out.drawImage(tintedMask(ctx,edge,width,height,'#111111'),depth,depth);
-  out.drawImage(border,0,0);out.drawImage(foreground,0,0);
+  if(l.outline>0)out.drawImage(border,0,0);out.drawImage(foreground,0,0);
   if(texture){
     // Carve ink defects through keyline and cast shadow, never paint them white.
     out.globalCompositeOperation='destination-out';out.globalAlpha=1;
