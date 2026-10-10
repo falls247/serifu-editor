@@ -26,9 +26,33 @@ try {
   page.once('dialog',dialog=>dialog.accept('セリフの指定色'));await dialogue.locator('[data-action=save-preset]').click();
   await source.locator('[data-action=add-female]').click();assert.equal(await source.locator('[data-kind=dialogue]').last().locator('[data-field=textColor]').inputValue(),'#2468aa');await source.locator('[data-action=undo]').click();
   await source.locator('[data-action=add-balloon]').click();const balloon=source.locator('[data-kind=balloon]').first();
+  const assertNumericPairs=async card=>{
+    const pairs=await card.evaluate(card=>[...card.querySelectorAll('input[data-field][type=number],input[data-field][type=range]')].map(input=>({field:input.dataset.field,paired:!!input.closest('.numeric-setting')?.querySelector(`[data-numeric-field="${input.dataset.field}"]`)})));
+    assert.ok(pairs.length>0);assert.ok(pairs.every(pair=>pair.paired),`all ${await card.getAttribute('data-kind')} card numeric controls must have sliders: ${JSON.stringify(pairs)}`);
+    return pairs;
+  };
+  const balloonPairs=await assertNumericPairs(balloon),balloonSlider=name=>balloon.locator(`[data-numeric-field=${name}]`);
   await balloon.locator('textarea').fill('吹き出しの文字');await field('vertical').selectOption('false');await field('x').fill('400');await field('y').fill('415');await field('w').fill('570');await field('h').fill('330');await field('size').fill('48');await field('thickness').fill('2.5');
   await balloon.locator('[data-field=textColor]').fill('#007755');await field('textOutlineColor').fill('#cc3300');await field('outline').fill('6.5');
   assert.equal(await field('textColor').inputValue(),'#007755');assert.equal(await balloon.locator('[data-field=textOutlineColor]').inputValue(),'#cc3300');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'6.5');
+  assert.equal(await balloonSlider('outline').inputValue(),'6.5');
+  await balloonSlider('outline').press('ArrowRight');assert.equal(await field('outline').inputValue(),'7');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'7');
+  await source.locator('[data-action=undo]').click();assert.equal(await balloonSlider('outline').inputValue(),'6.5');
+  await source.locator('[data-action=redo]').click();assert.equal(await balloonSlider('outline').inputValue(),'7');await source.locator('[data-action=undo]').click();
+  await balloon.locator('[data-field=borderWidth]').fill('3.25');assert.equal(await balloonSlider('borderWidth').inputValue(),'3.25');assert.equal(await field('borderWidth').inputValue(),'3.25');
+  await field('borderWidth').fill('4.5');assert.equal(await balloonSlider('borderWidth').inputValue(),'4.5');
+  await balloon.locator('[data-field=shadowOffsetX]').fill('-12');assert.equal(await balloonSlider('shadowOffsetX').inputValue(),'-12');
+  const oldTransparency=await balloon.locator('[data-field=transparency]').inputValue();await balloonSlider('transparency').scrollIntoViewIfNeeded();const track=await balloonSlider('transparency').boundingBox();
+  await page.mouse.move(track.x+track.width*.4,track.y+track.height/2);await page.mouse.down();await page.mouse.move(track.x+track.width*.7,track.y+track.height/2,{steps:8});await page.mouse.up();
+  const draggedTransparency=await balloonSlider('transparency').inputValue();assert.ok(Number(draggedTransparency)>60);assert.equal(await balloon.locator('[data-field=transparency]').inputValue(),draggedTransparency);
+  await source.locator('[data-action=undo]').click();assert.equal(await balloonSlider('transparency').inputValue(),oldTransparency);await source.locator('[data-action=redo]').click();assert.equal(await balloonSlider('transparency').inputValue(),draggedTransparency);
+  const brush=balloon.locator('.brush-settings');await brush.locator('summary').click();await balloon.locator('[data-field=brushPressureVariation]').fill('65');assert.equal(await balloonSlider('brushPressureVariation').inputValue(),'65');
+  await balloonSlider('brushPressureVariation').press('ArrowLeft');assert.equal(await balloon.locator('[data-field=brushPressureVariation]').inputValue(),'64');
+  const oldBrushSeed=await balloon.locator('[data-field=brushSeed]').inputValue();await balloon.locator('[data-action=regenerate-brush]').click();assert.equal(await brush.getAttribute('open'),'');assert.notEqual(await balloonSlider('brushSeed').inputValue(),oldBrushSeed);
+  await source.locator('[data-action=undo]').click();assert.equal(await balloonSlider('brushSeed').inputValue(),oldBrushSeed);assert.equal(await brush.getAttribute('open'),'');
+  await source.locator('[data-action=add-caption]').click();const caption=source.locator('[data-kind=caption]').first(),captionPairs=await assertNumericPairs(caption);
+  await caption.locator('[data-field=padding]').fill('37');assert.equal(await caption.locator('[data-numeric-field=padding]').inputValue(),'37');await caption.locator('[data-numeric-field=padding]').press('ArrowRight');assert.equal(await caption.locator('[data-field=padding]').inputValue(),'38');assert.equal(await field('padding').inputValue(),'38');
+  await caption.locator('[data-action=drop-layer]').click();await balloon.locator('.layer-summary').click();
   assert.equal(await balloon.locator('[data-field=shapeSeed]').isVisible(),true);assert.equal(await balloon.locator('[data-field=spikeCount]').isVisible(),false);
   await field('shapeSeed').fill('0');assert.equal(await balloon.locator('[data-field=shapeSeed]').inputValue(),'0');
   await balloon.locator('[data-field=shapeSeed]').fill('1');assert.equal(await field('shapeSeed').inputValue(),'1');
@@ -72,8 +96,11 @@ try {
   assert.equal(await dialogue.locator('[data-field=textColor]').inputValue(),'#2468aa');assert.equal(await balloon.locator('[data-field=shapeSeed]').inputValue(),'4321');assert.equal(await balloon.locator('[data-field=spikeCount]').inputValue(),'24');
   await page.reload();await page.locator('#projectInput').setInputFiles({name:'speech-style.json',mimeType:'application/json',buffer:projectBytes});await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await dialogue.locator('[data-field=textOutlineColor]').inputValue(),'#cc3300');assert.equal(await balloon.locator('[data-field=spikeCount]').inputValue(),'24');
+  await assertNumericPairs(balloon);await balloon.locator('.layer-summary').click();await balloon.locator('.brush-settings summary').click();
   await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/speech-style-desktop.png'});
+  await balloon.screenshot({path:'artifacts/balloon-card-sliders-desktop.png',style:'.collection-bar{visibility:hidden !important}'});
   await page.setViewportSize({width:420,height:860});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'artifacts/speech-style-mobile.png'});
-  assert.deepEqual(errors,[]);console.log('Speech style browser smoke passed: custom colors and outlines, zero outline, speaker defaults, synchronized controls, seed and tip count, regeneration undo, presets, copy scaling, fixed pixels, OffscreenCanvas parity, PNG and project/draft recovery, mobile layout.',pixels);
+  await balloon.screenshot({path:'artifacts/balloon-card-sliders-mobile.png',style:'.collection-bar{visibility:hidden !important}'});
+  assert.deepEqual(errors,[]);console.log('Speech style browser smoke passed: balloon/caption card numeric sliders, direct input and keyboard/pointer changes, synchronized controls, gesture undo/redo, brush details retained, custom colors and outlines, zero outline, speaker defaults, seed and tip count, regeneration undo, presets, copy scaling, fixed pixels, OffscreenCanvas parity, PNG and project/draft recovery, mobile layout.',{balloonPairs:balloonPairs.length,captionPairs:captionPairs.length,...pixels});
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/speech-style-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}

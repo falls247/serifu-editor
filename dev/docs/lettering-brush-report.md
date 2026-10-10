@@ -143,3 +143,17 @@ GEKIFUDEの読込を追加で待つため、未読込時は既存TTF約208KiBの
 `⋯`（U+22EF）と `─`（U+2500）を共通の縦書き回転対象へ追加した。従来は類似文字の `…`・`―` だけを扱っていたため、横向きのまま描かれた。効果音の標準配置／輪郭詰め、セリフ、吹き出し本文、キャプションすべてに反映し、横書きは従来の向きを維持する。
 
 3書体 × 2文字 × 縦横 × 各レイヤー／配置方式の60条件で、実インク領域の縦横比と実Worker PNGの画素差0を確認。`npm test`、`npm run check`、ビルド、組版ブラウザテストが成功。[修正前](../../artifacts/vertical-symbols-before.png)と[修正後](../../artifacts/vertical-symbols-after.png)を目視確認した。結果は [vertical-symbols-results.json](../../artifacts/vertical-symbols-results.json)、判断の補足は [ADR-0005](adr/0005-fonts-and-manga-typography.md)。
+
+## 追加修正: 吹き出しカードと元画像の比較表示
+
+吹き出し・キャプションのカードが共通処理より前に終了し、スライダー追加とブラシ詳細の開閉復元を飛ばしていた。カード追加処理を共通化し、吹き出し14項目・キャプション9項目を直接入力・増減・スライダーで調整できるようにした。数値範囲、保存データ、描画パラメータは維持する。
+
+元画像の上に「ORIGINAL」を追加した。両方の枠に収まる共通サイズで元画像とLIVE PREVIEWを表示し、横並びでは上端も揃える。縦横比を保ち、画面幅・サムネイル欄の開閉に追従する。共通の幅は狭い方の列で決まるため、広い列では左右に余白が生じる。PNGの解像度や編集座標は変更しない。
+
+ブラウザで数値入力、端数・負数、スライダーのキーボード操作とドラッグ、右側設定との同期、Undo/Redo、筆跡再生成後の詳細保持、保存復元を確認した。比較表示は3種類の画像比率と6段階の画面幅、サムネイル欄の開閉を含む24条件で画像・枠の高さと横並び時の上端が一致。デスクトップとモバイルで目視確認した。
+
+`npm test`（15ファイル）、`npm run check`、ビルドが成功。全12本のブラウザテストは個別実行を含めて成功した。まとめ実行では、狭いプレビューでテストの回転ハンドルが画像外へ出る条件を検出し、画像内で回転を確認する条件へ修正した。また、別ページの追加ボタンがフォーカス時のカード伸縮で移動し、初回クリックが失われる実際の不具合を修正した。修正後の編集・プリセット・スライダー・一覧の回帰テストは成功。
+
+- [吹き出しカード](../../artifacts/balloon-card-sliders-desktop.png)、[モバイルのカード](../../artifacts/balloon-card-sliders-mobile.png)
+- [比較表示](../../artifacts/preview-layout-desktop.png)、[モバイルの比較表示](../../artifacts/preview-layout-mobile.png)、[検証値](../../artifacts/preview-layout-results.json)
+- 判断の補足: [ADR-0015](adr/0015-numeric-controls-and-glyph-fallback.md)、[ADR-0001](adr/0001-static-app-and-export.md)

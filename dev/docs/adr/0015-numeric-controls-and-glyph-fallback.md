@@ -37,3 +37,11 @@ GEKIFUDEにもない文字は従来の端末書体へ進む。端末書体やフ
 - [model.js](../../../model.js)、[presets.js](../../../presets.js): 効果音の輪郭色
 - [fonts.test.mjs](../../../test/fonts.test.mjs)、[speech-style.test.mjs](../../../test/speech-style.test.mjs): 空字形・キャッシュ・色保存
 - [sfx-controls-smoke.mjs](../../../scripts/sfx-controls-smoke.mjs): 詳細保持、数値入力、スライダー、40条件のハート描画、PNG／Worker一致
+
+## 追加修正: 吹き出し・キャプションのカード
+
+吹き出しとキャプションは、専用カードを追加した直後の早期終了により、共通の数値UI追加と詳細開閉状態の復元を通っていなかった。`renderCards()` のカード追加処理を共通化し、全種類でスライダー生成と開閉状態の復元を実行する。数値範囲・刻み・モデル・保存版は変更しない。
+
+`data-action` ボタンへのフォーカスではページ選択を変更せず、既存のクリック処理で選択して操作する。別ページへフォーカスした瞬間のカードの折り畳み・展開により、pointerdownとpointerupの間でボタン位置が変わり、初回クリックが失われるため。入力欄とカードの選択見出しは従来どおりフォーカスで選択する。
+
+[speech-style-smoke.mjs](../../../scripts/speech-style-smoke.mjs) で吹き出し14組・キャプション9組の数値UI、端数と負の値、キーボードとポインタ操作、右側設定欄との同期、操作単位のUndo/Redo、筆跡再生成後の詳細保持、保存・再読み込み、モバイルの収まりを検証する。

@@ -200,6 +200,8 @@ try {
   const resizeX = handleRect.x + handleRect.width * (350 + width / 2) / 1000, resizeY = handleRect.y + handleRect.height * (350 + height / 2) / 750;
   await page.mouse.move(resizeX, resizeY); await page.mouse.down(); await page.mouse.move(resizeX + 15, resizeY + 15, { steps: 5 }); await page.mouse.up();
   assert.ok(Number(await wInput.inputValue()) > width, 'resize handle must update the layout width');
+  // A fixed screen-distance resize grows more at smaller preview scales; keep the rotation handle inside the image.
+  await hInput.fill('300');await hInput.blur();
   const updatedHeight = Number(await hInput.inputValue()), centerX = handleRect.x + handleRect.width * .35, centerY = handleRect.y + handleRect.height * 350 / 750;
   const rotateY = centerY - handleRect.height * updatedHeight / 1500 - 24;
   await page.mouse.move(centerX, rotateY); await page.mouse.down(); await page.mouse.move(centerX + 35, rotateY + 10, { steps: 5 }); await page.mouse.up();
@@ -222,7 +224,8 @@ try {
   assert.equal(await first.locator('.position-controls [data-field=size]').inputValue(),'66');
   assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
   assert.equal(await first.locator('.position-controls [data-field=vertical]').inputValue(),'true');
-  await second.locator('[data-action=add-female]').click();
+  const secondLayerCount=await second.locator('.layer-card').count();await second.locator('[data-action=add-female]').click();
+  assert.equal(await second.locator('.layer-card').count(),secondLayerCount+1,'the first click on another page must add a layer without moving the button during focus');
   assert.equal(await second.locator('.position-controls [data-field=size]').inputValue(),'66');
   assert.equal(await second.locator('.layer-card').last().locator('[data-preset-select]').inputValue(),dialoguePreset);
   const effectCard=await selectCard(first,2);await effectCard.locator('textarea').focus();

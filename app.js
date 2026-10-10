@@ -282,10 +282,13 @@ function persistPageControl(p) {
 
 function sizePreview(p) {
   if (!p.row) return;
-  const frame = p.row.querySelector('.preview-frame');
-  const width = Math.max(1, Math.min(frame.clientWidth - 2, 620 * p.img.width / p.img.height));
-  p.canvas.style.width = `${width}px`;
-  p.canvas.style.height = `${width * p.img.height / p.img.width}px`;
+  const frame=p.row.querySelector('.preview-frame'),originalFrame=p.row.querySelector('.original-frame');
+  const aspect=p.img.width/p.img.height,maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
+  const width=Math.max(1,Math.min(frame.clientWidth-2,originalFrame.clientWidth-2,maxHeight*aspect));
+  for(const image of [p.canvas,p.row.querySelector('.original')]){
+    image.style.width=`${width}px`;image.style.height=`${width/aspect}px`;
+  }
+  p.row.querySelector('.original-toolbar').style.height=`${p.row.querySelector('.preview-toolbar:not(.original-toolbar)').getBoundingClientRect().height}px`;
   drawPage(p);
 }
 
@@ -536,6 +539,11 @@ function renderCards(p) {
   rememberCardDetails(p);
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
+  const appendCard=(card,layer)=>{
+    addNumericControls(card,p);
+    for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${layer.id}:${details.querySelector('summary').textContent}`)??false;
+    container.append(card);
+  };
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
     const summary=element('button','layer-summary');summary.type='button';summary.title='クリックして編集';renderLayerSummary(l,summary);card.append(summary);
@@ -576,7 +584,7 @@ function renderCards(p) {
        shadowLabel.prepend(shadowToggle);card.append(shadowLabel);
       const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
       card.append(element('p','effect-note','25%透過＝不透明度75%。セリフ・書体・文字サイズ・方向・枠と形状は右側で調整。'));
-      container.append(card);continue;
+      appendCard(card,l);continue;
     }
     if(l.kind==='caption'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='モノローグ・説明を入力';text.setAttribute('aria-label','キャプションの本文');card.append(text);
@@ -590,7 +598,7 @@ function renderCards(p) {
         for(const [value,text] of Object.entries(CAPTION_ALIGNMENTS[field])){const option=element('option','',text);option.value=value;select.append(option);}select.value=l[field];label.append(select);grid.append(label);
       }
       const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
-      card.append(grid,brushControls(l),autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
+      card.append(grid,brushControls(l),autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));appendCard(card,l);continue;
     }
     const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.wrap='off';fitTextInput(text);
     text.placeholder = l.kind === 'sfx' ? 'ドーン！' : 'セリフを入力';
@@ -634,9 +642,7 @@ function renderCards(p) {
       for(const [value,label] of Object.entries(WARP_CHOICES)){const option=element('option','',label);option.value=value;warpSelect.append(option);}warpSelect.value=l.warp;warpLabel.append(warpSelect);grid.append(warpLabel);
       details.append(grid,element('p','effect-note','手描きの揺れはサイズ±5%・左右±3%から調整。左右は文字幅が基準。0で追加のばらつきなし。文字ごとの変化は保存・再読込でも固定。'),element('p','effect-note','感情・緊張はプリセット「感情／緊張の掠れ」から開始。縦ブラーは300px、滲みは400%まで。「文字の芯」で読みやすさを調整。掠れ・ハネは文字の形に直接適用。'));card.append(details);
     }
-    addNumericControls(card,p);
-    for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${l.id}:${details.querySelector('summary').textContent}`)??false;
-    container.append(card);
+    appendCard(card,l);
   }
   refreshPresetMenus(p); updateControls(p);
 }
@@ -658,6 +664,7 @@ function mountPage(p) {
   p.canvas.width = Math.max(1, Math.round(p.img.width * scale)); p.canvas.height = Math.max(1, Math.round(p.img.height * scale));
   $('deck').append(row); renderCards(p);
   p.resizeObserver = new ResizeObserver(() => sizePreview(p)); p.resizeObserver.observe(row.querySelector('.preview-frame'));
+  p.resizeObserver.observe(row.querySelector('.original-frame'));p.resizeObserver.observe(row.querySelector('.preview-toolbar:not(.original-toolbar)'));
   connectCanvas(p); sizePreview(p);
 }
 
@@ -695,7 +702,7 @@ function edit(p, fn, rebuild = true) {
 }
 
 $('deck').addEventListener('focusin', event => {
-  if (editLocked()) return;
+  if (editLocked()||event.target.closest('button[data-action]')) return;
   const p = pageFrom(event.target); if (!p) return;
   const id = event.target.closest('.layer-card')?.dataset.layerId;
   activate(p, id || p.selectedId);
