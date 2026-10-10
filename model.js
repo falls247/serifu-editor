@@ -97,7 +97,7 @@ export function copySelection(layer, width, height) {
 export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
-    size:clamp(layer.size*scale,8,500),outline:clamp(layer.outline*scale,1,80),thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),borderWidth:clamp(layer.borderWidth*scale,0,80),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
+    size:clamp(layer.size*scale,8,500),outline:clamp(layer.outline*scale,1,80),thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),borderWidth:clamp(layer.borderWidth*scale,0,80),shadowBlur:clamp((layer.shadowBlur??12)*scale,0,100),shadowOffsetX:clamp((layer.shadowOffsetX??6)*sx,-100,100),shadowOffsetY:clamp((layer.shadowOffsetY??6)*sy,-100,100),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
   if(layer.kind==='caption')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
     size:clamp(layer.size*scale,...CAPTION_LIMITS.size),padding:clamp(layer.padding*scale,...CAPTION_LIMITS.padding),borderWidth:clamp(layer.borderWidth*scale,...CAPTION_LIMITS.borderWidth),textOutlineWidth:clamp((layer.textOutlineWidth??0)*scale,...CAPTION_LIMITS.textOutlineWidth)};
   return {
