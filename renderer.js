@@ -1,4 +1,4 @@
-import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
+import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { fontDescription } from './fonts.js';
 import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
