@@ -42,3 +42,14 @@
 .layer-card:not(.selected)>:not(.layer-summary){display:none}
 .layer-card:not(.selected)>.layer-summary{display:-webkit-box;width:100%;text-align:left;padding:0;background:transparent;border:0;border-radius:0;color:#e9eaf0;white-space:normal;overflow-wrap:anywhere;line-height:1.5;font-size:13px;cursor:pointer;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
 .layer-card:not(.selected)>.layer-summary:hover{background:transparent}
+
+/* Independent SFX print texture controls; hidden must beat display:grid. */
+.ink-texture-panel{margin-top:10px;padding-top:9px;border-top:1px solid var(--line,#444)}
+.ink-texture-panel>label{display:block;font-size:11px}
+.grunge-controls[hidden]{display:none}
+.grunge-controls button{grid-column:1/-1;font-size:11px;min-height:30px}
+.grunge-controls .effect-note{grid-column:1/-1;margin:0}
+.effect-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.effect-grid label{min-width:0;overflow-wrap:anywhere}
+.effect-grid input,.effect-grid select{width:100%;min-width:0;box-sizing:border-box}
+@media(max-width:520px){.ink-texture-panel .effect-grid{grid-template-columns:minmax(0,1fr)}}
