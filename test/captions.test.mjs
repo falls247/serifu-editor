@@ -7,10 +7,10 @@ import {normalizeLayer,copySelection,pasteSelection,copyLayers,pasteLayers,cutLa
 const page=layers=>({layers,edited:false,done:false,selectedId:layers[0]?.id||null,undo:[],redo:[]});
 const context=()=>({font:'',save(){this.saved=this.font;},restore(){this.font=this.saved;},measureText(char){const size=Number(this.font.match(/([\d.]+)px/)[1]),width=size*(/^[\x00-\x7f]+$/.test(char)?.6:1);return {width,actualBoundingBoxLeft:0,actualBoundingBoxRight:width,actualBoundingBoxAscent:size*.8,actualBoundingBoxDescent:size*.2};}});
 
-test('new captions contain an independent white box, black frame and editable text with fitting off',()=>{
+test('new captions contain an independent white box, black frame and editable text with fitting on',()=>{
   const layer=newLayer('caption',1000,750);
   assert.equal(layer.text,'');assert.equal(layer.color,'#ffffff');assert.equal(layer.transparency,25);
-  assert.equal(layer.borderColor,'#000000');assert.equal(layer.textColor,'#111111');assert.equal(layer.autoFit,false);assert.equal(layer.vertical,true);
+  assert.equal(layer.borderColor,'#000000');assert.equal(layer.textColor,'#111111');assert.equal(layer.autoFit,true);assert.equal(layer.vertical,true);
   const restored=normalizeLayer(JSON.parse(JSON.stringify(layer)),5);assert.notEqual(restored.id,layer.id);assert.deepEqual({...restored,id:layer.id},layer);
   const rotated={...layer,x:100,y:100,w:200,h:40,rotation:90};assert.equal(hit(rotated,100,180),true);assert.equal(hit(rotated,180,100),false);
 });
@@ -38,7 +38,7 @@ test('automatic caption fitting reserves space for text outlines in either direc
 });
 
 test('manual caption font size remains fixed when its box changes, and overflow is detectable',()=>{
-  const layer={...newLayer('caption',1000,750),text:'あいうえおかきくけこ'.repeat(3),size:40,w:140,h:120,padding:8};
+  const layer={...newLayer('caption',1000,750),text:'あいうえおかきくけこ'.repeat(3),size:40,w:140,h:120,padding:8,autoFit:false};
   const small=captionLayout(context(),layer),large=captionLayout(context(),{...layer,w:500,h:500});
   assert.equal(small.size,40);assert.equal(large.size,40);assert.equal(small.fits,false);assert.equal(large.fits,true);assert.equal(layer.size,40);
 });

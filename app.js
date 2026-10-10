@@ -12,6 +12,7 @@ import { imageDimensions } from './image-metadata.js';
 import { ImagePool } from './bulk-pool.js';
 import { ExportCache, exportKey } from './export-cache.js';
 import { originalBlob, projectParts, projectBlob, readProject, writeParts } from './project-io.js';
+import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
 import { FONT_CATALOG, FONT_STYLES, fontDescription } from './fonts.js';
 
 const $ = id => document.getElementById(id);
@@ -26,18 +27,20 @@ for(const select of $('pageTemplate').content.querySelectorAll('[data-field=font
   }
 }
 const fontLoads=new Map();
+const fontWaiters=new Map();
 const fontErrors=new Set();
 function requestPageFonts(p){
   if(!document.fonts)return;
   for(const layer of p.layers){
-    if(layer.kind==='balloon')continue;
     const query=fontDescription(layer).load;
-    if(!query||document.fonts.check(query)||fontLoads.has(query))continue;
-    fontLoads.set(query,document.fonts.load(query).then(()=>{fontErrors.delete(query);clearGlyphCache();pages.forEach(drawPage);pages.forEach(updateControls);}).catch(error=>{fontErrors.add(query);pages.forEach(updateControls);status(`書体を読み込めなかった: ${error.message}。ページを再読込して再試行。`);}));
+    if(!query||document.fonts.check(query))continue;
+    if(fontLoads.has(query)){fontWaiters.get(query)?.add(p);continue;}
+    const waiting=new Set([p]);fontWaiters.set(query,waiting);
+    fontLoads.set(query,document.fonts.load(query).then(()=>{fontErrors.delete(query);clearGlyphCache();const affected=new Set([...pages,...waiting]);affected.forEach(page=>{drawPage(page);scheduleThumbnailRefresh(page,true);updateControls(page);});}).catch(error=>{fontErrors.add(query);for(const page of new Set([...pages,...waiting]))updateControls(page);status(`書体を読み込めなかった: ${error.message}。ページを再読込して再試行。`);}).finally(()=>fontWaiters.delete(query)));
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
-let sourceDirectory = null, currentTask=null, fontVersion=0;
+let sourceDirectory = null, sourceFolderName = null, currentTask=null, fontVersion=0;
 const imagePool=new ImagePool(),pngCache=new ExportCache();
 const editLocked=()=>busy&&currentTask?.data.kind!=='画像追加';
 const viewLocked=()=>busy&&currentTask?.data.kind==='レイヤー一括操作';
@@ -54,7 +57,7 @@ function displayTask(data){
   $('bulkCancel').disabled=data.state!=='running';
 }
 $('bulkCancel').onclick=()=>currentTask?.cancel();
-function releasePage(p){unmountPage(p);p.thumbnail?.remove();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);if(p.thumbnailSrc.startsWith('blob:'))URL.revokeObjectURL(p.thumbnailSrc);pngCache.invalidate(p.id);}
+function releasePage(p){unmountPage(p);p.thumbnailReleased=true;clearTimeout(p.thumbnailTimer);p.thumbnailGeneration++;p.thumbnail?.remove();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);for(const url of new Set([p.thumbnailBaseSrc,p.thumbnailSrc]))if(url?.startsWith('blob:'))URL.revokeObjectURL(url);pngCache.invalidate(p.id);}
 
 const VIEW_KEY = 'serifu.view.v1';
 let view = { pageSize: 50, thumbnails: true, scale: 100 }, batchStart = 0, syncingView = false;
@@ -81,14 +84,68 @@ function pageFrom(element) {
 }
 
 function createPage({ id=crypto.randomUUID(), name, src, img, prepared, file = null, directory = null, layers = [], done = false, edited = false, expectedSize, preserveEdited=false }) {
-  let thumbnailSrc;
-  if(prepared){img=new Image(prepared.width,prepared.height);thumbnailSrc=URL.createObjectURL(prepared.thumbnail);}
+  let thumbnailBaseSrc;
+  if(prepared){img=new Image(prepared.width,prepared.height);thumbnailBaseSrc=URL.createObjectURL(prepared.thumbnail);}
   else{
     const thumbnail=document.createElement('canvas'),ratio=Math.min(1,320/Math.max(img.width,img.height));
-    thumbnail.width=Math.max(1,Math.round(img.width*ratio));thumbnail.height=Math.max(1,Math.round(img.height*ratio));thumbnail.getContext('2d').drawImage(img,0,0,thumbnail.width,thumbnail.height);thumbnailSrc=thumbnail.toDataURL('image/webp',.75);thumbnail.width=1;thumbnail.height=1;
+    thumbnail.width=Math.max(1,Math.round(img.width*ratio));thumbnail.height=Math.max(1,Math.round(img.height*ratio));thumbnail.getContext('2d').drawImage(img,0,0,thumbnail.width,thumbnail.height);thumbnailBaseSrc=thumbnail.toDataURL('image/webp',.75);thumbnail.width=1;thumbnail.height=1;
     img.width=img.naturalWidth||img.width;img.height=img.naturalHeight||img.height;img.onload=null;img.onerror=null;img.src='';
   }
-  return { id, name, src, thumbnailSrc, img, file, directory, layers, done, edited:expectedSize||preserveEdited?edited===true:edited===true||layers.length>0, selectedId: layers[0]?.id || null, undo: [], redo: [] };
+  return { id, name, src, thumbnailSrc:thumbnailBaseSrc, thumbnailBaseSrc, thumbnailRenderedSignature:layers.length?null:thumbnailSignature({layers}), thumbnailGeneration:0, img, file, directory, layers, done, edited:expectedSize||preserveEdited?edited===true:edited===true||layers.length>0, selectedId: layers[0]?.id || null, undo: [], redo: [] };
+}
+const emptyThumbnailImage=document.createElement('canvas');
+emptyThumbnailImage.width=1;emptyThumbnailImage.height=1;
+function thumbnailSignature(p){return `${fontVersion}:${JSON.stringify(p.layers)}`;}
+async function renderPageThumbnail(p,signal,force=false){
+  checkAbort(signal);
+  const signature=thumbnailSignature(p);
+  if(!force&&p.thumbnailRenderedSignature===signature)return;
+  const generation=++p.thumbnailGeneration;
+  if(!p.layers.length){
+    const previous=p.thumbnailSrc;p.thumbnailSrc=p.thumbnailBaseSrc;p.thumbnailRenderedSignature=signature;
+    const image=p.thumbnail?.querySelector('img');if(image)image.src=p.thumbnailSrc;
+    if(previous&&previous!==p.thumbnailBaseSrc&&previous.startsWith('blob:'))URL.revokeObjectURL(previous);
+    return;
+  }
+  let base,canvas,overlay;
+  try{
+    base=await decode(p.thumbnailBaseSrc);checkAbort(signal);
+    const width=base.naturalWidth||base.width,height=base.naturalHeight||base.height;
+    canvas=document.createElement('canvas');overlay=document.createElement('canvas');
+    canvas.width=overlay.width=width;canvas.height=overlay.height=height;
+    const ctx=canvas.getContext('2d');ctx.drawImage(base,0,0,width,height);
+    const ratio=Math.min(width/p.img.width,height/p.img.height);
+    draw(overlay.getContext('2d'),emptyThumbnailImage,p.layers,null,ratio,ratio);
+    ctx.drawImage(overlay,0,0);
+    const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/webp',.8));
+    if(!blob)throw new Error('サムネイルを生成できない');checkAbort(signal);
+    if(generation!==p.thumbnailGeneration||thumbnailSignature(p)!==signature)return;
+    const url=URL.createObjectURL(blob),previous=p.thumbnailSrc;
+    p.thumbnailSrc=url;p.thumbnailRenderedSignature=signature;
+    const image=p.thumbnail?.querySelector('img');if(image)image.src=url;
+    if(previous&&previous!==p.thumbnailBaseSrc&&previous.startsWith('blob:'))URL.revokeObjectURL(previous);
+  }finally{
+    if(base)base.src='';
+    if(canvas){canvas.width=1;canvas.height=1;}
+    if(overlay){overlay.width=1;overlay.height=1;}
+  }
+}
+function scheduleThumbnailRefresh(p,force=false){
+  if(!p?.thumbnailBaseSrc||p.thumbnailReleased)return;
+  p.thumbnailWantedSignature=thumbnailSignature(p);p.thumbnailForce=!!p.thumbnailForce||force;
+  clearTimeout(p.thumbnailTimer);
+  p.thumbnailTimer=setTimeout(()=>{
+    p.thumbnailTimer=null;if(p.thumbnailRendering)return;
+    const targetSignature=p.thumbnailWantedSignature,rebuild=p.thumbnailForce;p.thumbnailForce=false;
+    const rendering=renderPageThumbnail(p,null,rebuild).catch(error=>{
+      if(!p.thumbnailReleased&&error.name!=='AbortError'){p.thumbnailFailedSignature=targetSignature;status(`「${p.name}」のサムネイルを更新できなかった: ${error.message}`);}
+    }).finally(()=>{
+      if(p.thumbnailRendering!==rendering)return;
+      p.thumbnailRendering=null;
+      if(p.thumbnailForce||(p.thumbnailWantedSignature!==p.thumbnailRenderedSignature&&(p.thumbnailWantedSignature!==p.thumbnailFailedSignature||p.thumbnailForce)))scheduleThumbnailRefresh(p,p.thumbnailForce);
+    });
+    p.thumbnailRendering=rendering;
+  },70);
 }
 async function prepareImageJob(blob,task,dimensions=null){return imagePool.run('prepare-image',{blob,dimensions},task,async()=>{
   const src=URL.createObjectURL(blob);let img,canvas;
@@ -145,8 +202,9 @@ function updateGlobal() {
         if (p.id === activeId) p.thumbnail.setAttribute('aria-current', 'page');
         else p.thumbnail.removeAttribute('aria-current');
         p.thumbnail.querySelector('.thumbnail-number').textContent = String(i + 1).padStart(2, '0');
-        p.thumbnail.querySelector('.thumbnail-state').textContent = p.done ? '✓ 確認済み' : p.edited ? '編集済み' : '未編集';
-        p.thumbnail.setAttribute('aria-label', `${i + 1}ページ ${p.name} ${p.done ? '確認済み' : p.edited ? '編集済み' : '未編集'}`);
+        const stateLabel=p.edited?`編集済み${p.done?' · ✓ 確認済み':''}`:p.done?'✓ 確認済み':'未編集';
+        p.thumbnail.querySelector('.thumbnail-state').textContent = stateLabel;
+        p.thumbnail.setAttribute('aria-label', `${i + 1}ページ ${p.name} ${stateLabel}`);
       }
     }
     if (!p.row) return;
@@ -181,6 +239,45 @@ function drawPage(p) {
   draw(p.canvas.getContext('2d'), p.img, p.layers, p.id === activeId ? p.selectedId : null, scale, displayScale);
 }
 
+function layerSummary(layer) {
+  if(layer.kind==='balloon')return `吹き出し：${layer.shape==='distorted-rect'?'歪み長方形':layer.shape==='spiky'?'尖り形':'楕円'}`;
+  return layer.text||'（未入力）';
+}
+
+function renderLayerSummary(layer,button) {
+  button.replaceChildren();
+  if(layer.kind==='dialogue'||layer.kind==='balloon'){
+    const speaker=layer.speaker==='female'?'女性':'男性';
+    const prefix=layer.kind==='balloon'?`○ ${speaker}吹き出し：`:`●${speaker}セリフ：`;
+    button.append(element('span','layer-summary-speaker',prefix),document.createTextNode(layer.text||'（未入力）'));
+  }else button.textContent=layerSummary(layer);
+}
+
+function persistControlValue(p,input) {
+  if(!p?.row||!input?.matches('[data-field]'))return;
+  const field=input.dataset.field,card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
+  if(!layer)return;
+  let value=input.value;
+  const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[1,80],...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
+  if(field==='vertical')value=value==='true';
+  else if(input.type==='checkbox')value=input.checked;
+  else if(input.type==='number'||input.type==='range'){
+    if(value===''||!Number.isFinite(Number(value)))return;
+    value=Number(value);
+    if(Object.hasOwn(limits,field))value=clamp(value,...limits[field]);
+  }
+  if(Object.is(layer[field],value))return;
+  checkpoint(p);layer[field]=value;if(field!=='text')layer.presetId=null;
+  if(field==='text'){fitTextInput(input);const summary=card.querySelector('.layer-summary');if(summary)renderLayerSummary(layer,summary);}
+  markChanged(p);
+  drawPage(p);
+  if(field!=='text')refreshPresetMenus(p);
+}
+
+function persistPageControl(p) {
+  if(p?.row?.contains(document.activeElement))persistControlValue(p,document.activeElement);
+}
+
 function sizePreview(p) {
   if (!p.row) return;
   const frame = p.row.querySelector('.preview-frame');
@@ -195,10 +292,19 @@ function updateControls(p) {
   const l = selected(p), controls = p.row.querySelector('.position-controls');
   controls.disabled = !l;
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
-  controls.querySelector('legend').textContent = balloon?'吹き出し：楕円とテールの位置調整':l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
-  for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=balloon;
-  for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=balloon||caption;
+  controls.querySelector('legend').textContent = balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
+  for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=!l;
+  controls.querySelector('.multiline-align-control').hidden=!l||!['dialogue','balloon'].includes(l.kind);
+  for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=!l||caption;
   controls.querySelector('.balloon-style-controls').hidden=!balloon&&!caption;
+  const shapeControl=controls.querySelector('.balloon-shape-control'),shapeSelect=shapeControl.querySelector('select');
+  shapeControl.hidden=!balloon&&!caption;
+  shapeControl.firstChild.textContent=caption?'キャプション形状':'吹き出し形状';
+  for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!['ellipse','distorted-rect','spiky'].includes(option.value);
+  const showDistortion=balloon?['distorted-rect','spiky'].includes(l.shape):caption&&l.shape==='spiky';
+  controls.querySelector('.balloon-distortion-control').hidden=!showDistortion;
+  controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??55}%`;
+  controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
@@ -213,13 +319,13 @@ function updateControls(p) {
   }
   const captionStatus=controls.querySelector('.caption-fit-status');captionStatus.hidden=!caption;
   if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${layout.size}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
-  const query=l&&!balloon&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
+  const query=l&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
   fontStatus.textContent=query&&document.fonts&&!document.fonts.check(query)?fontErrors.has(query)?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
   fontStatus.hidden=!fontStatus.textContent;
   const fontNote=controls.querySelector('.font-note');
-  fontNote.textContent=l&&!balloon?FONT_CATALOG[l.font]?.note||'':'';fontNote.hidden=!fontNote.textContent;
+  fontNote.textContent=l?FONT_CATALOG[l.font]?.note||'':'';fontNote.hidden=!fontNote.textContent;
   for (const card of p.row.querySelectorAll('.layer-card')) {
-    card.classList.toggle('selected', card.dataset.layerId === p.selectedId);
+    card.classList.toggle('selected', p.id===activeId&&card.dataset.layerId === p.selectedId);
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
     if(layer?.kind==='sfx'){
       card.querySelector('.taper-controls').hidden=layer.effect!=='taper';
@@ -234,17 +340,20 @@ function updateControls(p) {
 }
 
 function activate(p, id = p.selectedId, scroll = false) {
-  const previous = active(); activeId = p.id; p.selectedId = id;
+  const previous = active();
+  if(previous&&previous!==p)persistPageControl(previous);
+  activeId = p.id; p.selectedId = id;
   const index = pages.indexOf(p);
   const nextStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
   if (!p.row || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
-  if (previous && previous !== p) drawPage(previous);
+  if (previous && previous !== p) { updateControls(previous); drawPage(previous); }
   updateControls(p); drawPage(p); updateGlobal();
   if (scroll) p.row.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function unmountPage(p) {
   if (!p.row) return;
+  persistPageControl(p);
   p.resizeObserver?.disconnect();
   p.canvas.width = 1; p.canvas.height = 1;
   p.row.remove(); p.row = null; p.canvas = null; p.resizeObserver = null;
@@ -339,10 +448,11 @@ function renderCards(p) {
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
+    const summary=element('button','layer-summary');summary.type='button';summary.title='クリックして編集';renderLayerSummary(l,summary);card.append(summary);
     const header = element('div', 'card-header'),heading=element('div','card-heading');
     heading.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
-    if (l.kind === 'dialogue') {
-      const roles = element('div', 'role-switch');roles.setAttribute('role','group');roles.setAttribute('aria-label','話者の切替');
+    if (l.kind === 'dialogue'||l.kind==='balloon') {
+      const roles = element('div', 'role-switch');roles.setAttribute('role','group');roles.setAttribute('aria-label',l.kind==='balloon'?'吹き出し内セリフの話者切替':'話者の切替');
       for (const [speaker, label] of [['male', '男性・黒'], ['female', '女性・ピンク']]) {
         const b = button(`speaker-${speaker}`, label);b.classList.toggle('chosen', l.speaker === speaker);b.setAttribute('aria-pressed',String(l.speaker===speaker));roles.append(b);
       }
@@ -355,6 +465,7 @@ function renderCards(p) {
     presetSelect.dataset.presetSelect='';presetSelect.setAttribute('aria-label',`${presetLabels[l.kind]}プリセット`);
     presetLine.append(presetSelect,button('save-preset','保存','この設定に名前を付けてプリセットを保存'),button('delete-preset','削除','選択中の保存プリセットを削除'));card.append(presetLine);
     if(l.kind==='balloon'){
+      const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='吹き出しのセリフを入力';text.setAttribute('aria-label',l.speaker==='female'?'女性の吹き出しセリフ':'男性の吹き出しセリフ');card.append(text);
       const grid=element('div','effect-grid');
       for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
@@ -363,7 +474,7 @@ function renderCards(p) {
       const orderLabel=element('label','','効果音との重なり'),order=element('select');order.dataset.field='sfxOrder';
       for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);card.append(grid);
       const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
-      card.append(element('p','effect-note','25%透過＝不透明度75%。台詞より常に下。楕円の位置・幅・高さと、テールの先端・付根は右側で調整。'));
+      card.append(element('p','effect-note','25%透過＝不透明度75%。セリフ・書体・文字サイズ・方向・枠と形状は右側で調整。'));
       container.append(card);continue;
     }
     if(l.kind==='caption'){
@@ -452,7 +563,7 @@ function movePage(p, offset) {
 }
 
 function markChanged(p) {
-  dirty(); p.done = false;p.edited=true; updateGlobal();
+  dirty(); p.done = false;p.edited=true;scheduleThumbnailRefresh(p);updateGlobal();
 }
 
 function edit(p, fn, rebuild = true) {
@@ -471,7 +582,7 @@ $('deck').addEventListener('focusin', event => {
 $('deck').addEventListener('focusout', event => {
   editing.delete(event.target);
   const p = pageFrom(event.target);
-  if (p) queueMicrotask(() => updateControls(p));
+  if (p) { persistControlValue(p,event.target); queueMicrotask(() => updateControls(p)); }
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
@@ -490,7 +601,9 @@ $('deck').addEventListener('input', event => {
   else if(field==='tail'||field==='autoFit')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field!=='text')l.presetId=null;markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
+  l[field] = value;if(field!=='text')l.presetId=null;
+  if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)renderLayerSummary(l,summary);}
+  markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
 
 $('deck').addEventListener('click', event => {
@@ -507,8 +620,8 @@ $('deck').addEventListener('click', event => {
       const layer = makeLayer(kind,p.img.width,p.img.height,speaker);
       p.layers.push(layer); p.selectedId = layer.id;
     });
-    p.row.querySelector(`.layer-card[data-layer-id="${p.selectedId}"] ${kind==='balloon'?'input':'textarea'}`).focus({ preventScroll: true });
-  } else if (action.startsWith('speaker-') && l?.kind === 'dialogue') {
+    p.row.querySelector(`.layer-card[data-layer-id="${p.selectedId}"] textarea`).focus({ preventScroll: true });
+  } else if (action.startsWith('speaker-') && ['dialogue','balloon'].includes(l?.kind)) {
     edit(p, () => l.speaker = action.slice(8));
   } else if (action === 'save-preset' && l) {
     saveSelectedPreset();
@@ -523,7 +636,7 @@ $('deck').addEventListener('click', event => {
   } else if (action === 'center' && l) {
     edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2;l.presetId=null; }, false);refreshPresetMenus();
   } else if (['undo', 'redo'].includes(action)) {
-    if (restore(p, action)) { dirty(); renderCards(p); drawPage(p); updateGlobal(); }
+    if (restore(p, action)) { dirty(); scheduleThumbnailRefresh(p);renderCards(p); drawPage(p); updateGlobal(); }
   } else if (action === 'save-image') {
     guard(task=>saveImage(p,task),'PNG保存',2);
   } else if (action === 'move-up' || action === 'move-down') {
@@ -551,8 +664,8 @@ async function bulkLayers(action,p,task){
   const copies=await prepareLayers(source.layers,layer=>action==='copy-all'||action==='cut-all'?structuredClone(layer):scaledCopy(layer,source.width,source.height,target.img.width,target.img.height),task);
   checkAbort(task.signal);task.stage('データ適用',copies.length);
   if(action==='copy-all'||action==='cut-all')pageClipboard={layers:copies,width:source.width,height:source.height,name:p.name,cut:action==='cut-all'};
-  if(action==='cut-all'){checkpoint(p);p.layers=[];p.selectedId=null;dirty();}
-  else if(action==='paste-all'||action==='copy-next'){checkpoint(target);target.layers.push(...copies);target.selectedId=action==='copy-next'?copies.at(-1).id:copies[0].id;dirty();}
+  if(action==='cut-all'){checkpoint(p);p.layers=[];p.selectedId=null;dirty();scheduleThumbnailRefresh(p);}
+  else if(action==='paste-all'||action==='copy-next'){checkpoint(target);target.layers.push(...copies);target.selectedId=action==='copy-next'?copies.at(-1).id:copies[0].id;dirty();scheduleThumbnailRefresh(target);}
   task.update({processed:copies.length,succeeded:copies.length},true);task.stage('画面反映',1);
   if(action!=='copy-all'){renderCards(target);drawPage(target);}if(action==='copy-next')activate(target,target.selectedId,true);else updateGlobal();
   task.result(target.name);status(`「${target.name}」の文字を${{ 'copy-all':'コピー','cut-all':'カット','paste-all':'貼付け','copy-next':'複製'}[action]}した（${copies.length}件）。`);
@@ -591,7 +704,7 @@ function connectCanvas(p) {
     if (Object.entries(updates).every(([key, value]) => l[key] === value)) return;
     if (!drag.checkpointed) { checkpoint(p); drag.checkpointed = true; }
     Object.assign(l, updates);
-    dirty(); l.presetId=null; p.done = false;p.edited=true; drawPage(p); updateControls(p); updateGlobal();
+    dirty(); l.presetId=null; p.done = false;p.edited=true;scheduleThumbnailRefresh(p);drawPage(p); updateControls(p); updateGlobal();
   });
   const end = () => { if (drag?.page === p) { drag = null; updateControls(p);refreshPresetMenus(); } };
   p.canvas.addEventListener('pointerup', end); p.canvas.addEventListener('pointercancel', end);
@@ -622,7 +735,7 @@ window.addEventListener('keydown', event => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
     event.preventDefault();
-    if (restore(p, event.shiftKey ? 'redo' : 'undo')) { dirty(); renderCards(p); drawPage(p); updateGlobal(); }
+    if (restore(p, event.shiftKey ? 'redo' : 'undo')) { dirty(); scheduleThumbnailRefresh(p);renderCards(p); drawPage(p); updateGlobal(); }
     return;
   }
   const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }, direction = directions[event.key], l = selected(p);
@@ -651,6 +764,7 @@ function decode(src) {
 }
 async function addFiles(entries,task) {
   entries=entries.filter(e=>/\.(png|jpe?g|webp|gif|avif)$/i.test(e.file?.name||e.handle?.name));
+  sourceFolderName=uploadedFolderName(entries)||sourceFolderName;
   let count=0,failures=0,first=null,lastFlush=performance.now(),unflushed=0;
   const flush=()=>{if(!unflushed)return;if(!activeId&&first)activeId=first.id;dirty();const flushed=performance.now();refreshJump();task.metrics.flushMs=(task.metrics.flushMs||0)+performance.now()-flushed;if(task.metrics.firstEditableMs===null){task.metrics.firstEditableMs=performance.now()-task.started;}unflushed=0;lastFlush=performance.now();};
   if(entries.length>=4)imagePool.resize(4);task.stage('画像準備と表示反映',entries.length);
@@ -689,7 +803,7 @@ function download(blob, name) {
 }
 async function prepareExportFonts(snapshot,task) {
   task?.stage('書体準備');if(!document.fonts)return;
-  const queries=new Set(snapshot.flatMap(p=>p.layers.filter(l=>l.kind!=='balloon').map(l=>fontDescription(l).load)).filter(Boolean));
+  const queries=new Set(snapshot.flatMap(p=>p.layers.map(l=>fontDescription(l).load)).filter(Boolean));
   for(const query of queries){checkAbort(task?.signal);const faces=await document.fonts.load(query);if(!faces.length)throw new Error(`書体を読込できない: ${query}`);}
   clearGlyphCache();
 }
@@ -710,23 +824,23 @@ async function saveImages(task,editedOnly=false,picked) {
   if(!picked)return saveImagesZip(task,editedOnly);
   task.stage('保存先の選択と準備');task.update({currentName:'保存先フォルダを選択してほしい'},true);
   const selection=await awaitWithAbort(picked,task.signal);if(selection.error)throw selection.error;const parent=selection.parent;checkAbort(task.signal);
-  const allPages=snapshotPages(),snapshot=allPages.map((p,index)=>({...p,pageIndex:index})).filter(p=>!editedOnly||p.edited),format=$('projectFormat').value,prefs=structuredClone(preferences),captured=revision;
+  const allPages=snapshotPages(),snapshot=allPages.map((p,index)=>({...p,pageIndex:index})).filter(p=>!editedOnly||p.edited),format=$('projectFormat').value,prefs=structuredClone(preferences),captured=revision,folderName=sourceFolderName,startedAt=new Date(),baseName=`${safeFilenamePart(folderName)}_${filenameTimestamp(startedAt)}`,projectName=projectFileName(format,startedAt,folderName);
   if(!snapshot.length){task.stage('対象なし',0);status('保存対象の編集済み画像がない。');return;}
-  const folder=`serifu_${new Date().toISOString().replace(/[:.]/g,'-')}_${crypto.randomUUID().slice(0,8)}`;task.update({currentName:`${parent.name||'保存先'}/${folder}`},true);const directory=await awaitWithAbort(parent.getDirectoryHandle(folder,{create:true}),task.signal);let completed=0,projectSaved=false;task.metrics.pngWritten=0;task.metrics.projectSaved=false;
+  const folder=`${baseName}${editedOnly?'_edited':''}`;task.update({currentName:`${parent.name||'保存先'}/${folder}`},true);const directory=await awaitWithAbort(parent.getDirectoryHandle(folder,{create:true}),task.signal);let completed=0,projectSaved=false;task.metrics.pngWritten=0;task.metrics.projectSaved=false;
   try{await prepareExportFonts(snapshot,task);task.stage('PNG生成と書込み',snapshot.length);
     for await(const result of boundedResults(snapshot,p=>imageBlob(p,task),queueOptions(task))){const p=snapshot[result.index],name=pageExportName(p.name,p.pageIndex,allPages.length);task.update({currentName:name});if(result.error)throw new Error(`${p.name}: ${result.error.message}`);checkAbort(task.signal);const started=performance.now();await writeParts(directory,name,[result.value],task.signal);task.metrics.writeMs=(task.metrics.writeMs||0)+performance.now()-started;completed++;task.metrics.pngWritten=completed;task.result(name,true,result.value.size);}
-    await writeParts(directory,`serifu-project.${format}`,projectParts(snapshot,prefs,{format,task}),task.signal,bytes=>task.update({writtenBytes:task.data.writtenBytes+bytes}),()=>task.stage('編集データの書込み確定',1));projectSaved=true;task.result(`serifu-project.${format}`);task.metrics.pngWritten=completed;task.metrics.projectSaved=true;
+    await writeParts(directory,projectName,projectParts(snapshot,prefs,{format,task,sourceFolderName:folderName}),task.signal,bytes=>task.update({writtenBytes:task.data.writtenBytes+bytes}),()=>task.stage('編集データの書込み確定',1));projectSaved=true;task.result(projectName);task.metrics.pngWritten=completed;task.metrics.projectSaved=true;
     if((!editedOnly||snapshot.length===allPages.length)&&captured===revision)changed=false;
     status(`${snapshot.length} 枚と編集データを「${parent.name?parent.name+'/':''}${folder}」へ保存した`);
-  }catch(error){const failedStage=task.data.stage;task.metrics.errorFile=failedStage==='書体準備'?'':failedStage==='PNG生成と書込み'?task.data.currentName:`serifu-project.${format}`;task.update({currentName:`${folder} · PNG ${completed}枚 · 編集データ${projectSaved?'あり':'なし'}`},true);if(error.name==='AbortError')throw error;if(failedStage==='書体準備')task.result('書体準備',false);else{if(failedStage!=='PNG生成と書込み')task.stage('編集データの書込み確定',1);task.result(task.metrics.errorFile,false);}throw new Error(`${folder} 内に ${completed} 枚保存済み。${error.message}`);}
+  }catch(error){const failedStage=task.data.stage;task.metrics.errorFile=failedStage==='書体準備'?'':failedStage==='PNG生成と書込み'?task.data.currentName:projectName;task.update({currentName:`${folder} · PNG ${completed}枚 · 編集データ${projectSaved?'あり':'なし'}`},true);if(error.name==='AbortError')throw error;if(failedStage==='書体準備')task.result('書体準備',false);else{if(failedStage!=='PNG生成と書込み')task.stage('編集データの書込み確定',1);task.result(task.metrics.errorFile,false);}throw new Error(`${folder} 内に ${completed} 枚保存済み。${error.message}`);}
 }
 async function saveImagesZip(task,editedOnly){
-  const allPages=snapshotPages(),snapshot=allPages.map((p,index)=>({...p,pageIndex:index})).filter(p=>!editedOnly||p.edited),format=$('projectFormat').value,prefs=structuredClone(preferences);
+  const allPages=snapshotPages(),snapshot=allPages.map((p,index)=>({...p,pageIndex:index})).filter(p=>!editedOnly||p.edited),format=$('projectFormat').value,prefs=structuredClone(preferences),folderName=sourceFolderName,startedAt=new Date(),baseName=`${safeFilenamePart(folderName)}_${filenameTimestamp(startedAt)}`,projectName=projectFileName(format,startedAt,folderName);
   if(!snapshot.length){task.stage('対象なし',0);status('保存対象の編集済み画像がない。');return;}
-  const archive=new ZipArchive(),name=`serifu${editedOnly?'-edited':''}_${new Date().toISOString().replace(/[:.]/g,'-')}.zip`;task.metrics.pngPacked=0;
+  const archive=new ZipArchive(),name=`${baseName}${editedOnly?'_edited':''}.zip`;task.metrics.pngPacked=0;
   await prepareExportFonts(snapshot,task);task.stage('PNG生成とZIP準備',snapshot.length);
   for await(const result of boundedResults(snapshot,p=>imageBlob(p,task),queueOptions(task))){const p=snapshot[result.index],filename=pageExportName(p.name,p.pageIndex,allPages.length);task.update({currentName:filename});if(result.error)throw new Error(`${p.name}: ${result.error.message}`);await archive.add(filename,result.value,task.signal);task.metrics.pngPacked++;task.result(filename);}
-  const project=await projectBlob(snapshot,prefs,{format,task});task.stage('ZIP作成',1);await archive.add(`serifu-project.${format}`,project,task.signal);const blob=archive.blob(task.signal);task.result(name);task.stage('ダウンロード準備',1);checkAbort(task.signal);download(blob,name);task.metrics.archiveEntries=archive.entries.length;task.result(name);status(`${snapshot.length} 枚と編集データをまとめた「${name}」のダウンロードを開始した。展開して利用できる。`);
+  const project=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName});task.stage('ZIP作成',1);await archive.add(projectName,project,task.signal);const blob=archive.blob(task.signal);task.result(name);task.stage('ダウンロード準備',1);checkAbort(task.signal);download(blob,name);task.metrics.archiveEntries=archive.entries.length;task.result(name);status(`${snapshot.length} 枚と編集データをまとめた「${name}」のダウンロードを開始した。展開して利用できる。`);
 }
 function startSave(editedOnly=false){
   if(busy)return;let picked;
@@ -742,7 +856,7 @@ $('textSave').onclick = () => guard(async task => {
   download(new Blob(['\ufeff',text],{type:'text/plain;charset=utf-8'}),`serifu-${target}.txt`);task.result(`serifu-${target}.txt`);status(`${$('textTarget').selectedOptions[0].textContent}のテキストのダウンロードを開始した`);
 },'本文テキスト出力',3);
 $('projectSave').onclick = () => guard(async task => {
-  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs=structuredClone(preferences);task.update({processed:snapshot.length,succeeded:snapshot.length});const format=$('projectFormat').value,blob=await projectBlob(snapshot,prefs,{format,task});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,`serifu-project.${format}`);task.result(`serifu-project.${format}`,true,blob.size);status('編集データのダウンロードを開始した');
+  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs=structuredClone(preferences),format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
 },'編集データ保存',3);
 async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
   task.stage('検証',records.length);const validated=[];
@@ -756,7 +870,9 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
     for await(const result of boundedResults(ready,async p=>prepareImage(p.blob,task,p.thumbnailSize),{...queueOptions(task,true),estimate:p=>({...jobEstimate({...p,expectedSize:p.allocationSize}),result:320*320*4+65536})})){
       if(result.error){task.result(ready[result.index].name,false);throw new Error(`${ready[result.index].name}: ${result.error.message}`);}checkAbort(task.signal);const p=ready[result.index],prepared=result.value;
       if(p.expectedSize&&(p.expectedSize.width!==prepared.width||p.expectedSize.height!==prepared.height))throw new Error(`画像寸法が不正: ${p.name}`);
-      loaded.push(createPage({id:restoreIds?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,edited:p.edited===true,expectedSize:p.expectedSize,preserveEdited:restoreIds&&typeof p.edited==='boolean',src:URL.createObjectURL(p.blob),file:p.blob,prepared}));task.result(p.name);
+      const page=createPage({id:restoreIds?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,edited:p.edited===true||(!restoreIds&&p.layers.length>0),expectedSize:p.expectedSize,preserveEdited:restoreIds&&typeof p.edited==='boolean',src:URL.createObjectURL(p.blob),file:p.blob,prepared});loaded.push(page);
+      if(page.layers.length){requestPageFonts(page);await renderPageThumbnail(page,task.signal);}
+      task.result(p.name);
     }
     await yieldToBrowser();
   }
@@ -768,6 +884,7 @@ $('projectLoad').onclick = () => {if(!busy)$('projectInput').click();};
 $('projectInput').onchange = event => {
   const file=event.target.files[0];event.target.value='';if(!file)return;
   guard(async task=>{task.stage('ファイル解析',1);let data;try{data=await readProject(file,{signal:task.signal});task.result(file.name);}catch(error){if(error.name!=='AbortError')task.result(file.name,false);throw error;}const loaded=await prepareProjectPages(data.pages,data.version,task);checkAbort(task.signal);
+    sourceFolderName=data.sourceFolderName||projectFolderName(file.name)||sourceFolderName;
     pages.push(...loaded);const presetNotice=mergePresets(data.preferences);dirty();task.stage('一覧反映',loaded.length);refreshJump();activate(loaded[0],loaded[0].selectedId,true);task.update({processed:loaded.length,succeeded:loaded.length},true);
     status((data.version===1?'旧データを追加。吹き出しは白縁の男性セリフへ変換した。':'編集データを追加。元ファイルとの接続がないため元画像削除は無効。')+presetNotice);
   },'編集データ読込',4);
@@ -789,7 +906,7 @@ $('demo').onclick = () => guard(async () => {
     if(preferences.presets.find(p=>p.id===preferences.defaults.sfx)?.builtin)applyPreset(sfx,preferences.presets.find(p=>p.id===['sfx-impact','sfx-speed','sfx-tension'][i]),1000,750);
     sfx.x = 560; sfx.y = 420; sfx.text = ['ドーン！', 'シュッ', 'ゾワッ…'][i];
     const src = c.toDataURL(), p = createPage({ name: `sample-${i + 1}.png`, src, img: await decode(src), layers: [male, female, sfx] });
-    pages.push(p);
+    pages.push(p);scheduleThumbnailRefresh(p);
   }
   refreshJump();activate(pages[first],pages[first].selectedId,true);dirty();
   status('3枚のサンプルを追加。中央でセリフを編集し、右で位置を調整。');
@@ -892,7 +1009,7 @@ async function temporarySave(manual=false) {
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
-  const meta={version:PROJECT_VERSION,savedAt:Date.now(),preferences:prefs,pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true}))};
+  const meta={version:PROJECT_VERSION,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true}))};
   const task=new BulkTask(manual?'一時保存':'自動保存',{stageCount:3,onProgress:data=>{if(manual&&currentTask?.data.operationId===data.operationId)displayTask(data);else if(!manual)$('draftStatus').textContent=`自動保存 · ${data.stage} ${data.processed}/${data.total??'未確定'}`;}});
   if(manual){currentTask=task;task.emit(true);}delete $('draftStatus').dataset.error;
   draftTask=(async()=>{await storageReady;checkAbort(task.signal);const ids=await getImageIds(),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
@@ -924,6 +1041,7 @@ $('restoreDraft').onclick=()=>guard(async task=>{
   task.stage('画像取得',meta.pages.length);const images=await getDraftImages(meta.pages.map(p=>p.id));checkAbort(task.signal);
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
+  sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
   batchStart=0;const presetNotice=mergePresets(meta.preferences);task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
   dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
 },'一時保存復元',5);
@@ -934,7 +1052,7 @@ $('clearDraft').onclick=()=>guard(async()=>{
 });
 applyViewSettings();refreshPresetMenus();configureAutosave();updateGlobal();
 if(document.fonts){
-  const redrawFonts=()=>{fontVersion++;pngCache.clear();clearGlyphCache();pages.forEach(drawPage);};
+  const redrawFonts=()=>{fontVersion++;pngCache.clear();clearGlyphCache();pages.forEach(drawPage);pages.forEach(p=>scheduleThumbnailRefresh(p,true));};
   document.fonts.addEventListener('loadingdone',redrawFonts);
   document.fonts.load('900 64px MangaBold').then(redrawFonts).catch(()=>{});
 }

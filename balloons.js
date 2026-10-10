@@ -1,39 +1,96 @@
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
+const FULL_TURN=Math.PI*2;
 
-export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000]});
+export const BALLOON_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],distortion:[0,100],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000]});
+export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形',spiky:'尖り形'});
+
+export function balloonSeedFromId(id) {
+  let hash=2166136261;
+  for(const char of String(id??'')){hash^=char.charCodeAt(0);hash=Math.imul(hash,16777619);}
+  return hash>>>0;
+}
 
 export function newBalloon(width,height) {
   const w=limit(width*.64,30,30000),h=limit(height*.56,30,30000);
+  const id=crypto.randomUUID();
   return {
-    id:crypto.randomUUID(),kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
+    id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
+    text:'',speaker:'male',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
-    tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
+    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
+}
+
+function boundaryScale(layer,angle) {
+  const phase=(layer.shapeSeed>>>0)/4294967296*FULL_TURN;
+  const amount=(layer.distortion??50)/100;
+  if(layer.shape==='spiky'){
+    const bentAngle=7*(angle-phase+.045*Math.sin(3*angle+phase));
+    const spike=1-amount*.76*(1-Math.cos(bentAngle))/2;
+    const wobble=1+amount*(.07*Math.sin(2*angle+phase)+.035*Math.sin(5*angle-phase*1.3));
+    return spike*wobble;
+  }
+  if(layer.shape!=='distorted-rect')return 1;
+  const cosine=Math.cos(angle),sine=Math.sin(angle),power=5;
+  const roundedRect=(Math.abs(cosine)**power+Math.abs(sine)**power)**(-1/power);
+  const wobble=1+amount*(.07*Math.sin(3*angle+phase)+.04*Math.sin(7*angle-phase*1.3)+.02*Math.sin(11*angle+phase*.7));
+  return roundedRect*wobble;
+}
+
+export function balloonBoundaryPoint(layer,angle) {
+  const radius=boundaryScale(layer,angle);
+  return {x:layer.w/2*radius*Math.cos(angle),y:layer.h/2*radius*Math.sin(angle)};
+}
+
+function containsBase(layer,point) {
+  const nx=point.x/(layer.w/2),ny=point.y/(layer.h/2),radius=Math.hypot(nx,ny);
+  return radius===0||radius<=boundaryScale(layer,Math.atan2(ny,nx));
+}
+
+function boundaryRate(layer,angle) {
+  const step=.001,before=balloonBoundaryPoint(layer,angle-step),after=balloonBoundaryPoint(layer,angle+step);
+  return Math.hypot(after.x-before.x,after.y-before.y)/(step*2);
 }
 
 export function balloonGeometry(layer) {
   const rx=layer.w/2,ry=layer.h/2,angle=layer.tailAngle*Math.PI/180;
-  const half=limit(layer.tailWidth/(2*Math.hypot(rx*Math.sin(angle),ry*Math.cos(angle))),.01,Math.PI*.4);
-  const start=angle+half,end=angle-half+Math.PI*2;
-  return {rx,ry,start,end,a:{x:rx*Math.cos(start),y:ry*Math.sin(start)},b:{x:rx*Math.cos(end),y:ry*Math.sin(end)},
-    tip:{x:layer.tailX,y:layer.tailY},hasTail:layer.tail&&(layer.tailX/rx)**2+(layer.tailY/ry)**2>1};
+  const half=limit(layer.tailWidth/(2*Math.max(.001,boundaryRate(layer,angle))),.01,Math.PI*.4);
+  const start=angle+half,end=angle-half+FULL_TURN;
+  return {rx,ry,start,end,a:balloonBoundaryPoint(layer,start),b:balloonBoundaryPoint(layer,end),
+    tip:{x:layer.tailX,y:layer.tailY},hasTail:layer.tail&&!containsBase(layer,{x:layer.tailX,y:layer.tailY})};
 }
 
 export function balloonHit(layer,point) {
   const g=balloonGeometry(layer);
-  if((point.x/g.rx)**2+(point.y/g.ry)**2<=1)return true;
+  if(containsBase(layer,point))return true;
   if(!g.hasTail)return false;
   const cross=(a,b)=>(point.x-b.x)*(a.y-b.y)-(a.x-b.x)*(point.y-b.y);
   const sides=[cross(g.a,g.b),cross(g.b,g.tip),cross(g.tip,g.a)];
   return sides.every(value=>value>=0)||sides.every(value=>value<=0);
 }
 
-export function paintBalloon(ctx,layer) {
+function balloonPath(ctx,layer) {
   const g=balloonGeometry(layer);
   ctx.beginPath();
-  if(g.hasTail){ctx.ellipse(0,0,g.rx,g.ry,0,g.start,g.end);ctx.lineTo(g.tip.x,g.tip.y);ctx.lineTo(g.a.x,g.a.y);}
-  else ctx.ellipse(0,0,g.rx,g.ry,0,0,Math.PI*2);
+  if(layer.shape==='distorted-rect'||layer.shape==='spiky'){
+    const from=g.hasTail?g.start:0,to=g.hasTail?g.end:FULL_TURN,steps=Math.max(2,Math.ceil((to-from)/(FULL_TURN/160)));
+    for(let index=0;index<=steps;index++){
+      const angle=from+(to-from)*index/steps,point=balloonBoundaryPoint(layer,angle);
+      if(index===0)ctx.moveTo(point.x,point.y);else ctx.lineTo(point.x,point.y);
+    }
+    if(g.hasTail){ctx.lineTo(g.tip.x,g.tip.y);ctx.lineTo(g.a.x,g.a.y);}
+  }else if(g.hasTail){ctx.ellipse(0,0,g.rx,g.ry,0,g.start,g.end);ctx.lineTo(g.tip.x,g.tip.y);ctx.lineTo(g.a.x,g.a.y);}
+  else ctx.ellipse(0,0,g.rx,g.ry,0,0,FULL_TURN);
   ctx.closePath();
+}
+
+export function clipBalloon(ctx,layer) {
+  balloonPath(ctx,layer);
+  ctx.clip();
+}
+
+export function paintBalloon(ctx,layer) {
+  balloonPath(ctx,layer);
   ctx.save();ctx.globalAlpha*=1-layer.transparency/100;ctx.fillStyle=layer.color;ctx.fill();ctx.restore();
   if(layer.borderWidth>0){ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='round';ctx.stroke();}
 }

@@ -10,17 +10,17 @@ const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio'};
 const boxStyles={
-  balloon:['rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder'],
-  caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY'],
+  balloon:['shape','distortion','rotation','color','borderColor','transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
+  caption:['rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
-  if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio'}};
+  if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio'}};
   if(kind==='caption')return {styles:boxStyles.caption,ratios:{...boxRatioKeys,size:'sizeRatio',padding:'paddingRatio',textOutlineWidth:'textOutlineWidthRatio'}};
   return {styles:[...styleKeys,'blurAngle'],ratios:ratioKeys};
 }
 function presetDimension(kind,key,width,height) {
   if(['balloon','caption'].includes(kind)){
-    if(['borderWidth','tailWidth','size','padding','textOutlineWidth'].includes(key))return Math.min(width,height);
+    if(['borderWidth','tailWidth','size','outline','thickness','padding','textOutlineWidth'].includes(key))return Math.min(width,height);
     if(key==='tailY')return height;
   }
   return dimension(key,width,height);
@@ -49,9 +49,9 @@ export function defaultPreferences() {
 export function applyPreset(layer,preset,width,height) {
   if(!preset||preset.kind!==layer.kind) return layer;
   const {styles,ratios}=presetFields(layer.kind);
-  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]])),presetId:preset.id};
+  const next={...layer,...Object.fromEntries(styles.map(k=>[k,layer.kind==='balloon'&&preset.style[k]===undefined?layer[k]:preset.style[k]])),presetId:preset.id};
   for(const [key,ratio] of Object.entries(ratios)){
-    const value=preset.style[ratio]??(['thickness','blurX','blurY'].includes(key)?0:NaN);
+    const value=preset.style[ratio]??(layer.kind==='balloon'?layer[key]/presetDimension(layer.kind,key,width,height):['thickness','blurX','blurY'].includes(key)?0:NaN);
     if(!Number.isFinite(value))throw new Error('プリセットの寸法が不正');
     next[key]=value*presetDimension(layer.kind,key,width,height);
   }
@@ -59,6 +59,7 @@ export function applyPreset(layer,preset,width,height) {
   if(layer.kind==='balloon'||layer.kind==='caption'){
     const limits=layer.kind==='balloon'?BALLOON_LIMITS:CAPTION_LIMITS;
     for(const key of Object.keys(ratios))if(limits[key])next[key]=clamp(next[key],...limits[key]);
+    if(layer.kind==='balloon'){next.size=clamp(next.size,8,500);next.outline=clamp(next.outline,1,80);next.thickness=clamp(next.thickness,...THICKNESS_LIMIT);}
   }else{
     next.size=clamp(next.size,8,500);next.outline=clamp(next.outline,1,80);next.blur=clamp(next.blur,0,30);next.motionBlur=clamp(next.motionBlur,0,300);next.blurX=clamp(next.blurX,0,150);next.blurY=clamp(next.blurY,0,300);
     next.thickness=clamp(next.thickness,...THICKNESS_LIMIT);

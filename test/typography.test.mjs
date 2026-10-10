@@ -22,7 +22,7 @@ test('vertical Japanese punctuation uses actual font bearings to place ink in th
 
 test('caption physical alignment defaults to the center and moves each line or column to any edge',()=>{
   for(const vertical of [true,false]){
-    const base={...newLayer('caption',1000,750),text:'あい\nう',w:300,h:300,size:30,padding:10,vertical};
+    const base={...newLayer('caption',1000,750),text:'あい\nう',w:300,h:300,size:30,padding:10,vertical,autoFit:false};
     const middle=captionLayout(context(),base);assert.equal(base.alignX,'center');assert.equal(base.alignY,'center');
     for(const alignX of ['left','center','right'])for(const alignY of ['top','center','bottom']){
       const layout=captionLayout(context(),{...base,alignX,alignY});assert.equal(layout.size,30);assert.equal(layout.fits,true);

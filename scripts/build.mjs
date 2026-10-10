@@ -2,7 +2,7 @@ import { copyFile, mkdir, rm, writeFile, cp, access } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
 const output = new URL('_site/', root);
-const assets = ['index.html', 'app.js', 'export.js', 'renderer.js', 'balloons.js', 'captions.js', 'typography.js', 'ink.js', 'fonts.js', 'model.js', 'presets.js', 'storage.js','bulk-task.js','bulk-pool.js','image-worker.js','image-metadata.js','export-cache.js','project-io.js','project-worker.js','zip.js', 'style.css'];
+const assets = ['index.html', 'favicon-32.png', 'apple-touch-icon.png', 'app.js', 'export.js', 'renderer.js', 'balloons.js', 'captions.js', 'typography.js', 'ink.js', 'fonts.js', 'model.js', 'presets.js', 'storage.js','bulk-task.js','bulk-pool.js','image-worker.js','image-metadata.js','export-cache.js','project-io.js','project-filenames.js','project-worker.js','zip.js', 'style.css'];
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });

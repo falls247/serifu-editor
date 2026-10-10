@@ -76,17 +76,24 @@ try {
   await first().locator('[data-kind=balloon]').click(); await first().locator('canvas').focus(); await page.keyboard.press('Delete');
 
   await rows.nth(49).locator('[data-action=add-female]').click(); await rows.nth(49).locator('textarea').fill('境界の台詞');
+  const femaleSummary=rows.nth(49).locator('.layer-summary');
+  assert.equal(await femaleSummary.textContent(),'●女性セリフ：境界の台詞');
+  assert.equal(await femaleSummary.locator('.layer-summary-speaker').evaluate(node=>getComputedStyle(node).color),await rows.nth(49).locator('.kind-label').evaluate(node=>getComputedStyle(node).color));
   await rows.nth(49).locator('[data-action=copy-next]').click();
   assert.equal(await page.locator('#viewRange').textContent(), '51–100 / 500枚');
   assert.equal(await first().locator('textarea').inputValue(), '境界の台詞');
   await thumbs.nth(49).click(); assert.equal(await page.locator('#viewRange').textContent(), '1–50 / 500枚');
   await rows.nth(49).locator('[data-action=complete]').click();
   assert.equal(await page.locator('#viewRange').textContent(), '51–100 / 500枚');
-  assert.equal(await thumbs.nth(49).locator('.thumbnail-state').textContent(), '✓ 確認済み');
+  assert.match(await thumbs.nth(49).locator('.thumbnail-state').textContent(), /編集済み.*確認済み/);
   await thumbs.nth(499).click();
   assert.equal(await page.locator('#viewRange').textContent(), '451–500 / 500枚');
   assert.equal(await rows.last().locator('.page-name').textContent(), '500.png');
   assert.equal(await rows.last().evaluate(node => node.classList.contains('active')), true);
+  assert.equal(await thumbs.nth(499).locator('.thumbnail-state').textContent(),'編集済み');
+  assert.equal(await rows.last().locator('textarea').inputValue(),'最後の台詞');
+  await thumbs.nth(0).click(); await thumbs.nth(499).click();
+  assert.equal(await rows.last().locator('textarea').inputValue(),'最後の台詞','imported edit data must return after thumbnail unmount and remount');
   assert.equal(await page.locator('#nextBatch').isDisabled(), true);
   await page.selectOption('#pageSize', '100'); assert.equal(await rows.count(), 100);
   assert.equal(await page.locator('#viewRange').textContent(), '401–500 / 500枚');
@@ -134,7 +141,7 @@ try {
   await page.click('#toggleThumbnails');
   await thumbs.nth(49).click();
   assert.equal(await rows.nth(49).locator('textarea').inputValue(), '境界の台詞');
-  assert.equal(await thumbs.nth(49).locator('.thumbnail-state').textContent(), '✓ 確認済み');
+  assert.match(await thumbs.nth(49).locator('.thumbnail-state').textContent(), /編集済み.*確認済み/);
   await rows.nth(49).locator('[data-action=move-down]').click();
   assert.equal(await page.locator('#viewRange').textContent(), '51–100 / 500枚');
   assert.equal(await first().locator('.page-name').textContent(), '050.png');

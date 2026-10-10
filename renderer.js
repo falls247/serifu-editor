@@ -1,6 +1,6 @@
 import { inkSeed, distressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { fontDescription } from './fonts.js';
-import { newBalloon, balloonHit, paintBalloon, paintOrder } from './balloons.js';
+import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 export { paintOrder } from './balloons.js';
@@ -16,9 +16,10 @@ export function newLayer(kind, width, height, speaker = 'male') {
   return {
     id, kind, speaker,
     text: kind === 'sfx' ? 'ドーン！' : '',
+    lineAlign:'top',
     x: width * .5, y: height * .4,
-    w: clamp(width * (kind === 'sfx' ? .34 : .36), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .46), 30, 30000),
-    size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .04)), 16, 500),
+    w: clamp(width * (kind === 'sfx' ? .34 : .28), 30, 30000), h: clamp(height * (kind === 'sfx' ? .75 : .62), 30, 30000),
+    size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .055)), 16, 500),
     rotation: kind === 'sfx' ? -12 : 0, thickness:0, outline: clamp(Math.round(width * .006), 2, 80),
     vertical: true, color: '#111111', effect: 'burst', taperRate:10,
     font: kind === 'sfx' ? 'comic' : 'sans', blur: 0, motionBlur: 0, blurAngle: 90,
@@ -180,6 +181,7 @@ export function textGlyphs(ctx,layer) {
       return {char,index:i,baseSize,size:layer.effect==='taper'&&sfx?Math.max(8,baseSize*variation.scale):baseSize*variation.scale,shift:variation.shift,angle:layer.vertical?verticalRotation(char):0,width:ctx.measureText(char).width*sx};
     }));
     const glyphs=[];
+    const topAligned=layer.lineAlign!=='center';
     if(layer.vertical){
       const columns=[];
       for(const line of lines){
@@ -189,12 +191,12 @@ export function textGlyphs(ctx,layer) {
       }
       const widths=columns.map(column=>Math.max(column.length?0:glyphFontSize(layer,0),...column.map(glyph=>glyph.baseSize))*1.3*sx);
       let x=widths.reduce((a,b)=>a+b,0)/2;
-      columns.forEach((column,i)=>{x-=widths[i]/2;let y=-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
+      columns.forEach((column,i)=>{x-=widths[i]/2;let y=columns.length>1&&topAligned?-layer.h*.44:-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
     }else{
       const rows=[];
       for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>layer.w*.88){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
       const heights=rows.map(row=>Math.max(row.length?0:layer.size,...row.map(glyph=>glyph.baseSize))*1.3*sy);
-      let y=-heights.reduce((a,b)=>a+b,0)/2;
+      let y=rows.length>1&&topAligned?-layer.h*.44:-heights.reduce((a,b)=>a+b,0)/2;
       rows.forEach((row,i)=>{let x=-row.reduce((sum,glyph)=>sum+glyph.width,0)/2;for(const glyph of row){glyphs.push({...glyph,x:x+glyph.width/2,y:y+heights[i]/2});x+=glyph.width;}y+=heights[i];});
     }
     return glyphs;
@@ -228,7 +230,10 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
   ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
   for (const l of paintOrder(layers)) {
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
-    if(l.kind==='balloon')paintBalloon(ctx,l);
+    if(l.kind==='balloon'){
+      paintBalloon(ctx,l);
+      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,{...l,w:l.w*.84,h:l.h*.84});ctx.restore();}
+    }
     else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); paintText(ctx, l);}
     ctx.restore();

@@ -25,6 +25,30 @@ test('brush presets retain texture and scale directional blur independently on n
   for(const key of ['blurXRatio','blurYRatio','blurStrength','inkCore','roughness','dryInk','brushTails'])delete legacy.style[key];
   applyPreset(target,legacy,1000,750);assert.equal(target.blurY,0);assert.equal(target.dryInk,0);
 });
+test('balloon presets scale text styling while keeping the current speech and speaker',()=>{
+  const source={...newLayer('balloon',1000,750),text:'残すセリフ',speaker:'male',size:60,outline:8,thickness:2.5,font:'hand',vertical:false};
+  const preset=createPreset('吹き出し文字',source,1000,750),target={...newLayer('balloon',2000,1500),text:'貼付先のセリフ',speaker:'female'};
+  applyPreset(target,preset,2000,1500);
+  assert.equal(target.text,'貼付先のセリフ');assert.equal(target.speaker,'female');assert.equal(target.size,120);assert.equal(target.outline,16);assert.equal(target.thickness,5);assert.equal(target.font,'hand');assert.equal(target.vertical,false);
+});
+test('older balloon presets without speech styles remain valid and preserve current speech settings',()=>{
+  const old={...createPreset('旧吹き出し',newLayer('balloon',1000,750),1000,750)};
+  for(const key of ['sizeRatio','outlineRatio','thicknessRatio'])delete old.style[key];delete old.style.font;delete old.style.vertical;
+  const prefs=defaultPreferences();prefs.presets.push(old);
+  const remembered=normalizePreferences(JSON.parse(JSON.stringify(prefs))).presets.find(p=>p.id===old.id);
+  assert.ok(remembered);
+  const target={...newLayer('balloon',1000,750),text:'現在のセリフ',speaker:'female',size:73,font:'round',vertical:false};
+  applyPreset(target,remembered,1000,750);
+  assert.equal(target.text,'現在のセリフ');assert.equal(target.speaker,'female');assert.equal(target.size,73);assert.equal(target.font,'round');assert.equal(target.vertical,false);
+});
+test('balloon presets clamp text settings for very small and very large pages',()=>{
+  const source={...newLayer('balloon',1000,750),size:100,outline:3,thickness:20};
+  const preset=createPreset('寸法範囲外の吹き出し',source,1000,750);
+  const small=newLayer('balloon',30,30);applyPreset(small,preset,30,30);
+  assert.equal(small.size,8);assert.equal(small.outline,1);assert.ok(small.thickness>=-10&&small.thickness<=30);
+  const large=newLayer('balloon',30000,30000);applyPreset(large,preset,30000,30000);
+  assert.equal(large.size,500);assert.equal(large.outline,80);assert.equal(large.thickness,30);
+});
 test('numeric ink thickness is a preset setting with compatible defaults and bounded scaling',()=>{
   const source={...newLayer('dialogue',1000,750),thickness:-2.5},preset=createPreset('細いセリフ',source,1000,750);
   const target=applyPreset(newLayer('dialogue',2000,1500),preset,2000,1500);assert.equal(target.thickness,-5);
