@@ -1,5 +1,7 @@
-import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder } from './renderer.js';
+import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS } from './balloons.js';
+import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
+import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
 import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
@@ -13,7 +15,7 @@ import { ImagePool } from './bulk-pool.js';
 import { ExportCache, exportKey } from './export-cache.js';
 import { originalBlob, projectParts, projectBlob, readProject, writeParts } from './project-io.js';
 import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
-import { FONT_CATALOG, FONT_STYLES, fontDescription } from './fonts.js';
+import { FONT_CATALOG, FONT_STYLES, fontLoadQueries } from './fonts.js';
 
 const $ = id => document.getElementById(id);
 const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
@@ -31,8 +33,7 @@ const fontWaiters=new Map();
 const fontErrors=new Set();
 function requestPageFonts(p){
   if(!document.fonts)return;
-  for(const layer of p.layers){
-    const query=fontDescription(layer).load;
+  for(const query of new Set(p.layers.flatMap(fontLoadQueries))){
     if(!query||document.fonts.check(query))continue;
     if(fontLoads.has(query)){fontWaiters.get(query)?.add(p);continue;}
     const waiting=new Set([p]);fontWaiters.set(query,waiting);
@@ -219,6 +220,8 @@ function updateGlobal() {
     p.row.querySelector('[data-action=save-image]').disabled = busy;
     p.row.querySelector('[data-action=move-up]').disabled = busy || i === 0;
     p.row.querySelector('[data-action=move-down]').disabled = busy || i === pages.length - 1;
+    p.row.querySelector('[data-action=move-after]').disabled=busy||pages.length<2;
+    const destination=p.row.querySelector('[data-page-destination]');destination.max=String(pages.length);destination.disabled=busy||pages.length<2;
     const copy = p.row.querySelector('[data-action=copy-next]');
     if (copy) copy.disabled = busy || !p.layers.length || i === pages.length - 1;
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
@@ -254,24 +257,25 @@ function renderLayerSummary(layer,button) {
 }
 
 function persistControlValue(p,input) {
-  if(!p?.row||!input?.matches('[data-field]'))return;
-  const field=input.dataset.field,card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
+  if(!p?.row||!input?.matches(CONTROL_SELECTOR))return;
+  const field=controlField(input),card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
   if(!layer)return;
   let value=input.value;
-  const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[1,80],...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
+  const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[0,80],shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS,...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
   if(field==='vertical')value=value==='true';
   else if(input.type==='checkbox')value=input.checked;
   else if(input.type==='number'||input.type==='range'){
     if(value===''||!Number.isFinite(Number(value)))return;
     value=Number(value);
-    if(Object.hasOwn(limits,field))value=clamp(value,...(field==='outline'&&layer.kind==='sfx'?[0,80]:limits[field]));
+    if(['shapeSeed','spikeCount','brushSeed','glyphSeed'].includes(field))value=Math.round(value);
+    if(Object.hasOwn(limits,field))value=clamp(value,...limits[field]);
   }
   if(Object.is(layer[field],value))return;
-  checkpoint(p);layer[field]=value;if(field!=='text')layer.presetId=null;
+  checkpoint(p);layer[field]=value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))layer.brushEngine='pressure';if(field!=='text')layer.presetId=null;
   if(field==='text'){fitTextInput(input);const summary=card.querySelector('.layer-summary');if(summary)renderLayerSummary(layer,summary);}
   markChanged(p);
   drawPage(p);
-  if(field!=='text')refreshPresetMenus(p);
+  updateControls(p);if(field!=='text')refreshPresetMenus(p);
 }
 
 function persistPageControl(p) {
@@ -280,10 +284,13 @@ function persistPageControl(p) {
 
 function sizePreview(p) {
   if (!p.row) return;
-  const frame = p.row.querySelector('.preview-frame');
-  const width = Math.max(1, Math.min(frame.clientWidth - 2, 620 * p.img.width / p.img.height));
-  p.canvas.style.width = `${width}px`;
-  p.canvas.style.height = `${width * p.img.height / p.img.width}px`;
+  const frame=p.row.querySelector('.preview-frame'),originalFrame=p.row.querySelector('.original-frame');
+  const aspect=p.img.width/p.img.height,maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
+  const width=Math.max(1,Math.min(frame.clientWidth-2,originalFrame.clientWidth-2,maxHeight*aspect));
+  for(const image of [p.canvas,p.row.querySelector('.original')]){
+    image.style.width=`${width}px`;image.style.height=`${width/aspect}px`;
+  }
+  p.row.querySelector('.original-toolbar').style.height=`${p.row.querySelector('.preview-toolbar:not(.original-toolbar)').getBoundingClientRect().height}px`;
   drawPage(p);
 }
 
@@ -292,11 +299,11 @@ function updateControls(p) {
   const l = selected(p), controls = p.row.querySelector('.position-controls');
   controls.disabled = !l;
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
-  controls.querySelector('[data-field=outline]').min=l?.kind==='sfx'?'0':'1';
   controls.querySelector('legend').textContent = balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=!l;
   controls.querySelector('.multiline-align-control').hidden=!l||!['dialogue','balloon'].includes(l.kind);
   for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=!l||caption;
+  for(const node of controls.querySelectorAll('[data-text-color-control]'))node.hidden=!l||l.kind==='sfx';
   controls.querySelector('.balloon-style-controls').hidden=!balloon&&!caption;
   const shapeControl=controls.querySelector('.balloon-shape-control'),shapeSelect=shapeControl.querySelector('select');
   shapeControl.hidden=!balloon&&!caption;
@@ -304,24 +311,29 @@ function updateControls(p) {
   for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!['ellipse','distorted-rect','spiky'].includes(option.value);
   const showDistortion=balloon?['distorted-rect','spiky'].includes(l.shape):caption&&l.shape==='spiky';
   controls.querySelector('.balloon-distortion-control').hidden=!showDistortion;
+  const showSeed=balloon&&['distorted-rect','spiky'].includes(l.shape);
+  for(const node of controls.querySelectorAll('[data-shape-seed-control]'))node.hidden=!showSeed;
+  controls.querySelector('.balloon-spike-count-control').hidden=!balloon||l.shape!=='spiky';
   controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??55}%`;
   controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
+  controls.querySelector('.text-position-controls').hidden=!balloon&&!caption;
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
   controls.querySelector('.balloon-position-note').hidden=!balloon;
   controls.querySelector('[data-action=backward]').textContent=balloon?'効果音の下へ':'背面へ';
   controls.querySelector('[data-action=forward]').textContent=balloon?'効果音の上へ':'前面へ';
-  for (const input of controls.querySelectorAll('[data-field]')) {
+  for (const input of controls.querySelectorAll(CONTROL_SELECTOR)) {
     if (input !== document.activeElement) {
       if(input.type==='checkbox')input.checked=l?.[input.dataset.field]===true;
-      else input.value = l?.[input.dataset.field]===undefined?'':String(l[input.dataset.field]);
+      else syncControlValue(input,layerFieldValue(l,controlField(input)),p);
     }
   }
+  for(const input of controls.querySelectorAll('[data-numeric-field=size]'))input.disabled=caption&&l.autoFit;
   const captionStatus=controls.querySelector('.caption-fit-status');captionStatus.hidden=!caption;
   if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${layout.size}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
-  const query=l&&fontDescription(l).load,fontStatus=p.row.querySelector('.font-status');
-  fontStatus.textContent=query&&document.fonts&&!document.fonts.check(query)?fontErrors.has(query)?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
+  const pendingQueries=l&&document.fonts?fontLoadQueries(l).filter(query=>!document.fonts.check(query)):[],fontStatus=p.row.querySelector('.font-status');
+  fontStatus.textContent=pendingQueries.length?pendingQueries.some(query=>fontErrors.has(query))?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
   fontStatus.hidden=!fontStatus.textContent;
   const fontNote=controls.querySelector('.font-note');
   fontNote.textContent=l?FONT_CATALOG[l.font]?.note||'':'';fontNote.hidden=!fontNote.textContent;
@@ -333,12 +345,31 @@ function updateControls(p) {
        card.querySelector('.grunge-controls').hidden=layer.inkTexture!=='grunge';
       const rate=card.querySelector('[data-field=taperRate]');if(rate!==document.activeElement)rate.value=String(layer.taperRate);
     }
-    if(layer?.kind==='balloon'||layer?.kind==='caption')for(const input of card.querySelectorAll('[data-field]')){
+    if(layer?.kind==='balloon'){
+      card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky'].includes(layer.shape);
+      card.querySelector('.balloon-spike-count-control').hidden=layer.shape!=='spiky';
+    }
+    if(layer)for(const input of card.querySelectorAll(CONTROL_SELECTOR)){
       if(input===document.activeElement)continue;
       if(input.type==='checkbox')input.checked=layer[input.dataset.field];
-      else input.value=String(layer[input.dataset.field]);
+      else syncControlValue(input,layerFieldValue(layer,controlField(input)),p);
     }
   }
+}
+
+function layerFieldValue(layer,field) {
+  return field==='textColor'&&['dialogue','balloon'].includes(layer?.kind)?dialogueColor(layer):layer?.[field];
+}
+
+function speechStyleControls(layer) {
+  const grid=element('div','effect-grid speech-style-controls');
+  for(const [field,title,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['outline','文字の輪郭の太さ（px）','number']]){
+    const label=element('label','',title),input=element('input');input.type=type;input.dataset.field=field;input.value=String(layerFieldValue(layer,field));
+    if(type==='number'){input.min='0';input.max='80';input.step='0.5';input.title='0で輪郭なし';}
+    label.append(input);grid.append(label);
+  }
+  grid.append(button('reset-text-color','話者の初期色','男性は黒、女性はピンクへ文字色を戻す'));
+  return grid;
 }
 
 function activate(p, id = p.selectedId, scroll = false) {
@@ -356,6 +387,7 @@ function activate(p, id = p.selectedId, scroll = false) {
 function unmountPage(p) {
   if (!p.row) return;
   persistPageControl(p);
+  rememberCardDetails(p);
   p.resizeObserver?.disconnect();
   p.canvas.width = 1; p.canvas.height = 1;
   p.row.remove(); p.row = null; p.canvas = null; p.resizeObserver = null;
@@ -438,6 +470,77 @@ function fitTextInput(input) {
   input.rows=Math.max(1,input.value.split('\n').length);
 }
 
+function settingSelect(field,title,choices,value){
+  const label=element('label','',title),select=element('select');select.dataset.field=field;
+  for(const [key,text] of Object.entries(choices)){const option=element('option','',text);option.value=key;select.append(option);}
+  select.value=value;label.append(select);return label;
+}
+function settingNumber(field,title,limits,value,step='1'){
+  const label=element('label','',title),input=element('input');input.type='number';input.dataset.field=field;
+  [input.min,input.max]=limits;input.step=step;input.value=String(value);label.append(input);return label;
+}
+function textPositionControls(layer){
+  const grid=element('div','text-position-controls effect-grid'),limits=layer.kind==='balloon'?BALLOON_LIMITS:CAPTION_LIMITS;
+  for(const [field,title] of [['textOffsetX','文字の横位置（px）'],['textOffsetY','文字の縦位置（px）'],['padding','内側の余白（px）']])grid.append(settingNumber(field,title,limits[field],layer[field]??0,field==='padding'?'1':'0.5'));
+  return grid;
+}
+const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
+function controlField(input){return input.dataset.field??input.dataset.numericField;}
+function syncControlValue(input,value,p){
+  const field=controlField(input);
+  if(input.type==='range'&&['textOffsetX','textOffsetY'].includes(field)){
+    const dimension=field==='textOffsetY'?p.img.height:p.img.width;
+    input.min=String(Math.max(-30000,Math.min(-dimension,value??0)));
+    input.max=String(Math.min(30000,Math.max(dimension,value??0)));
+  }
+  if(input.type==='range'&&['x','y','w','h'].includes(field)){
+    const dimension=['y','h'].includes(field)?p.img.height:p.img.width;
+    input.min=String(['w','h'].includes(field)?30:Math.min(-dimension,value??0));
+    input.max=String(['w','h'].includes(field)?Math.min(30000,Math.max(dimension*2,value??0,30)):Math.max(dimension*2,value??0));
+  }
+  if(input.type==='range'&&input.dataset.numericStep&&Number.isFinite(value)){
+    const step=Number(input.dataset.numericStep),ticks=(value-(Number(input.min)||0))/step;
+    input.step=Math.abs(ticks-Math.round(ticks))<1e-8?String(step):'any';
+  }
+  input.value=value===undefined?'':Number.isFinite(value)&&['number','range'].includes(input.type)?String(Number(value.toPrecision(15))):String(value);
+}
+function addNumericControls(root,p){
+  for(const input of root.querySelectorAll('input[data-field][type=number], input[data-field][type=range]')){
+    if(input.closest('.numeric-setting'))continue;
+    const field=input.dataset.field,label=input.closest('label'),title=input.getAttribute('aria-label')||label?.textContent.trim()||field;
+    const wrap=element('div','numeric-setting'),linked=element('input');linked.type=input.type==='number'?'range':'number';linked.dataset.numericField=field;
+    const dimension=['y','h'].includes(field)?p.img.height:p.img.width,value=Number(input.value);
+    linked.min=input.min||String(Math.min(-dimension,value||0));linked.max=input.max||String(Math.max(dimension*2,value||0));linked.step=input.step||'1';
+    if(['w','h'].includes(field))linked.max=String(Math.min(30000,Math.max(dimension*2,value||0,30)));
+    linked.value=input.value;linked.disabled=input.disabled;
+    const range=input.type==='range'?input:linked;range.dataset.numericStep=input.step||'1';range.step='any';
+    input.setAttribute('aria-label',`${title}${input.type==='range'?' スライダー':''}`);linked.setAttribute('aria-label',`${title}${linked.type==='range'?' スライダー':''}`);
+    input.before(wrap);if(input.type==='number')wrap.append(input,linked);else wrap.append(linked,input);
+  }
+}
+function rememberCardDetails(p){
+  p.cardDetails??=new Map();
+  for(const card of p.row?.querySelectorAll('.layer-card')??[])for(const details of card.querySelectorAll('details')){
+    p.cardDetails.set(`${card.dataset.layerId}:${details.querySelector('summary').textContent}`,details.open);
+  }
+}
+function brushControls(layer){
+  const details=element('details','brush-settings effect-details');details.append(element('summary','','ブラシ輪郭'));
+  const grid=element('div','effect-grid');grid.append(settingSelect('borderStyle','描画モード',BRUSH_MODES,layer.borderStyle??'solid'));
+  const labels={brushRoughness:'輪郭の揺れ（%）',brushPressureVariation:'筆圧・線幅の変化（%）',brushTexture:'掠れ量（%）',brushOpacityVariation:'インク濃淡（%）'};
+  for(const [field,title] of Object.entries(labels))grid.append(settingNumber(field,title,BRUSH_LIMITS[field],layer[field]));
+  grid.append(settingNumber('brushSeed','ブラシseed',[0,4294967295],layer.brushSeed),button('regenerate-brush','筆跡を再生成'));
+  details.append(grid,element('p','effect-note','枠線の太さが基準線幅。通常線はブラシ効果OFF。手描きペンは筆圧40%・掠れ15%、掠れ筆は筆圧65%・掠れ75%が目安。'));return details;
+}
+function placementControls(layer){
+  const details=element('details','placement-settings effect-details');details.append(element('summary','','文字配置'));
+  const grid=element('div','effect-grid');grid.append(settingSelect('kerningMode','配置方式',{standard:'標準（従来配置）',optical:'輪郭で文字詰め'},layer.kerningMode));
+  const labels={kerningStrength:'文字詰め強度（%）',minimumGlyphGap:'最小インク間隔（px）',overlapAllowance:'重なりの上限（%）',rotationJitter:'回転のばらつき（±°）',verticalJitter:'上下のずれ（%）',spacingJitter:'字間のばらつき（%）',glyphOverlap:'文字の重なり（%）'};
+  for(const [field,title] of Object.entries(labels))grid.append(settingNumber(field,title,PLACEMENT_LIMITS[field],layer[field],field==='minimumGlyphGap'?'0.5':'1'));
+  grid.append(settingNumber('sizeVariation','サイズのばらつき（%）',EFFECT_LIMITS.sizeVariation,layer.sizeVariation,'0.5'),settingNumber('horizontalJitter','左右のずれ（%）',EFFECT_LIMITS.horizontalJitter,layer.horizontalJitter,'0.5'),settingNumber('glyphSeed','文字配置seed',[0,4294967295],layer.glyphSeed),button('regenerate-placement','配置を再生成'));
+  details.append(grid,element('p','effect-note','文字詰め0%で追加の詰めなし。各ばらつき0で追加の変動なし。重なりは上限と指定量の小さい方を使う。密集レタリングは強度85%・回転4°から調整。'));return details;
+}
+
 function button(action, text, title) {
   const b = element('button', '', text); b.dataset.action = action;
   if (title) b.title = title;
@@ -446,8 +549,14 @@ function button(action, text, title) {
 
 function renderCards(p) {
   if (!p.row) return;
+  rememberCardDetails(p);
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0;
+  const appendCard=(card,layer)=>{
+    addNumericControls(card,p);
+    for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${layer.id}:${details.querySelector('summary').textContent}`)??false;
+    container.append(card);
+  };
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
     const summary=element('button','layer-summary');summary.type='button';summary.title='クリックして編集';renderLayerSummary(l,summary);card.append(summary);
@@ -455,7 +564,7 @@ function renderCards(p) {
     heading.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
     if (l.kind === 'dialogue'||l.kind==='balloon') {
       const roles = element('div', 'role-switch');roles.setAttribute('role','group');roles.setAttribute('aria-label',l.kind==='balloon'?'吹き出し内セリフの話者切替':'話者の切替');
-      for (const [speaker, label] of [['male', '男性・黒'], ['female', '女性・ピンク']]) {
+      for (const [speaker, label] of [['male', '男性'], ['female', '女性']]) {
         const b = button(`speaker-${speaker}`, label);b.classList.toggle('chosen', l.speaker === speaker);b.setAttribute('aria-pressed',String(l.speaker===speaker));roles.append(b);
       }
       heading.append(roles);
@@ -468,27 +577,32 @@ function renderCards(p) {
     presetLine.append(presetSelect,button('save-preset','保存','この設定に名前を付けてプリセットを保存'),button('delete-preset','削除','選択中の保存プリセットを削除'));card.append(presetLine);
     if(l.kind==='balloon'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='吹き出しのセリフを入力';text.setAttribute('aria-label',l.speaker==='female'?'女性の吹き出しセリフ':'男性の吹き出しセリフ');card.append(text);
+      card.append(speechStyleControls(l),textPositionControls(l),element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。枠は動かさず本文を移動。余白を減らすと改行までの長さが広がる。'));
       const grid=element('div','effect-grid');
-      for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number'],['brushRoughness','ブラシの荒れ（%）','number']]){
+      for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
       const orderLabel=element('label','','効果音との重なり'),order=element('select');order.dataset.field='sfxOrder';
       for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);
-       const brushLabel=element('label','','枠線の描き方'),brushSelect=element('select');brushSelect.dataset.field='borderStyle';
-       for(const [value,title] of [['solid','通常'],['brush','ブラシ風']]){const option=element('option','',title);option.value=value;brushSelect.append(option);}
-       brushSelect.value=l.borderStyle??'solid';brushLabel.append(brushSelect);grid.append(brushLabel);card.append(grid);
+      card.append(grid,brushControls(l));
+      const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky'].includes(l.shape);
+      for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount]]){
+        const label=element('label',field==='spikeCount'?'balloon-spike-count-control':'',title),input=element('input');input.type='number';input.dataset.field=field;input.min=String(min);input.max=String(max);input.step='1';input.value=String(l[field]);
+        label.hidden=field==='spikeCount'&&l.shape!=='spiky';label.append(input);shapeControls.append(label);
+      }
+      shapeControls.append(button('regenerate-shape','形状を再生成','形状seedを変更して別の歪み・尖り方にする'));card.append(shapeControls);
        const shadowLabel=element('label','tail-toggle','影を付ける'),shadowToggle=element('input');
        shadowToggle.type='checkbox';shadowToggle.dataset.field='shadowEnabled';shadowToggle.checked=l.shadowEnabled??false;
        shadowLabel.prepend(shadowToggle);card.append(shadowLabel);
       const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
       card.append(element('p','effect-note','25%透過＝不透明度75%。セリフ・書体・文字サイズ・方向・枠と形状は右側で調整。'));
-      container.append(card);continue;
+      appendCard(card,l);continue;
     }
     if(l.kind==='caption'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='モノローグ・説明を入力';text.setAttribute('aria-label','キャプションの本文');card.append(text);
       const grid=element('div','effect-grid');
-      for(const [field,labelText,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['textOutlineWidth','文字の輪郭の太さ（px）','number'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['padding','内側の余白（px）','number']]){
+      for(const [field,labelText,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['textOutlineWidth','文字の輪郭の太さ（px）','number'],['color','背景色','color'],['transparency','背景の透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=CAPTION_LIMITS[field];input.step=['borderWidth','textOutlineWidth'].includes(field)?'0.5':'1';}label.append(input);grid.append(label);
       }
@@ -497,12 +611,13 @@ function renderCards(p) {
         for(const [value,text] of Object.entries(CAPTION_ALIGNMENTS[field])){const option=element('option','',text);option.value=value;select.append(option);}select.value=l[field];label.append(select);grid.append(label);
       }
       const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
-      card.append(grid,autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
+      card.append(grid,textPositionControls(l),brushControls(l),autoLabel,element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。自動追従ONでも文字位置だけ調整できる。25%透過＝背景の不透明度75%。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));appendCard(card,l);continue;
     }
     const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.wrap='off';fitTextInput(text);
     text.placeholder = l.kind === 'sfx' ? 'ドーン！' : 'セリフを入力';
     text.setAttribute('aria-label', l.kind === 'sfx' ? '効果音テキスト' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ');
     card.append(text);
+    if(l.kind==='dialogue')card.append(speechStyleControls(l));
     if (l.kind === 'sfx') {
       const options = element('div', 'card-options'), label = element('label', '', '漫画エフェクト');
       const select = element('select'); select.dataset.field = 'effect';
@@ -510,6 +625,9 @@ function renderCards(p) {
       select.value = l.effect; label.append(select); options.append(label);
       const colorLabel = element('label', '', '文字色'), color = element('input');
       color.type = 'color'; color.dataset.field = 'color'; color.value = l.color; colorLabel.append(color); options.append(colorLabel); card.append(options);
+      const outlineControls=element('div','effect-grid sfx-outline-controls');
+      const outlineLabel=element('label','','輪郭色'),outlineColor=element('input');outlineColor.type='color';outlineColor.dataset.field='textOutlineColor';outlineColor.value=l.textOutlineColor??'#ffffff';outlineLabel.append(outlineColor);
+      outlineControls.append(outlineLabel,settingNumber('outline','輪郭の太さ（px）',[0,80],l.outline,'0.5'));card.append(outlineControls);
       const taper=element('div','taper-controls'),rateLabel=element('label','','先細りの変化率（%／文字）'),rate=element('input');
       rate.type='number';rate.dataset.field='taperRate';[rate.min,rate.max]=EFFECT_LIMITS.taperRate;rate.step='0.5';rate.value=String(l.taperRate);rateLabel.append(rate);
       taper.hidden=l.effect!=='taper';taper.append(rateLabel,element('p','effect-note','初期値10%。基準100pxなら100→90→80px。最小8px。改行しても縮小を継続。ばらつき0なら指定率どおり。'));card.append(taper);
@@ -528,21 +646,24 @@ function renderCards(p) {
       card.append(element('p','effect-note','「なし」「先細り」は集中線・立体影なし。ブラー・掠れ・歪みは下のパラメータで独立調整。'));
     }
     if(l.kind==='sfx') {
-      const details=element('details','effect-details');details.append(element('summary','','文字のばらつき・ブラー・掠れ・歪みの調整'));
+      card.append(placementControls(l));
+      const details=element('details','effect-details');details.append(element('summary','','ブラー・掠れ・歪みの調整'));
       const grid=element('div','effect-grid');
-      const labels={sizeVariation:'文字サイズのばらつき（%）',horizontalJitter:'左右のズレ（%）',blurY:'縦ブラー（px）',blurX:'横ブラー（px）',blurStrength:'滲みの強さ（%）',inkCore:'文字の芯（%）',roughness:'輪郭の荒れ（%）',dryInk:'筆の掠れ（%）',brushTails:'ハネ・払い（%）',blur:'全方向ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'残像の方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
+      const labels={blurY:'縦ブラー（px）',blurX:'横ブラー（px）',blurStrength:'滲みの強さ（%）',inkCore:'文字の芯（%）',roughness:'輪郭の荒れ（%）',dryInk:'筆の掠れ（%）',brushTails:'ハネ・払い（%）',blur:'全方向ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'残像の方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
       for(const [field,labelText] of Object.entries(labels)){const label=element('label','',labelText),input=element('input');input.type='number';input.dataset.field=field;[input.min,input.max]=EFFECT_LIMITS[field];input.step=['blur','sizeVariation','horizontalJitter'].includes(field)?'0.5':'1';input.value=String(l[field]);label.append(input);grid.append(label);}
       const warpLabel=element('label','','歪みの形'),warpSelect=element('select');warpSelect.dataset.field='warp';
       for(const [value,label] of Object.entries(WARP_CHOICES)){const option=element('option','',label);option.value=value;warpSelect.append(option);}warpSelect.value=l.warp;warpLabel.append(warpSelect);grid.append(warpLabel);
       details.append(grid,element('p','effect-note','手描きの揺れはサイズ±5%・左右±3%から調整。左右は文字幅が基準。0で追加のばらつきなし。文字ごとの変化は保存・再読込でも固定。'),element('p','effect-note','感情・緊張はプリセット「感情／緊張の掠れ」から開始。縦ブラーは300px、滲みは400%まで。「文字の芯」で読みやすさを調整。掠れ・ハネは文字の形に直接適用。'));card.append(details);
     }
-    container.append(card);
+    appendCard(card,l);
   }
   refreshPresetMenus(p); updateControls(p);
 }
 
 function mountPage(p) {
   const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;
+  row.querySelector('[data-page-destination]').value=p.moveAfterPage??'';
+  addNumericControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
   row.querySelector('.dimensions').textContent = `${p.img.width} × ${p.img.height}`;
   const original = row.querySelector('.original'); original.src = p.src; original.alt = `元画像 ${p.name}`;
@@ -557,6 +678,7 @@ function mountPage(p) {
   p.canvas.width = Math.max(1, Math.round(p.img.width * scale)); p.canvas.height = Math.max(1, Math.round(p.img.height * scale));
   $('deck').append(row); renderCards(p);
   p.resizeObserver = new ResizeObserver(() => sizePreview(p)); p.resizeObserver.observe(row.querySelector('.preview-frame'));
+  p.resizeObserver.observe(row.querySelector('.original-frame'));p.resizeObserver.observe(row.querySelector('.preview-toolbar:not(.original-toolbar)'));
   connectCanvas(p); sizePreview(p);
 }
 
@@ -569,17 +691,30 @@ function refreshJump() {
   updateGlobal();
 }
 
-function movePage(p, offset) {
+function movePageTo(p,destination,focusAction) {
   if(busy)return;
-  const index = pages.indexOf(p), destination = index + offset;
+  const index = pages.indexOf(p);
   if (index < 0 || destination < 0 || destination >= pages.length) return;
-  const neighbor = pages[destination];
-  [pages[index], pages[destination]] = [neighbor, p];
+  if(destination===index){status(`「${p.name}」は指定位置に配置済み`);return;}
+  pages.splice(index,1);pages.splice(destination,0,p);
   dirty(); refreshJump(); activate(p, p.selectedId, true);
-  const focusTarget = p.row.querySelector(`[data-action=move-${offset < 0 ? 'up' : 'down'}]:enabled`)
+  const focusTarget = p.row.querySelector(`[data-action=${focusAction}]:enabled`)
     || p.row.querySelector('.page-actions button:enabled');
   focusTarget?.focus({ preventScroll: true });
   status(`「${p.name}」を ${destination + 1} / ${pages.length} ページへ移動した`);
+}
+
+function movePage(p,offset){
+  const index=pages.indexOf(p);if(index>=0)movePageTo(p,index+offset,`move-${offset<0?'up':'down'}`);
+}
+
+function movePageAfter(p){
+  if(busy)return;
+  const input=p.row.querySelector('[data-page-destination]');if(!input.reportValidity())return;
+  const after=input.valueAsNumber,index=pages.indexOf(p);
+  if(index<0||!Number.isInteger(after)||after<0||after>pages.length)return;
+  // Resolve the target in the current order, before removing the moving page.
+  movePageTo(p,after>index?after-1:after,'move-after');
 }
 
 function markChanged(p) {
@@ -594,7 +729,7 @@ function edit(p, fn, rebuild = true) {
 }
 
 $('deck').addEventListener('focusin', event => {
-  if (editLocked()) return;
+  if (editLocked()||event.target.closest('button[data-action]')) return;
   const p = pageFrom(event.target); if (!p) return;
   const id = event.target.closest('.layer-card')?.dataset.layerId;
   activate(p, id || p.selectedId);
@@ -606,25 +741,28 @@ $('deck').addEventListener('focusout', event => {
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
-  const input = event.target, field = input.dataset.field;
+  if(event.target.matches('[data-page-destination]')){const p=pageFrom(event.target);if(p)p.moveAfterPage=event.target.value;return;}
+  const input = event.target, field = controlField(input);
   if (!field) return;
   if(field==='text')fitTextInput(input);
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
   const l = p.layers.find(item => item.id === id); if (!l) return;
   let value = input.value;
-  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [1, 80], ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
+  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [0, 80], shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS, ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;
     value = Number(value);
-    if (limits[field]) value = clamp(value, ...(field==='outline'&&l.kind==='sfx'?[0,80]:limits[field]));
+    if(['shapeSeed','spikeCount','brushSeed','glyphSeed'].includes(field))value=Math.round(value);
+    if (limits[field]) value = clamp(value, ...limits[field]);
   } else if (field === 'vertical') value = value === 'true';
   else if(field==='tail'||field==='autoFit'||field==='shadowEnabled')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field!=='text')l.presetId=null;
+  l[field] = value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))l.brushEngine='pressure';if(field!=='text')l.presetId=null;
   if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)renderLayerSummary(l,summary);}
   markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
+$('deck').addEventListener('change',event=>editing.delete(event.target));
 
 $('deck').addEventListener('click', event => {
   if (editLocked()) return;
@@ -632,7 +770,7 @@ $('deck').addEventListener('click', event => {
   const card = event.target.closest('.layer-card'), cardId = card?.dataset.layerId;
   activate(p, cardId || p.selectedId);
   const action = event.target.closest('[data-action]')?.dataset.action;
-  if (!action || (busy&&['move-up','move-down','remove','delete','complete','copy-next','copy-all','cut-all','paste-all','save-image'].includes(action))) return;
+  if (!action || (busy&&['move-up','move-down','move-after','remove','delete','complete','copy-next','copy-all','cut-all','paste-all','save-image'].includes(action))) return;
   const l = selected(p);
   if (action.startsWith('add-')) {
     const kind = action === 'add-caption'?'caption':action === 'add-balloon'?'balloon':action === 'add-sfx' ? 'sfx' : 'dialogue', speaker = action === 'add-female' ? 'female' : 'male';
@@ -647,8 +785,16 @@ $('deck').addEventListener('click', event => {
     saveSelectedPreset();
   } else if (action === 'delete-preset' && l) {
     deletePreset(card.querySelector('[data-preset-select]').value);
+  } else if (action === 'regenerate-brush' && ['balloon','caption'].includes(l?.kind)) {
+    edit(p,()=>{l.brushSeed=crypto.getRandomValues(new Uint32Array(1))[0];l.brushEngine='pressure';l.presetId=null;});
+  } else if (action === 'regenerate-placement' && l?.kind==='sfx') {
+    edit(p,()=>{l.glyphSeed=crypto.getRandomValues(new Uint32Array(1))[0];l.presetId=null;});
   } else if (action === 'regenerate-texture' && l?.kind==='sfx') {
     edit(p,()=>{l.textureSeed=(Math.imul(l.textureSeed??0,1664525)+1013904223)>>>0;l.presetId=null;});
+  } else if (action === 'regenerate-shape' && l?.kind==='balloon') {
+    edit(p,()=>{l.shapeSeed=(Math.imul(l.shapeSeed,1664525)+1013904223)>>>0;l.presetId=null;});
+  } else if (action === 'reset-text-color' && ['dialogue','balloon'].includes(l?.kind)) {
+    edit(p,()=>{l.textColor=null;l.presetId=null;});
   } else if (action === 'duplicate' && l) {
     edit(p, () => { const copy = duplicateLayer(l); p.layers.push(copy); p.selectedId = copy.id; });
   } else if (action === 'drop-layer' && l) {
@@ -663,6 +809,8 @@ $('deck').addEventListener('click', event => {
     guard(task=>saveImage(p,task),'PNG保存',2);
   } else if (action === 'move-up' || action === 'move-down') {
     movePage(p, action === 'move-up' ? -1 : 1);
+  } else if (action === 'move-after') {
+    event.preventDefault();movePageAfter(p);
   } else if (action === 'complete') {
     p.done = true; dirty(); updateGlobal();
     const next = pages[pages.indexOf(p) + 1];
@@ -825,7 +973,7 @@ function download(blob, name) {
 }
 async function prepareExportFonts(snapshot,task) {
   task?.stage('書体準備');if(!document.fonts)return;
-  const queries=new Set(snapshot.flatMap(p=>p.layers.map(l=>fontDescription(l).load)).filter(Boolean));
+  const queries=new Set(snapshot.flatMap(p=>p.layers.flatMap(fontLoadQueries)));
   for(const query of queries){checkAbort(task?.signal);const faces=await document.fonts.load(query);if(!faces.length)throw new Error(`書体を読込できない: ${query}`);}
   clearGlyphCache();
 }
@@ -1059,7 +1207,7 @@ $('autosaveMinutes').onchange=()=>{
 $('restoreDraft').onclick=()=>guard(async task=>{
   await storageReady;task.stage('メタ情報');const meta=await getDraftMeta();if(!meta)return;
   if(pages.length&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
-  if(![3,4,5,6,7].includes(meta.version)||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
+  if(!Number.isInteger(meta.version)||meta.version<3||meta.version>PROJECT_VERSION||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
   task.stage('画像取得',meta.pages.length);const images=await getDraftImages(meta.pages.map(p=>p.id));checkAbort(task.signal);
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();

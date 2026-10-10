@@ -1,4 +1,5 @@
 import {checkAbort,yieldToBrowser} from './bulk-task.js';
+import {PROJECT_VERSION} from './model.js';
 const MAGIC=new Uint8Array([0x53,0x45,0x52,0x49,0x46,0x55,0,1]);
 export const MANIFEST_LIMIT=16*1024**2;
 const mimePattern=/^image\/(png|jpeg|webp|gif|avif)$/;
@@ -29,7 +30,7 @@ export async function* projectParts(pages,preferences,{format='serifu',task,sour
   task?.stage(format==='json'?'JSON変換':'原画像収録',pages.length);
   if(format==='json'){
     const folder=typeof sourceFolderName==='string'&&sourceFolderName?`,"sourceFolderName":${await projectJSON('stringify',sourceFolderName,{signal})}`:'';
-    yield `{"version":7,"preferences":${await projectJSON('stringify',preferences,{signal})}${folder},"pages":[`;
+    yield `{"version":${PROJECT_VERSION},"preferences":${await projectJSON('stringify',preferences,{signal})}${folder},"pages":[`;
     for(let i=0;i<pages.length;i++){checkAbort(signal);const p=pages[i],src=p.src?.startsWith('data:')?p.src:await blobDataURL(await originalBlob(p),signal);
       yield (i?',':'')+await projectJSON('stringify',{name:p.name,src,layers:p.layers,done:p.done===true,edited:p.edited===true},{signal});task?.result(p.name);await yieldToBrowser();}
     yield ']}';return;
@@ -37,7 +38,7 @@ export async function* projectParts(pages,preferences,{format='serifu',task,sour
   const assets=[],blobs=[],records=[];
   for(const p of pages){checkAbort(signal);const blob=await originalBlob(p);if(!mimePattern.test(blob.type))throw new Error(`未対応の原画像形式: ${p.name}`);
     records.push({name:p.name,assetIndex:assets.length,layers:p.layers,done:p.done===true,edited:p.edited===true});assets.push({size:blob.size,mimeType:blob.type,width:p.img.width,height:p.img.height});blobs.push(blob);if(blobs.length%20===0)await yieldToBrowser();}
-  const manifestData={containerVersion:1,projectVersion:7,preferences,pages:records,assets};
+  const manifestData={containerVersion:1,projectVersion:PROJECT_VERSION,preferences,pages:records,assets};
   if(typeof sourceFolderName==='string'&&sourceFolderName)manifestData.sourceFolderName=sourceFolderName;
   const manifest=new TextEncoder().encode(await projectJSON('stringify',manifestData,{signal}));
   if(manifest.byteLength>MANIFEST_LIMIT)throw new Error('編集メタデータが16MiBを超える');
@@ -47,7 +48,7 @@ export async function* projectParts(pages,preferences,{format='serifu',task,sour
 export async function projectBlob(pages,preferences,options){const parts=[];for await(const part of projectParts(pages,preferences,options))parts.push(part);checkAbort(options?.task?.signal);return new Blob(parts,{type:options?.format==='json'?'application/json':'application/octet-stream'});}
 function validatePages(data,container=false){
   const version=container?data.projectVersion:data.version;
-  if(!(container?[6,7].includes(version):[1,2,3,4,5,6,7].includes(version))||!Array.isArray(data.pages)||!data.pages.length)throw new Error('未対応または空の編集データ');
+  if(!Number.isInteger(version)||version<(container?6:1)||version>PROJECT_VERSION||!Array.isArray(data.pages)||!data.pages.length)throw new Error('未対応または空の編集データ');
   for(const p of data.pages){if(!p||typeof p.name!=='string'||!Array.isArray(p.layers))throw new Error('画像データが不正');
     if(!container&&(typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp|gif|avif);base64,[A-Za-z0-9+/\s]*={0,2}$/.test(p.src)))throw new Error('画像データが不正');}
 }

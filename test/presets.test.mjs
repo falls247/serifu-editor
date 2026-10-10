@@ -45,7 +45,7 @@ test('balloon presets clamp text settings for very small and very large pages',(
   const source={...newLayer('balloon',1000,750),size:100,outline:3,thickness:20};
   const preset=createPreset('寸法範囲外の吹き出し',source,1000,750);
   const small=newLayer('balloon',30,30);applyPreset(small,preset,30,30);
-  assert.equal(small.size,8);assert.equal(small.outline,1);assert.ok(small.thickness>=-10&&small.thickness<=30);
+  assert.equal(small.size,8);assert.equal(small.outline,.12);assert.ok(small.thickness>=-10&&small.thickness<=30);
   const large=newLayer('balloon',30000,30000);applyPreset(large,preset,30000,30000);
   assert.equal(large.size,500);assert.equal(large.outline,80);assert.equal(large.thickness,30);
 });
@@ -55,12 +55,12 @@ test('numeric ink thickness is a preset setting with compatible defaults and bou
   delete preset.style.thicknessRatio;applyPreset(target,preset,1000,750);assert.equal(target.thickness,0);
   source.thickness=20;const thick=createPreset('太いセリフ',source,1000,750);applyPreset(target,thick,4000,3000);assert.equal(target.thickness,30);
 });
-test('letter variation percentages are preset settings while the new layer keeps its own fixed pattern',()=>{
+test('user lettering presets save variation percentages and the fixed layout seed',()=>{
   const source={...newLayer('sfx',1000,750),sizeVariation:8.5,horizontalJitter:3.5,glyphSeed:123456};
   const preset=createPreset('手描き',source,1000,750),prefs=defaultPreferences();prefs.presets.push(preset);prefs.defaults.sfx=preset.id;
   const remembered=normalizePreferences(JSON.parse(JSON.stringify(prefs))).presets.find(p=>p.id===preset.id);
   const target={...newLayer('sfx',2000,1500),glyphSeed:654321};applyPreset(target,remembered,2000,1500);
-  assert.equal(target.sizeVariation,8.5);assert.equal(target.horizontalJitter,3.5);assert.equal(target.glyphSeed,654321);
+  assert.equal(target.sizeVariation,8.5);assert.equal(target.horizontalJitter,3.5);assert.equal(target.glyphSeed,123456);
   delete remembered.style.sizeVariation;delete remembered.style.horizontalJitter;applyPreset(target,remembered,1000,750);
   assert.equal(target.sizeVariation,0);assert.equal(target.horizontalJitter,0);
 });

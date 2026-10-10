@@ -12,7 +12,14 @@ function noise(x,y,seed) {
   let value=Math.imul(x+1,374761393)^Math.imul(y+1,668265263)^seed;
   value=Math.imul(value^(value>>>13),1274126177);return ((value^(value>>>16))>>>0)/4294967296;
 }
-export function glyphVariation(seed,index,sizeVariation=0,horizontalJitter=0) {
+export function glyphVariation(seed,index,sizeVariation=0,horizontalJitter=0,options={}) {
+  if(options.correlated){
+    const smooth=(channel)=>{
+      const t=index/3,cell=Math.floor(t),f=t-cell,u=f*f*(3-2*f);
+      return ((noise(cell,channel,seed)*(1-u)+noise(cell+1,channel,seed)*u)*.8+noise(index,channel+19,seed)*.2)*2-1;
+    };
+    return {scale:1+smooth(0)*sizeVariation/100,shift:smooth(1)*horizontalJitter/100||0,rotation:smooth(2)*(options.rotationJitter||0)*Math.PI/180||0,vertical:smooth(3)*(options.verticalJitter||0)/100||0,spacing:smooth(4)*(options.spacingJitter||0)/100||0};
+  }
   return {
     scale:sizeVariation?1+(noise(index,0,seed)*2-1)*sizeVariation/100:1,
     shift:horizontalJitter?(noise(index,1,seed)*2-1)*horizontalJitter/100:0,

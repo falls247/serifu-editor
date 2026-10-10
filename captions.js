@@ -1,7 +1,8 @@
-import { fontDescription } from './fonts.js';
+import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
+import { fontDescription, glyphFontDescription } from './fonts.js';
 import { graphemes, verticalRotation, punctuationCenter } from './typography.js';
 
-export const CAPTION_LIMITS=Object.freeze({transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
+export const CAPTION_LIMITS=Object.freeze({textOffsetX:[-30000,30000],textOffsetY:[-30000,30000],transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
 export const CAPTION_ALIGNMENTS=Object.freeze({alignX:{left:'左',center:'中央',right:'右'},alignY:{top:'上',center:'中央',bottom:'下'}});
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const alignedStart=(available,used,alignment)=>alignment==='left'||alignment==='top'?-available/2:alignment==='right'||alignment==='bottom'?available/2-used:-used/2;
@@ -10,9 +11,9 @@ export function newCaption(width,height) {
   const id=crypto.randomUUID();
   return {id,kind:'caption',presetId:null,shape:'rect',shapeSeed:seedFromId(id),distortion:55,x:width*.23,y:height*.28,
     w:limit(width*.32,30,30000),h:limit(height*.4,30,30000),rotation:0,text:'',
-    color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
+    ...brushDefaults(id),color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
     textColor:'#111111',textOutlineColor:'#ffffff',textOutlineWidth:0,font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,
-    autoFit:true,padding:0,alignX:'center',alignY:'center'};
+    autoFit:true,padding:0,alignX:'center',alignY:'center',textOffsetX:0,textOffsetY:0};
 }
 
 function seedFromId(id) {
@@ -21,18 +22,22 @@ function seedFromId(id) {
   return hash>>>0;
 }
 
-function captionPath(ctx,layer) {
+export function captionOutline(layer) {
   const {w,h}=layer;
-  ctx.beginPath();
-  if(layer.shape!=='spiky') { ctx.rect(-w/2,-h/2,w,h); return; }
-  const count=14,phase=(layer.shapeSeed>>>0)/4294967296*Math.PI*2,amount=(layer.distortion??55)/100;
+  if(layer.shape!=='spiky')return [{x:-w/2,y:-h/2},{x:w/2,y:-h/2},{x:w/2,y:h/2},{x:-w/2,y:h/2},{x:-w/2,y:-h/2}];
+  const count=14,phase=(layer.shapeSeed>>>0)/4294967296*Math.PI*2,amount=(layer.distortion??55)/100,points=[];
   for(let i=0;i<count;i++){
     const angle=-Math.PI/2+i*Math.PI*2/count+phase*.055+Math.sin(i*1.83+phase)*.025*amount;
-    const peak=i%2===0, wobble=Math.sin(i*1.71+phase)*.13;
-    const radius=(peak?.98:.62)+wobble*amount;
-    const x=Math.cos(angle)*w/2*radius,y=Math.sin(angle)*h/2*radius;
-    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    const peak=i%2===0,wobble=Math.sin(i*1.71+phase)*.13,radius=(peak?.98:.62)+wobble*amount;
+    points.push({x:Math.cos(angle)*w/2*radius,y:Math.sin(angle)*h/2*radius});
   }
+  return [...points,points[0]];
+}
+function captionPath(ctx,layer) {
+  ctx.beginPath();
+  if(layer.shape!=='spiky'){ctx.rect(-layer.w/2,-layer.h/2,layer.w,layer.h);return;}
+  const points=captionOutline(layer);ctx.moveTo(points[0].x,points[0].y);
+  for(const p of points.slice(1,-1))ctx.lineTo(p.x,p.y);
   ctx.closePath();
 }
 
@@ -54,9 +59,10 @@ export function captionLayout(ctx,layer,sizeOverride) {
       if(!layer.text)return {size,font,glyphs:[],width:0,height:0,innerWidth:box.width,innerHeight:box.height,fits:true};
       const measured=new Map();
       for(const char of lines.flat())if(!measured.has(char)){
+        const glyphDescription=glyphFontDescription(ctx,layer,char),glyphFont=`${glyphDescription.weight} ${size}px ${glyphDescription.family}`;ctx.font=glyphFont;
         const m=ctx.measureText(char),left=m.actualBoundingBoxLeft||0,right=m.actualBoundingBoxRight??m.width,
           ascent=m.actualBoundingBoxAscent??size*.8,descent=m.actualBoundingBoxDescent??size*.2;
-        measured.set(char,{char,left,right,ascent,descent,width:Math.max(m.width,left+right),height:Math.max(0,ascent+descent),rotate:layer.vertical&&verticalRotation(char)!==0});
+        measured.set(char,{char,font:glyphFont,left,right,ascent,descent,width:Math.max(m.width,left+right),height:Math.max(0,ascent+descent),rotate:layer.vertical&&verticalRotation(char)!==0});
       }
       const metrics=[...measured.values()],glyphs=[];
       let width=0,height=0;
@@ -82,6 +88,7 @@ export function captionLayout(ctx,layer,sizeOverride) {
         const startY=alignedStart(textHeight,height,layer.alignY??'center');
         rows.forEach((row,i)=>{let x=alignedStart(textWidth,row.reduce((sum,m)=>sum+m.width,0),layer.alignX??'center');for(const m of row){glyphs.push({...m,x:x+m.width/2,y:startY+(i+.5)*advance});x+=m.width;}});
       }
+      for(const glyph of glyphs){glyph.x+=layer.textOffsetX??0;glyph.y+=layer.textOffsetY??0;}
       width+=outline*2;height+=outline*2;
       return {size,font,glyphs,width,height,innerWidth:box.width,innerHeight:box.height,fits:width<=box.width+.001&&height<=box.height+.001};
     };
@@ -96,13 +103,17 @@ export function captionLayout(ctx,layer,sizeOverride) {
 export function paintCaption(ctx,layer) {
   ctx.save();ctx.globalAlpha*=1-layer.transparency/100;ctx.fillStyle=layer.color;captionPath(ctx,layer);
   ctx.fill();ctx.restore();
-  if(layer.borderWidth>0){captionPath(ctx,layer);ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='miter';ctx.stroke();}
+  if(layer.borderWidth>0){
+    if(['brush','dry-brush'].includes(layer.borderStyle))paintBrushStroke(ctx,captionOutline(layer),layer);
+    else {captionPath(ctx,layer);ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='miter';ctx.stroke();}
+  }
   const layout=captionLayout(ctx,layer);
-  ctx.save();captionPath(ctx,{...layer,w:layout.innerWidth,h:layout.innerHeight});ctx.clip();
+  ctx.save();captionPath(ctx,{...layer,w:Math.max(1,layer.w-layer.borderWidth),h:Math.max(1,layer.h-layer.borderWidth)});ctx.clip();
   ctx.font=layout.font;ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle=layer.textColor;
   const outline=layer.textOutlineWidth??0;
   ctx.strokeStyle=layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.lineJoin='round';
   for(const stroke of outline>0?[true,false]:[false])for(const glyph of layout.glyphs){
+    ctx.font=glyph.font;
     ctx.save();ctx.translate(glyph.x,glyph.y);if(glyph.rotate)ctx.rotate(Math.PI/2);
     const x=(glyph.left-glyph.right)/2,y=(glyph.ascent-glyph.descent)/2;
     if(stroke)ctx.strokeText(glyph.char,x,y);else ctx.fillText(glyph.char,x,y);

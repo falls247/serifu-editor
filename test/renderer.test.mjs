@@ -25,7 +25,7 @@ test('old bubble projects become outlined male dialogue without losing text or p
 });
 test('project validation rejects unknown speakers, effects, nonfinite coordinates and invalid outlines', () => {
   const l = newLayer('dialogue', 1000, 800, 'female');
-  for (const invalid of [{ speaker: '__proto__' }, { effect: 'other' }, { x: NaN }, { outline: 0 }]) assert.throws(() => normalizeLayer({ ...l, ...invalid }));
+  for (const invalid of [{ speaker: '__proto__' }, { effect: 'other' }, { x: NaN }, { outline: -1 }]) assert.throws(() => normalizeLayer({ ...l, ...invalid }));
   assert.equal(normalizeLayer(l).speaker, 'female');
 });
 test('swapping dialogue changes only text while preserving roles and positions', () => {

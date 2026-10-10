@@ -43,7 +43,9 @@ try {
   const balloon = row.locator('[data-kind=balloon]');
   await balloon.locator('textarea').fill('吹き出しの台詞～');
   await balloon.locator('[data-action=speaker-female]').click();
-  for (const [field, value] of Object.entries({ x: 200, y: 150, w: 180, h: 240, size: 24 })) await controls.locator(`[data-field=${field}]`).fill(String(value));
+  for (const [field, value] of Object.entries({ x: 200, y: 150, w: 180, h: 240, size: 24, padding: 16 })) await controls.locator(`[data-field=${field}]`).fill(String(value));
+  // Font/PNG parity uses fully visible text; frame-edge clipping is tested separately.
+  await controls.locator('[data-field=lineAlign]').selectOption('center');
   await controls.locator('[data-field=font]').selectOption('round');
   await controls.locator('[data-field=shape]').selectOption('distorted-rect');
   await controls.locator('[data-field=distortion]').evaluate(input => { input.value = '70'; input.dispatchEvent(new Event('input', { bubbles: true })); });

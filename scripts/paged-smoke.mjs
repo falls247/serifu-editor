@@ -45,7 +45,7 @@ try {
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '3');
   await first().locator('[data-kind=caption] [data-field=textOutlineWidth]').fill('4.5');
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '4.5');
-  await first().locator('.caption-controls [data-field=textOutlineColor]').fill('#ff6600');
+  await first().locator('.position-controls [data-field=textOutlineColor]').fill('#ff6600');
   assert.equal(await first().locator('[data-kind=caption] [data-field=textOutlineColor]').inputValue(), '#ff6600');
   const colored = await first().locator('canvas').evaluate(canvas => {
     const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -145,6 +145,13 @@ try {
   await rows.nth(49).locator('[data-action=move-down]').click();
   assert.equal(await page.locator('#viewRange').textContent(), '51–100 / 500枚');
   assert.equal(await first().locator('.page-name').textContent(), '050.png');
+  const movedId=await first().getAttribute('data-page-id'),moved=page.locator(`.image-row[data-page-id="${movedId}"]`);
+  await moved.locator('[data-page-destination]').fill('500');await moved.locator('[data-action=move-after]').click();
+  assert.equal(await page.locator('#viewRange').textContent(),'451–500 / 500枚');assert.equal(await rows.last().locator('.page-name').textContent(),'050.png');
+  assert.equal(await page.locator('#jump').inputValue(),movedId);assert.equal(await moved.locator('[data-page-destination]').inputValue(),'500');assert.equal(await moved.locator('[data-action=move-after]').evaluate(button=>button===document.activeElement),true);
+  assert.match(await thumbs.last().locator('.thumbnail-state').textContent(),/編集済み.*確認済み/);
+  await moved.locator('[data-page-destination]').fill('49');await moved.locator('[data-action=move-after]').click();
+  assert.equal(await page.locator('#viewRange').textContent(),'1–50 / 500枚');assert.equal(await rows.last().locator('.page-name').textContent(),'050.png');assert.equal(await moved.locator('textarea').inputValue(),'境界の台詞');
   await thumbs.nth(0).click();
   await first().locator('canvas').focus(); await page.keyboard.press('Delete');
   await page.keyboard.press('Control+z');
@@ -155,7 +162,7 @@ try {
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'mobile layout must fit the viewport');
   await page.screenshot({ path: 'artifacts/paged-mobile.png' });
   assert.deepEqual(errors, []);
-  console.log('500件の50/100/全表示、範囲境界の複製・完了・移動、サムネイル倍率・状態・表示切替、DeleteとUndo、輪郭描画・保存・復元、全体への保存とTXT出力を確認した');
+  console.log('500件の50/100/全表示、指定ページ後への長距離移動・範囲切替・入力とフォーカス保持、範囲境界の複製・完了・移動、サムネイル倍率・状態・表示切替、DeleteとUndo、輪郭描画・保存・復元、全体への保存とTXT出力を確認した');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/paged-failure.png', fullPage: true }).catch(() => {}); }
   throw error;

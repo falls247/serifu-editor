@@ -1,16 +1,18 @@
 import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
-import { fontDescription } from './fonts.js';
-import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder } from './balloons.js';
+import { glyphFontDescription, clearFontCache } from './fonts.js';
+import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
+import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
+export const dialogueColor = layer => layer.textColor??DIALOGUE_COLORS[layer.speaker];
 export const EFFECTS = Object.freeze({ none:'なし', taper:'先細り', impact: 'ドン！／立体', burst: 'バン！／集中線', speed: 'シュッ／スピード', rumble: 'ゴゴゴ／震え', tension: 'ゾワッ／感情・緊張' });
 export const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
 export function newLayer(kind, width, height, speaker = 'male') {
-  if(kind==='balloon')return newBalloon(width,height);
+  if(kind==='balloon')return newBalloon(width,height,speaker);
   if(kind==='caption')return newCaption(width,height);
   const id=crypto.randomUUID();
   return {
@@ -22,10 +24,12 @@ export function newLayer(kind, width, height, speaker = 'male') {
     size: clamp(Math.round(width * (kind === 'sfx' ? .09 : .055)), 16, 500),
     rotation: kind === 'sfx' ? -12 : 0, thickness:0, outline: clamp(Math.round(width * .006), 2, 80),
     vertical: true, color: '#111111', effect: 'burst', taperRate:10,
+    textOutlineColor:'#ffffff', ...(kind==='dialogue'?{textColor:null}:{}),
     font: kind === 'sfx' ? 'comic' : 'sans', blur: 0, motionBlur: 0, blurAngle: 90,
     distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
     blurX: 0, blurY: 0, blurStrength: 200, inkCore: 80,
     roughness: kind === 'sfx' ? 18 : 0, dryInk: kind === 'sfx' ? 22 : 0, brushTails: kind === 'sfx' ? 25 : 0,
+    ...PLACEMENT_DEFAULTS,
     sizeVariation:kind==='sfx'?5:0, horizontalJitter:kind==='sfx'?3:0, glyphSeed:inkSeed(id),
     inkTexture:'none',grungeAmount:65,scratchLength:55,scratchAngle:90,spatterAmount:40,textureSeed:inkSeed(id+':texture'),
   };
@@ -90,23 +94,15 @@ function ornament(ctx, l) {
 export const WARP_CHOICES = Object.freeze({ wave: '波打ち', bulge: '膨張', taper: '先細り' });
 const glyphCache = new Map();
 let cachePixels = 0;
-export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; }
-function createSurface(ctx, width, height) {
-  if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(width, height);
-  if (typeof document !== 'undefined') { const c = document.createElement('canvas'); c.width = width; c.height = height; return c; }
-  return new ctx.canvas.constructor(width, height);
-}
-function fontFamily(l) {
-  return fontDescription(l).family;
-}
+export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; clearLayoutCache(); clearFontCache(); }
 function drawInk(ctx, l, char, x, y) {
   if (l.kind === 'sfx' && !['none','taper','tension'].includes(l.effect)) {
     const depth = l.size * (l.effect === 'impact' || l.effect === 'burst' ? .13 : .05);
     ctx.strokeStyle = '#111111'; ctx.fillStyle = '#111111'; ctx.lineWidth = l.outline * 2 + l.size * .05;
     ctx.strokeText(char, x + depth, y + depth); ctx.fillText(char, x + depth, y + depth);
   }
-  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = l.outline * 2; ctx.strokeText(char, x, y);
-  ctx.fillStyle = l.kind === 'sfx' ? l.color : DIALOGUE_COLORS[l.speaker]; ctx.fillText(char, x, y);
+  if(l.outline>0){ctx.strokeStyle=l.textOutlineColor??'#ffffff';ctx.lineWidth=l.outline*2;ctx.strokeText(char,x,y);}
+  ctx.fillStyle = l.kind === 'sfx' ? l.color : dialogueColor(l); ctx.fillText(char, x, y);
 }
 function tintedMask(ctx, alpha, width, height, color, strength=1) {
   const surface=createSurface(ctx,width,height),c=surface.getContext('2d'),pixels=c.createImageData(width,height);
@@ -115,10 +111,11 @@ function tintedMask(ctx, alpha, width, height, color, strength=1) {
   c.putImageData(pixels,0,0);return surface;
 }
 function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
-  if(l.kind!=='sfx')l={...l,color:DIALOGUE_COLORS[l.speaker],effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
+  if(l.kind!=='sfx')l={...l,color:dialogueColor(l),effect:'tension',stretchX:100,stretchY:100,skew:0,distortion:0,roughness:0,dryInk:0,brushTails:0,blurX:0,blurY:0};
+  const outlineColor=l.textOutlineColor??'#ffffff';
   const textured=l.kind==='sfx'&&l.inkTexture==='grunge'&&(l.grungeAmount>0||l.spatterAmount>0);
   const textureKey=textured?[l.inkTexture,l.grungeAmount,l.scratchLength,l.scratchAngle,l.spatterAmount,l.textureSeed,glyphIndex]:[];
-  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore,...textureKey].join('|');
+  const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,outlineColor,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore,...textureKey].join('|');
   if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
   const sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);
   const reach=l.size*(l.brushTails||0)/100*.65;
@@ -128,22 +125,7 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   const quality=Math.min(1,Math.sqrt(2000000/(drawWidth*drawHeight)));
   l={...l,size:l.size*quality,thickness:(l.thickness||0)*quality,outline:l.outline*quality,blurX:(l.blurX||0)*quality,blurY:(l.blurY||0)*quality};
   const width=Math.max(1,Math.round(drawWidth*quality)),height=Math.max(1,Math.round(drawHeight*quality));
-  const ink = createSurface(ctx, width, height), c = ink.getContext('2d');
-  c.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
-  const corner=verticalPunctuationOffset(c,char,l.size,l.vertical);
-  c.translate(width/2,height/2);c.transform(1,0,shear,1,0,0);c.scale(sx,sy);c.rotate(glyphAngle);c.fillStyle='#ffffff';c.fillText(char,corner.x,corner.y);c.setTransform(1,0,0,1,0,0);
-  let warped = ink;
-  if (l.distortion > 0) {
-    warped = createSurface(ctx, width, height); const out = warped.getContext('2d'), amount = l.distortion / 100;
-    for (let y = 0; y < height; y += 2) {
-      const t = clamp((y-height/2)/(l.size*.8),-1,1), slice = Math.min(2,height-y);
-      let offset=0, stretch=1;
-      if (l.warp === 'wave') offset = Math.sin(t*Math.PI*2) * l.size * .2 * amount;
-      if (l.warp === 'bulge') stretch = 1 + (1-t*t) * .6 * amount;
-      if (l.warp === 'taper') { stretch = 1 + t * .5 * amount; offset = t * l.size * .06 * amount; }
-      out.drawImage(ink,0,y,width,slice,(width-width*stretch)/2+offset,y,width*stretch,slice);
-    }
-  }
+  const warped=glyphInkSurface(ctx,l,char,glyphAngle,width,height);
   const pixels=warped.getContext('2d').getImageData(0,0,width,height).data,source=new Uint8ClampedArray(width*height);
   for(let i=0;i<source.length;i++)source[i]=pixels[i*4+3];
   const thickened=adjustInkThickness(source,width,height,l.thickness);
@@ -154,17 +136,17 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   if(texture)for(let i=0;i<alpha.length;i++)alpha[i]=Math.max(alpha[i],texture.speckles[i]);
   const edge=dilateMask(texturedBody,width,height,l.outline),fibreEdge=dilateMask(alpha,width,height,Math.min(l.outline,1));
   for(let i=0;i<edge.length;i++)edge[i]=Math.max(edge[i],fibreEdge[i]);
-  const foreground=tintedMask(ctx,alpha,width,height,l.color),border=tintedMask(ctx,edge,width,height,'#ffffff');
+  const foreground=tintedMask(ctx,alpha,width,height,l.color),border=tintedMask(ctx,edge,width,height,outlineColor);
   const result=createSurface(ctx,width,height),out=result.getContext('2d'),hasBlur=l.blurX>0||l.blurY>0;
   if(hasBlur){
     const strength=(l.blurStrength??200)/100;
-    out.drawImage(tintedMask(ctx,directionalBlur(edge,width,height,l.blurX,l.blurY),width,height,'#ffffff',strength),0,0);
+    if(l.outline>0)out.drawImage(tintedMask(ctx,directionalBlur(edge,width,height,l.blurX,l.blurY),width,height,outlineColor,strength),0,0);
     out.drawImage(tintedMask(ctx,directionalBlur(alpha,width,height,l.blurX,l.blurY),width,height,l.color,strength),0,0);
     out.globalAlpha=(l.inkCore??80)/100;
   }
   const depth=l.size*((l.effect==='impact'||l.effect==='burst')?.13:['none','taper','tension'].includes(l.effect)?0:.05);
   if(depth)out.drawImage(tintedMask(ctx,edge,width,height,'#111111'),depth,depth);
-  out.drawImage(border,0,0);out.drawImage(foreground,0,0);
+  if(l.outline>0)out.drawImage(border,0,0);out.drawImage(foreground,0,0);
   if(texture){
     // Carve ink defects through keyline and cast shadow, never paint them white.
     out.globalCompositeOperation='destination-out';out.globalAlpha=1;
@@ -185,11 +167,13 @@ export function glyphFontSize(layer,index) {
 export function textGlyphs(ctx,layer) {
   ctx.save();
   try {
-    const sfx=layer.kind==='sfx',sx=sfx?layer.stretchX/100:1,sy=sfx?layer.stretchY/100:1,description=fontDescription(layer);
+    if(layer.kind==='sfx'&&((layer.kerningMode==='optical'&&layer.kerningStrength>0)||layer.rotationJitter||layer.verticalJitter||layer.spacingJitter||layer.glyphOverlap))return opticalTextGlyphs(ctx,layer,glyphFontSize);
+    const sfx=layer.kind==='sfx',sx=sfx?layer.stretchX/100:1,sy=sfx?layer.stretchY/100:1;
+    const balloon=layer.kind==='balloon',box=balloon?balloonContentBox(layer):{width:layer.w*.88,height:layer.h*.88};
     let index=0;
     const lines=layer.text.split('\n').map(line=>graphemes(line).map(char=>{
       const i=index++,baseSize=glyphFontSize(layer,i),variation=sfx?glyphVariation(layer.glyphSeed??inkSeed(layer.text),i,layer.sizeVariation||0,layer.horizontalJitter||0):{scale:1,shift:0};
-      ctx.font=`${description.weight} ${baseSize}px ${description.family}`;
+      const description=glyphFontDescription(ctx,layer,char);ctx.font=`${description.weight} ${baseSize}px ${description.family}`;
       return {char,index:i,baseSize,size:layer.effect==='taper'&&sfx?Math.max(8,baseSize*variation.scale):baseSize*variation.scale,shift:variation.shift,angle:layer.vertical?verticalRotation(char):0,width:ctx.measureText(char).width*sx};
     }));
     const glyphs=[];
@@ -198,19 +182,20 @@ export function textGlyphs(ctx,layer) {
       const columns=[];
       for(const line of lines){
         let column=[],height=0;
-        for(const glyph of line){const advance=glyph.baseSize*1.12*sy;if(column.length&&height+advance>layer.h*.88+.001){columns.push(column);column=[];height=0;}column.push({...glyph,advance});height+=advance;}
+        for(const glyph of line){const advance=glyph.baseSize*1.12*sy;if(column.length&&height+advance>box.height+.001){columns.push(column);column=[];height=0;}column.push({...glyph,advance});height+=advance;}
         columns.push(column);
       }
       const widths=columns.map(column=>Math.max(column.length?0:glyphFontSize(layer,0),...column.map(glyph=>glyph.baseSize))*1.3*sx);
       let x=widths.reduce((a,b)=>a+b,0)/2;
-      columns.forEach((column,i)=>{x-=widths[i]/2;let y=columns.length>1&&topAligned?-layer.h*.44:-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
+      columns.forEach((column,i)=>{x-=widths[i]/2;let y=(balloon||columns.length>1)&&topAligned?-box.height/2:-column.reduce((sum,glyph)=>sum+glyph.advance,0)/2;for(const glyph of column){glyphs.push({...glyph,x,y:y+glyph.advance/2});y+=glyph.advance;}x-=widths[i]/2;});
     }else{
       const rows=[];
-      for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>layer.w*.88){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
+      for(const line of lines){let row=[],width=0;for(const glyph of line){if(row.length&&width+glyph.width>box.width){rows.push(row);row=[];width=0;}row.push(glyph);width+=glyph.width;}rows.push(row);}
       const heights=rows.map(row=>Math.max(row.length?0:layer.size,...row.map(glyph=>glyph.baseSize))*1.3*sy);
-      let y=rows.length>1&&topAligned?-layer.h*.44:-heights.reduce((a,b)=>a+b,0)/2;
+      let y=(balloon||rows.length>1)&&topAligned?-box.height/2:-heights.reduce((a,b)=>a+b,0)/2;
       rows.forEach((row,i)=>{let x=-row.reduce((sum,glyph)=>sum+glyph.width,0)/2;for(const glyph of row){glyphs.push({...glyph,x:x+glyph.width/2,y:y+heights[i]/2});x+=glyph.width;}y+=heights[i];});
     }
+    if(balloon)for(const glyph of glyphs){glyph.x+=layer.textOffsetX??0;glyph.y+=layer.textOffsetY??0;}
     return glyphs;
   } finally {ctx.restore();}
 }
@@ -220,11 +205,12 @@ function paintText(ctx, l) {
   ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';
   for(const letter of textGlyphs(ctx,l)){
     const {char,index:i,x,y,size,baseSize,shift,angle}=letter,layer=size===l.size?l:{...l,size};
-    ctx.font=`${fontDescription(layer).weight} ${size}px ${fontFamily(layer)}`;
+    const description=glyphFontDescription(ctx,layer,char);ctx.font=`${description.weight} ${size}px ${description.family}`;
     if(!sfx&&!l.thickness){const corner=verticalPunctuationOffset(ctx,char,size,l.vertical);ctx.save();ctx.translate(x,y);ctx.rotate(angle);drawInk(ctx,layer,char,corner.x,corner.y);ctx.restore();continue;}
     const glyph=warpedGlyph(ctx,layer,char,angle,i),image=glyph.surface;
     // Jitter follows the text box's horizontal axis, including rotated vertical punctuation.
     ctx.save();ctx.translate(x+(sfx?shift*baseSize*l.stretchX/100:0),y);
+    if(letter.drawScale)ctx.scale(letter.drawScale,letter.drawScale);
     if(sfx&&l.effect==='rumble'){ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04);ctx.rotate((i%2?1:-1)*.07);}
     const matrix=ctx.getTransform(),pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
     ctx.filter=sfx&&l.blur>0?`blur(${l.blur*pixelScale}px)`:'none';
@@ -244,7 +230,7 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon'){
       paintBalloon(ctx,l);
-      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,{...l,w:l.w*(l.shape==='spiky'?.70:.84),h:l.h*(l.shape==='spiky'?.70:.84)});ctx.restore();}
+      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,l);ctx.restore();}
     }
     else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); paintText(ctx, l);}

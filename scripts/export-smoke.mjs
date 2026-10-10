@@ -53,6 +53,18 @@ try {
   const a = row('a.png'), b = row('b.png'), c = row('c.png');
   assert.equal(await a.locator('[data-action=move-up]').isDisabled(), true);
   assert.equal(await c.locator('[data-action=move-down]').isDisabled(), true);
+  const names = () => rows.locator('.page-name').allTextContents();
+  const moveAfter=async(row,destination,enter=false)=>{
+    const input=row.locator('[data-page-destination]');await input.fill(String(destination));
+    if(enter)await input.press('Enter');else await row.locator('[data-action=move-after]').click();
+  };
+  assert.equal(await a.locator('[data-page-destination]').getAttribute('max'),'3');
+  await moveAfter(a,3);assert.deepEqual(await names(),['b.png','c.png','a.png']);assert.equal(await a.evaluate(row=>row.classList.contains('active')),true);
+  await moveAfter(a,0,true);assert.deepEqual(await names(),['a.png','b.png','c.png']);
+  await moveAfter(c,1);assert.deepEqual(await names(),['a.png','c.png','b.png']);await moveAfter(c,3);assert.deepEqual(await names(),['a.png','b.png','c.png']);
+  for(const destination of [1,2]){await moveAfter(b,destination);assert.deepEqual(await names(),['a.png','b.png','c.png'],'self and immediately preceding targets must keep order');}
+  for(const destination of ['',-1,4,1.5]){await moveAfter(b,destination);assert.equal(await b.locator('[data-page-destination]').evaluate(input=>input.checkValidity()),false);assert.deepEqual(await names(),['a.png','b.png','c.png'],'invalid destinations must keep order');}
+  assert.equal(await b.locator('.edited-badge').isHidden(),true);assert.equal(await b.locator('[data-action=undo]').isDisabled(),true);
   for (const text of ['女性A1', '女性A2\n続き']) {
     await a.locator('[data-action=add-female]').click(); await a.locator('textarea').last().fill(text);
   }
@@ -63,7 +75,7 @@ try {
   await c.locator('[data-action=move-up]').click();
   await c.locator('[data-action=move-up]').click();
   await a.locator('[data-action=move-down]').click();
-  const names = () => rows.locator('.page-name').allTextContents();
+  await moveAfter(c,3);assert.deepEqual(await names(),['b.png','a.png','c.png']);await moveAfter(c,0,true);
   assert.deepEqual(await names(), ['c.png', 'b.png', 'a.png']);
   assert.deepEqual(await rows.locator('.page-number').allTextContents(), ['01', '02', '03']);
   assert.deepEqual(await page.locator('#jump option').allTextContents(), ['1. c.png', '2. b.png', '3. a.png']);
@@ -71,6 +83,7 @@ try {
   assert.equal(await a.evaluate(node => node.classList.contains('done')), true);
   assert.equal(await a.locator('[data-action=move-down]').isDisabled(), true);
   assert.equal(await c.locator('[data-action=move-up]').isDisabled(), true);
+  await mkdir('artifacts',{recursive:true});await c.locator('.row-header').screenshot({path:'artifacts/page-move-desktop.png',style:'.collection-bar,footer{visibility:hidden !important}'});
   await c.locator('[data-action=complete]').click();
   assert.equal(await b.evaluate(node => node.classList.contains('active')), true);
   await b.locator('[data-action=copy-next]').isDisabled().then(value => assert.equal(value, true));
@@ -141,8 +154,9 @@ try {
   await page.setViewportSize({ width: 390, height: 844 });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'mobile layout must not overflow');
   await page.screenshot({ path: 'artifacts/export-mobile.png' });
-  const bounds = await rows.first().locator('.page-actions button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().left));
-  assert.ok(bounds[0] < bounds[1] && bounds[1] < bounds[2]);
+  const bounds = await rows.first().locator('[data-action=move-after],[data-action=move-up],[data-action=move-down]').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().left));
+  assert.ok(bounds[0] < bounds[1] && bounds[1] < bounds[2],'direct move controls must appear left of the adjacent move buttons on mobile');
+  await rows.first().locator('.row-header').screenshot({path:'artifacts/page-move-mobile.png',style:'.collection-bar,footer{visibility:hidden !important}'});
 
   const imported = await browser.newPage(); await imported.goto(`http://127.0.0.1:${port}`);
   await imported.locator('#projectInput').setInputFiles('artifacts/export-project.json');
@@ -150,7 +164,7 @@ try {
   assert.deepEqual((await imported.locator('.page-name').allTextContents()).slice(0, 3), ['c.png', 'b.png', 'a.png']);
   await imported.close();
   assert.deepEqual(errors, []);
-  console.log('テキスト出力、ページ順、保存先の初期位置・変更・取消、連番、JSON・一時保存の順序保持、モバイル表示を確認した');
+  console.log('指定ページの後への移動・0で先頭・Enter・前後の移動・不正値と自己指定、編集状態維持、テキスト出力、ページ順、保存先の初期位置・変更・取消、連番、JSON・一時保存の順序保持、モバイル表示を確認した');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/export-failure.png', fullPage: true }).catch(() => {}); }
   throw error;

@@ -1,14 +1,23 @@
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
 import { inkSeed } from './ink.js';
-import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId } from './balloons.js';
+import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
-export const PROJECT_VERSION=7;
+import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
+import { normalizeBrush } from './brush-stroke.js';
+export const PROJECT_VERSION=9;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
-export const EFFECT_LIMITS = Object.freeze({ taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
+export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
+
+function speechColors(input) {
+  const textColor=input.textColor===undefined?null:input.textColor,textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
+  const validColor=value=>typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);
+  if(textColor!==null&&!validColor(textColor)||!validColor(textOutlineColor))throw new Error('セリフの文字色・輪郭色が不正');
+  return {textColor,textOutlineColor};
+}
 
 export function normalizeLayer(input, version = PROJECT_VERSION) {
   if(input?.kind==='caption'){
-    input={...input,textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
+    input={textOffsetX:0,textOffsetY:0,...input,...normalizeBrush(input),textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('キャプションの座標・サイズが範囲外');
@@ -18,10 +27,12 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     const alignX=input.alignX===undefined?(version<6?'right':'center'):input.alignX,alignY=input.alignY===undefined?(version<6?'top':'center'):input.alignY;
     if(!Object.hasOwn(CAPTION_ALIGNMENTS.alignX,alignX)||!Object.hasOwn(CAPTION_ALIGNMENTS.alignY,alignY))throw new Error('キャプションの揃える方向が不正');
     if(!['rect','spiky'].includes(input.shape)||!Number.isInteger(input.shapeSeed)||input.shapeSeed<0||input.shapeSeed>4294967295||!Number.isFinite(input.distortion)||input.distortion<0||input.distortion>100)throw new Error('キャプションの形状設定が不正');
-    return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,shape:input.shape,shapeSeed:input.shapeSeed,distortion:input.distortion,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
+    return {id:crypto.randomUUID(),kind:'caption',presetId:typeof input.presetId==='string'?input.presetId:null,alignX,alignY,...normalizeBrush(input),shape:input.shape,shapeSeed:input.shapeSeed,distortion:input.distortion,...Object.fromEntries(['x','y','w','h','rotation','text','color','borderColor','textColor','textOutlineColor','font','vertical','autoFit',...Object.keys(CAPTION_LIMITS)].map(key=>[key,input[key]]))};
   }
   if(input?.kind==='balloon'){
-    input={...input,distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
+    const shapeSeed=input.shapeSeed??balloonSeedFromId(input.id);
+    input={textOffsetX:0,textOffsetY:0,padding:0,...input,...normalizeBrush(input),distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
+      spikeCount:input.spikeCount===undefined?defaultSpikeCount(shapeSeed):input.spikeCount,...speechColors(input),
       size:input.size===undefined?40:input.size,outline:input.outline===undefined?4:input.outline,thickness:input.thickness===undefined?0:input.thickness,
       vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font,shadowEnabled:input.shadowEnabled??false,shadowColor:input.shadowColor??'#222222',shadowBlur:input.shadowBlur??12,shadowOffsetX:input.shadowOffsetX??6,shadowOffsetY:input.shadowOffsetY??6,shadowOpacity:input.shadowOpacity??45,borderStyle:input.borderStyle??'solid',brushRoughness:input.brushRoughness??50};
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
@@ -29,13 +40,13 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('吹き出しの座標・サイズが範囲外');
     for(const key of ['color','borderColor','shadowColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('吹き出しの色が不正');
     for(const [key,[min,max]] of Object.entries(BALLOON_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('吹き出しの設定が範囲外');
-    if(typeof input.shadowEnabled!=='boolean'||!['solid','brush'].includes(input.borderStyle))throw new Error('吹き出しの影・ブラシ設定が不正');
+    if(typeof input.shadowEnabled!=='boolean'||!['solid','brush','dry-brush'].includes(input.borderStyle))throw new Error('吹き出しの影・ブラシ設定が不正');
     if(typeof input.tail!=='boolean'||!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しのテール・重なり設定が不正');
-    const shape=input.shape??'ellipse',shapeSeed=input.shapeSeed??balloonSeedFromId(input.id);
-    if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295)throw new Error('吹き出しの形状が不正');
+    const shape=input.shape??'ellipse';
+    if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295||!Number.isInteger(input.spikeCount))throw new Error('吹き出しの形状が不正');
     if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font)||!['top','center'].includes(input.lineAlign))throw new Error('吹き出しのセリフ設定が不正');
-    if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<1||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
-    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,shadowEnabled:input.shadowEnabled,shadowColor:input.shadowColor,borderStyle:input.borderStyle,text:input.text,speaker:input.speaker,size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
+    if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<0||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
+    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,...normalizeBrush(input),shadowEnabled:input.shadowEnabled,shadowColor:input.shadowColor,borderStyle:input.borderStyle,text:input.text,speaker:input.speaker,...speechColors(input),size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
   }
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
   const legacy = version === 1;
@@ -49,10 +60,13 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   const effect = legacy ? 'impact' : input.effect;
   const outline = legacy ? Math.max(2, Math.round(input.size * .15)) : input.outline;
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
-  if (!Number.isFinite(outline) || outline < (kind==='sfx'?0:1) || outline > 80) throw new Error('白い縁の太さが不正');
+  if (!Number.isFinite(outline) || outline < 0 || outline > 80) throw new Error('文字の輪郭の太さが不正');
   if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
-  const extras = { taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, grungeAmount:65, scratchLength:55, scratchAngle:90, spatterAmount:40, distortion:0, skew:0, stretchX:100, stretchY:100 };
+  const textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
+  if(typeof textOutlineColor!=='string'||!/^#[0-9a-f]{6}$/i.test(textOutlineColor))throw new Error('文字の輪郭色が不正');
+  const extras = { ...PLACEMENT_DEFAULTS, taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, grungeAmount:65, scratchLength:55, scratchAngle:90, spatterAmount:40, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
+  if(!['standard','optical'].includes(extras.kerningMode))throw new Error('文字配置方式が不正');
   if(!['top','center'].includes(extras.lineAlign))throw new Error('改行の配置設定が不正');
   if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
   if (!Number.isFinite(extras.thickness) || extras.thickness<THICKNESS_LIMIT[0] || extras.thickness>THICKNESS_LIMIT[1]) throw new Error('文字の太さが範囲外');
@@ -65,6 +79,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     id: crypto.randomUUID(), kind, speaker, text: input.text,
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
     rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
+    ...(kind==='dialogue'?speechColors(input):{textOutlineColor}),
     ...extras, glyphSeed, inkTexture, textureSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }
@@ -97,14 +112,17 @@ export function copySelection(layer, width, height) {
 export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
-    size:clamp(layer.size*scale,8,500),outline:clamp(layer.outline*scale,1,80),thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),borderWidth:clamp(layer.borderWidth*scale,0,80),shadowBlur:clamp((layer.shadowBlur??12)*scale,0,100),shadowOffsetX:clamp((layer.shadowOffsetX??6)*sx,-100,100),shadowOffsetY:clamp((layer.shadowOffsetY??6)*sy,-100,100),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
+    textOffsetX:clamp((layer.textOffsetX??0)*sx,...BALLOON_LIMITS.textOffsetX),textOffsetY:clamp((layer.textOffsetY??0)*sy,...BALLOON_LIMITS.textOffsetY),padding:clamp((layer.padding??0)*scale,...BALLOON_LIMITS.padding),
+    size:clamp(layer.size*scale,8,500),outline:clamp(layer.outline*scale,0,80),thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),borderWidth:clamp(layer.borderWidth*scale,0,80),shadowBlur:clamp((layer.shadowBlur??12)*scale,0,100),shadowOffsetX:clamp((layer.shadowOffsetX??6)*sx,-100,100),shadowOffsetY:clamp((layer.shadowOffsetY??6)*sy,-100,100),tailX:clamp(layer.tailX*sx,...BALLOON_LIMITS.tailX),tailY:clamp(layer.tailY*sy,...BALLOON_LIMITS.tailY),tailWidth:clamp(layer.tailWidth*scale,...BALLOON_LIMITS.tailWidth)};
   if(layer.kind==='caption')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
+    textOffsetX:clamp((layer.textOffsetX??0)*sx,...CAPTION_LIMITS.textOffsetX),textOffsetY:clamp((layer.textOffsetY??0)*sy,...CAPTION_LIMITS.textOffsetY),
     size:clamp(layer.size*scale,...CAPTION_LIMITS.size),padding:clamp(layer.padding*scale,...CAPTION_LIMITS.padding),borderWidth:clamp(layer.borderWidth*scale,...CAPTION_LIMITS.borderWidth),textOutlineWidth:clamp((layer.textOutlineWidth??0)*scale,...CAPTION_LIMITS.textOutlineWidth)};
   return {
     ...structuredClone(layer), id:crypto.randomUUID(), x:layer.x*sx, y:layer.y*sy,
     w:clamp(layer.w*sx,30,30000), h:clamp(layer.h*sy,30,30000),
-    size:clamp(layer.size*scale,8,500), outline:clamp(layer.outline*scale,layer.kind==='sfx'?0:1,80),
+    size:clamp(layer.size*scale,8,500), outline:clamp(layer.outline*scale,0,80),
     thickness:clamp((layer.thickness??0)*scale,...THICKNESS_LIMIT),
+    minimumGlyphGap:clamp((layer.minimumGlyphGap??2)*scale,...PLACEMENT_LIMITS.minimumGlyphGap),
     blur:clamp(layer.blur*scale,0,30), motionBlur:clamp(layer.motionBlur*scale,0,300),
     blurX:clamp((layer.blurX||0)*sx,0,150),blurY:clamp((layer.blurY||0)*sy,0,300),
   };
