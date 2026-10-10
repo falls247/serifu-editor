@@ -33,7 +33,7 @@ try {
     const b={...newLayer('balloon',720,700),x:360,y:350,w:320,h:520,shape:'spiky',distortion:85,color:'#ffffff',transparency:0,borderWidth:8,borderColor:'#ffc71a'};
     const spike=pixels(b),brush=pixels({...b,borderStyle:'brush',brushRoughness:100});
     const shadow=pixels({...b,shadowEnabled:true,shadowColor:'#212121',shadowBlur:16,shadowOffsetX:9,shadowOffsetY:10,shadowOpacity:75}),balloonPreview=canvas.toDataURL('image/png');
-    const probe={...b,shape:'ellipse',shapeSeed:12345,w:440,h:440,borderWidth:16,borderColor:'#111111'},solid=pixels(probe);
+    const probe={...b,brushEngine:'legacy',shape:'ellipse',shapeSeed:12345,w:440,h:440,borderWidth:16,borderColor:'#111111'},solid=pixels(probe);
     const brushLayer={...probe,borderStyle:'brush',brushRoughness:50},medium=pixels(brushLayer),brushRepeat=pixels(brushLayer),coarse=pixels({...brushLayer,brushRoughness:100});
     const gaps=rendered=>{let count=0;for(let i=0;i<solid.length;i+=4)if(solid[i]<40&&rendered[i]>160)count++;return count;};
     const brushZero=diff(solid,pixels({...brushLayer,brushRoughness:0})),brushSeedChange=diff(medium,pixels({...brushLayer,shapeSeed:12346}));

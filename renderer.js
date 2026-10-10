@@ -3,6 +3,7 @@ import { fontDescription } from './fonts.js';
 import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder } from './balloons.js';
 import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
+import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -28,6 +29,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
     distortion: kind === 'sfx' ? 25 : 0, warp: 'taper', skew: kind === 'sfx' ? -10 : 0, stretchX: 100, stretchY: 100, presetId: null,
     blurX: 0, blurY: 0, blurStrength: 200, inkCore: 80,
     roughness: kind === 'sfx' ? 18 : 0, dryInk: kind === 'sfx' ? 22 : 0, brushTails: kind === 'sfx' ? 25 : 0,
+    ...PLACEMENT_DEFAULTS,
     sizeVariation:kind==='sfx'?5:0, horizontalJitter:kind==='sfx'?3:0, glyphSeed:inkSeed(id),
     inkTexture:'none',grungeAmount:65,scratchLength:55,scratchAngle:90,spatterAmount:40,textureSeed:inkSeed(id+':texture'),
   };
@@ -92,12 +94,7 @@ function ornament(ctx, l) {
 export const WARP_CHOICES = Object.freeze({ wave: '波打ち', bulge: '膨張', taper: '先細り' });
 const glyphCache = new Map();
 let cachePixels = 0;
-export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; }
-function createSurface(ctx, width, height) {
-  if (typeof OffscreenCanvas === 'function') return new OffscreenCanvas(width, height);
-  if (typeof document !== 'undefined') { const c = document.createElement('canvas'); c.width = width; c.height = height; return c; }
-  return new ctx.canvas.constructor(width, height);
-}
+export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; clearLayoutCache(); }
 function fontFamily(l) {
   return fontDescription(l).family;
 }
@@ -131,22 +128,7 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   const quality=Math.min(1,Math.sqrt(2000000/(drawWidth*drawHeight)));
   l={...l,size:l.size*quality,thickness:(l.thickness||0)*quality,outline:l.outline*quality,blurX:(l.blurX||0)*quality,blurY:(l.blurY||0)*quality};
   const width=Math.max(1,Math.round(drawWidth*quality)),height=Math.max(1,Math.round(drawHeight*quality));
-  const ink = createSurface(ctx, width, height), c = ink.getContext('2d');
-  c.font = `${fontDescription(l).weight} ${l.size}px ${fontFamily(l)}`; c.textAlign = 'center'; c.textBaseline = 'middle'; c.lineJoin = 'round';
-  const corner=verticalPunctuationOffset(c,char,l.size,l.vertical);
-  c.translate(width/2,height/2);c.transform(1,0,shear,1,0,0);c.scale(sx,sy);c.rotate(glyphAngle);c.fillStyle='#ffffff';c.fillText(char,corner.x,corner.y);c.setTransform(1,0,0,1,0,0);
-  let warped = ink;
-  if (l.distortion > 0) {
-    warped = createSurface(ctx, width, height); const out = warped.getContext('2d'), amount = l.distortion / 100;
-    for (let y = 0; y < height; y += 2) {
-      const t = clamp((y-height/2)/(l.size*.8),-1,1), slice = Math.min(2,height-y);
-      let offset=0, stretch=1;
-      if (l.warp === 'wave') offset = Math.sin(t*Math.PI*2) * l.size * .2 * amount;
-      if (l.warp === 'bulge') stretch = 1 + (1-t*t) * .6 * amount;
-      if (l.warp === 'taper') { stretch = 1 + t * .5 * amount; offset = t * l.size * .06 * amount; }
-      out.drawImage(ink,0,y,width,slice,(width-width*stretch)/2+offset,y,width*stretch,slice);
-    }
-  }
+  const warped=glyphInkSurface(ctx,l,char,glyphAngle,width,height);
   const pixels=warped.getContext('2d').getImageData(0,0,width,height).data,source=new Uint8ClampedArray(width*height);
   for(let i=0;i<source.length;i++)source[i]=pixels[i*4+3];
   const thickened=adjustInkThickness(source,width,height,l.thickness);
@@ -188,6 +170,7 @@ export function glyphFontSize(layer,index) {
 export function textGlyphs(ctx,layer) {
   ctx.save();
   try {
+    if(layer.kind==='sfx'&&((layer.kerningMode==='optical'&&layer.kerningStrength>0)||layer.rotationJitter||layer.verticalJitter||layer.spacingJitter||layer.glyphOverlap))return opticalTextGlyphs(ctx,layer,glyphFontSize);
     const sfx=layer.kind==='sfx',sx=sfx?layer.stretchX/100:1,sy=sfx?layer.stretchY/100:1,description=fontDescription(layer);
     let index=0;
     const lines=layer.text.split('\n').map(line=>graphemes(line).map(char=>{
@@ -228,6 +211,7 @@ function paintText(ctx, l) {
     const glyph=warpedGlyph(ctx,layer,char,angle,i),image=glyph.surface;
     // Jitter follows the text box's horizontal axis, including rotated vertical punctuation.
     ctx.save();ctx.translate(x+(sfx?shift*baseSize*l.stretchX/100:0),y);
+    if(letter.drawScale)ctx.scale(letter.drawScale,letter.drawScale);
     if(sfx&&l.effect==='rumble'){ctx.translate(Math.sin(i*2.3)*l.size*.06,Math.cos(i*1.9)*l.size*.04);ctx.rotate((i%2?1:-1)*.07);}
     const matrix=ctx.getTransform(),pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
     ctx.filter=sfx&&l.blur>0?`blur(${l.blur*pixelScale}px)`:'none';

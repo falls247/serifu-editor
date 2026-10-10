@@ -1,3 +1,4 @@
+import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
 import { fontDescription } from './fonts.js';
 import { graphemes, verticalRotation, punctuationCenter } from './typography.js';
 
@@ -10,7 +11,7 @@ export function newCaption(width,height) {
   const id=crypto.randomUUID();
   return {id,kind:'caption',presetId:null,shape:'rect',shapeSeed:seedFromId(id),distortion:55,x:width*.23,y:height*.28,
     w:limit(width*.32,30,30000),h:limit(height*.4,30,30000),rotation:0,text:'',
-    color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
+    ...brushDefaults(id),color:'#ffffff',transparency:25,borderColor:'#000000',borderWidth:limit(width*.003,.5,80),
     textColor:'#111111',textOutlineColor:'#ffffff',textOutlineWidth:0,font:'sans',size:limit(Math.round(width*.04),8,500),vertical:true,
     autoFit:true,padding:0,alignX:'center',alignY:'center'};
 }
@@ -21,18 +22,22 @@ function seedFromId(id) {
   return hash>>>0;
 }
 
-function captionPath(ctx,layer) {
+export function captionOutline(layer) {
   const {w,h}=layer;
-  ctx.beginPath();
-  if(layer.shape!=='spiky') { ctx.rect(-w/2,-h/2,w,h); return; }
-  const count=14,phase=(layer.shapeSeed>>>0)/4294967296*Math.PI*2,amount=(layer.distortion??55)/100;
+  if(layer.shape!=='spiky')return [{x:-w/2,y:-h/2},{x:w/2,y:-h/2},{x:w/2,y:h/2},{x:-w/2,y:h/2},{x:-w/2,y:-h/2}];
+  const count=14,phase=(layer.shapeSeed>>>0)/4294967296*Math.PI*2,amount=(layer.distortion??55)/100,points=[];
   for(let i=0;i<count;i++){
     const angle=-Math.PI/2+i*Math.PI*2/count+phase*.055+Math.sin(i*1.83+phase)*.025*amount;
-    const peak=i%2===0, wobble=Math.sin(i*1.71+phase)*.13;
-    const radius=(peak?.98:.62)+wobble*amount;
-    const x=Math.cos(angle)*w/2*radius,y=Math.sin(angle)*h/2*radius;
-    if(i===0)ctx.moveTo(x,y);else ctx.lineTo(x,y);
+    const peak=i%2===0,wobble=Math.sin(i*1.71+phase)*.13,radius=(peak?.98:.62)+wobble*amount;
+    points.push({x:Math.cos(angle)*w/2*radius,y:Math.sin(angle)*h/2*radius});
   }
+  return [...points,points[0]];
+}
+function captionPath(ctx,layer) {
+  ctx.beginPath();
+  if(layer.shape!=='spiky'){ctx.rect(-layer.w/2,-layer.h/2,layer.w,layer.h);return;}
+  const points=captionOutline(layer);ctx.moveTo(points[0].x,points[0].y);
+  for(const p of points.slice(1,-1))ctx.lineTo(p.x,p.y);
   ctx.closePath();
 }
 
@@ -96,7 +101,10 @@ export function captionLayout(ctx,layer,sizeOverride) {
 export function paintCaption(ctx,layer) {
   ctx.save();ctx.globalAlpha*=1-layer.transparency/100;ctx.fillStyle=layer.color;captionPath(ctx,layer);
   ctx.fill();ctx.restore();
-  if(layer.borderWidth>0){captionPath(ctx,layer);ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='miter';ctx.stroke();}
+  if(layer.borderWidth>0){
+    if(['brush','dry-brush'].includes(layer.borderStyle))paintBrushStroke(ctx,captionOutline(layer),layer);
+    else {captionPath(ctx,layer);ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='miter';ctx.stroke();}
+  }
   const layout=captionLayout(ctx,layer);
   ctx.save();captionPath(ctx,{...layer,w:layout.innerWidth,h:layout.innerHeight});ctx.clip();
   ctx.font=layout.font;ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle=layer.textColor;

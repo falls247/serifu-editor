@@ -1,3 +1,4 @@
+import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const FULL_TURN=Math.PI*2;
 const spikeCache=new Map();
@@ -70,7 +71,7 @@ export function newBalloon(width,height,speaker='male') {
     id,kind:'balloon',presetId:null,x:width*.88,y:height*.16,w,h,rotation:0,
     text:'',speaker,textColor:null,textOutlineColor:'#ffffff',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
-    shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
+    ...brushDefaults(id),shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
     shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
   };
 }
@@ -120,7 +121,7 @@ export function balloonHit(layer,point) {
   return sides.every(value=>value>=0)||sides.every(value=>value<=0);
 }
 
-function balloonOutline(layer) {
+export function balloonOutline(layer) {
   const g=balloonGeometry(layer);
   const from=g.hasTail?g.start:0,to=g.hasTail?g.end:FULL_TURN,steps=Math.max(2,Math.ceil((to-from)/(FULL_TURN/360)));
   const angles=Array.from({length:steps+1},(_,index)=>from+(to-from)*index/steps);
@@ -219,8 +220,9 @@ export function paintBalloon(ctx,layer) {
   ctx.fillStyle=layer.color;ctx.fill();ctx.restore();
   if(layer.borderWidth>0){
     ctx.strokeStyle=layer.borderColor;ctx.lineJoin='round';
-    if(layer.borderStyle==='brush'){
-      paintBrushBorder(ctx,layer);
+    if(layer.borderStyle==='brush'||layer.borderStyle==='dry-brush'){
+      if((layer.brushEngine??'legacy')==='legacy'&&layer.borderStyle==='brush')paintBrushBorder(ctx,layer);
+      else paintBrushStroke(ctx,balloonOutline(layer),layer);
     }else{ctx.lineWidth=layer.borderWidth;ctx.stroke();}
   }
 }

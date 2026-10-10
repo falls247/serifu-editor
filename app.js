@@ -1,5 +1,7 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS } from './balloons.js';
+import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
+import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
 import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
@@ -258,17 +260,17 @@ function persistControlValue(p,input) {
   const field=input.dataset.field,card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
   if(!layer)return;
   let value=input.value;
-  const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[0,80],shapeSeed:[0,4294967295],...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
+  const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[0,80],shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS,...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
   if(field==='vertical')value=value==='true';
   else if(input.type==='checkbox')value=input.checked;
   else if(input.type==='number'||input.type==='range'){
     if(value===''||!Number.isFinite(Number(value)))return;
     value=Number(value);
-    if(['shapeSeed','spikeCount'].includes(field))value=Math.round(value);
+    if(['shapeSeed','spikeCount','brushSeed','glyphSeed'].includes(field))value=Math.round(value);
     if(Object.hasOwn(limits,field))value=clamp(value,...limits[field]);
   }
   if(Object.is(layer[field],value))return;
-  checkpoint(p);layer[field]=value;if(field!=='text')layer.presetId=null;
+  checkpoint(p);layer[field]=value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))layer.brushEngine='pressure';if(field!=='text')layer.presetId=null;
   if(field==='text'){fitTextInput(input);const summary=card.querySelector('.layer-summary');if(summary)renderLayerSummary(layer,summary);}
   markChanged(p);
   drawPage(p);
@@ -461,6 +463,32 @@ function fitTextInput(input) {
   input.rows=Math.max(1,input.value.split('\n').length);
 }
 
+function settingSelect(field,title,choices,value){
+  const label=element('label','',title),select=element('select');select.dataset.field=field;
+  for(const [key,text] of Object.entries(choices)){const option=element('option','',text);option.value=key;select.append(option);}
+  select.value=value;label.append(select);return label;
+}
+function settingNumber(field,title,limits,value,step='1'){
+  const label=element('label','',title),input=element('input');input.type='number';input.dataset.field=field;
+  [input.min,input.max]=limits;input.step=step;input.value=String(value);label.append(input);return label;
+}
+function brushControls(layer){
+  const details=element('details','brush-settings effect-details');details.append(element('summary','','ブラシ輪郭'));
+  const grid=element('div','effect-grid');grid.append(settingSelect('borderStyle','描画モード',BRUSH_MODES,layer.borderStyle??'solid'));
+  const labels={brushRoughness:'輪郭の揺れ（%）',brushPressureVariation:'筆圧・線幅の変化（%）',brushTexture:'掠れ量（%）',brushOpacityVariation:'インク濃淡（%）'};
+  for(const [field,title] of Object.entries(labels))grid.append(settingNumber(field,title,BRUSH_LIMITS[field],layer[field]));
+  grid.append(settingNumber('brushSeed','ブラシseed',[0,4294967295],layer.brushSeed),button('regenerate-brush','筆跡を再生成'));
+  details.append(grid,element('p','effect-note','枠線の太さが基準線幅。通常線はブラシ効果OFF。手描きペンは筆圧40%・掠れ15%、掠れ筆は筆圧65%・掠れ75%が目安。'));return details;
+}
+function placementControls(layer){
+  const details=element('details','placement-settings effect-details');details.append(element('summary','','文字配置'));
+  const grid=element('div','effect-grid');grid.append(settingSelect('kerningMode','配置方式',{standard:'標準（従来配置）',optical:'輪郭で文字詰め'},layer.kerningMode));
+  const labels={kerningStrength:'文字詰め強度（%）',minimumGlyphGap:'最小インク間隔（px）',overlapAllowance:'重なりの上限（%）',rotationJitter:'回転のばらつき（±°）',verticalJitter:'上下のずれ（%）',spacingJitter:'字間のばらつき（%）',glyphOverlap:'文字の重なり（%）'};
+  for(const [field,title] of Object.entries(labels))grid.append(settingNumber(field,title,PLACEMENT_LIMITS[field],layer[field],field==='minimumGlyphGap'?'0.5':'1'));
+  grid.append(settingNumber('sizeVariation','サイズのばらつき（%）',EFFECT_LIMITS.sizeVariation,layer.sizeVariation,'0.5'),settingNumber('horizontalJitter','左右のずれ（%）',EFFECT_LIMITS.horizontalJitter,layer.horizontalJitter,'0.5'),settingNumber('glyphSeed','文字配置seed',[0,4294967295],layer.glyphSeed),button('regenerate-placement','配置を再生成'));
+  details.append(grid,element('p','effect-note','文字詰め0%で追加の詰めなし。各ばらつき0で追加の変動なし。重なりは上限と指定量の小さい方を使う。密集レタリングは強度85%・回転4°から調整。'));return details;
+}
+
 function button(action, text, title) {
   const b = element('button', '', text); b.dataset.action = action;
   if (title) b.title = title;
@@ -493,15 +521,13 @@ function renderCards(p) {
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='吹き出しのセリフを入力';text.setAttribute('aria-label',l.speaker==='female'?'女性の吹き出しセリフ':'男性の吹き出しセリフ');card.append(text);
       card.append(speechStyleControls(l));
       const grid=element('div','effect-grid');
-      for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number'],['brushRoughness','ブラシの荒れ（%）','number']]){
+      for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
       const orderLabel=element('label','','効果音との重なり'),order=element('select');order.dataset.field='sfxOrder';
       for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);
-       const brushLabel=element('label','','枠線の描き方'),brushSelect=element('select');brushSelect.dataset.field='borderStyle';
-       for(const [value,title] of [['solid','通常'],['brush','ブラシ風']]){const option=element('option','',title);option.value=value;brushSelect.append(option);}
-       brushSelect.value=l.borderStyle??'solid';brushLabel.append(brushSelect);grid.append(brushLabel);card.append(grid);
+      card.append(grid,brushControls(l));
       const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky'].includes(l.shape);
       for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount]]){
         const label=element('label',field==='spikeCount'?'balloon-spike-count-control':'',title),input=element('input');input.type='number';input.dataset.field=field;input.min=String(min);input.max=String(max);input.step='1';input.value=String(l[field]);
@@ -527,7 +553,7 @@ function renderCards(p) {
         for(const [value,text] of Object.entries(CAPTION_ALIGNMENTS[field])){const option=element('option','',text);option.value=value;select.append(option);}select.value=l[field];label.append(select);grid.append(label);
       }
       const autoLabel=element('label','tail-toggle','文字サイズをボックスに合わせる'),auto=element('input');auto.type='checkbox';auto.dataset.field='autoFit';auto.checked=l.autoFit;autoLabel.prepend(auto);
-      card.append(grid,autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
+      card.append(grid,brushControls(l),autoLabel,element('p','effect-note','25%透過＝背景の不透明度75%。本文と枠線は不透明。左右・上下は初期値が中央。自動追従OFFならボックスを変えても文字サイズを保持。書体・文字方向・位置は右側で調整。'));container.append(card);continue;
     }
     const text = element('textarea'); text.dataset.field = 'text'; text.value = l.text; text.wrap='off';fitTextInput(text);
     text.placeholder = l.kind === 'sfx' ? 'ドーン！' : 'セリフを入力';
@@ -559,9 +585,10 @@ function renderCards(p) {
       card.append(element('p','effect-note','「なし」「先細り」は集中線・立体影なし。ブラー・掠れ・歪みは下のパラメータで独立調整。'));
     }
     if(l.kind==='sfx') {
-      const details=element('details','effect-details');details.append(element('summary','','文字のばらつき・ブラー・掠れ・歪みの調整'));
+      card.append(placementControls(l));
+      const details=element('details','effect-details');details.append(element('summary','','ブラー・掠れ・歪みの調整'));
       const grid=element('div','effect-grid');
-      const labels={sizeVariation:'文字サイズのばらつき（%）',horizontalJitter:'左右のズレ（%）',blurY:'縦ブラー（px）',blurX:'横ブラー（px）',blurStrength:'滲みの強さ（%）',inkCore:'文字の芯（%）',roughness:'輪郭の荒れ（%）',dryInk:'筆の掠れ（%）',brushTails:'ハネ・払い（%）',blur:'全方向ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'残像の方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
+      const labels={blurY:'縦ブラー（px）',blurX:'横ブラー（px）',blurStrength:'滲みの強さ（%）',inkCore:'文字の芯（%）',roughness:'輪郭の荒れ（%）',dryInk:'筆の掠れ（%）',brushTails:'ハネ・払い（%）',blur:'全方向ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'残像の方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
       for(const [field,labelText] of Object.entries(labels)){const label=element('label','',labelText),input=element('input');input.type='number';input.dataset.field=field;[input.min,input.max]=EFFECT_LIMITS[field];input.step=['blur','sizeVariation','horizontalJitter'].includes(field)?'0.5':'1';input.value=String(l[field]);label.append(input);grid.append(label);}
       const warpLabel=element('label','','歪みの形'),warpSelect=element('select');warpSelect.dataset.field='warp';
       for(const [value,label] of Object.entries(WARP_CHOICES)){const option=element('option','',label);option.value=value;warpSelect.append(option);}warpSelect.value=l.warp;warpLabel.append(warpSelect);grid.append(warpLabel);
@@ -643,17 +670,17 @@ $('deck').addEventListener('input', event => {
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
   const l = p.layers.find(item => item.id === id); if (!l) return;
   let value = input.value;
-  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [0, 80], shapeSeed:[0,4294967295], ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
+  const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [0, 80], shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS, ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;
     value = Number(value);
-    if(['shapeSeed','spikeCount'].includes(field))value=Math.round(value);
+    if(['shapeSeed','spikeCount','brushSeed','glyphSeed'].includes(field))value=Math.round(value);
     if (limits[field]) value = clamp(value, ...limits[field]);
   } else if (field === 'vertical') value = value === 'true';
   else if(field==='tail'||field==='autoFit'||field==='shadowEnabled')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field!=='text')l.presetId=null;
+  l[field] = value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))l.brushEngine='pressure';if(field!=='text')l.presetId=null;
   if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)renderLayerSummary(l,summary);}
   markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
@@ -679,6 +706,10 @@ $('deck').addEventListener('click', event => {
     saveSelectedPreset();
   } else if (action === 'delete-preset' && l) {
     deletePreset(card.querySelector('[data-preset-select]').value);
+  } else if (action === 'regenerate-brush' && ['balloon','caption'].includes(l?.kind)) {
+    edit(p,()=>{l.brushSeed=crypto.getRandomValues(new Uint32Array(1))[0];l.brushEngine='pressure';l.presetId=null;});
+  } else if (action === 'regenerate-placement' && l?.kind==='sfx') {
+    edit(p,()=>{l.glyphSeed=crypto.getRandomValues(new Uint32Array(1))[0];l.presetId=null;});
   } else if (action === 'regenerate-texture' && l?.kind==='sfx') {
     edit(p,()=>{l.textureSeed=(Math.imul(l.textureSeed??0,1664525)+1013904223)>>>0;l.presetId=null;});
   } else if (action === 'regenerate-shape' && l?.kind==='balloon') {
