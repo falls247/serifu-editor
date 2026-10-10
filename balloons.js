@@ -96,7 +96,14 @@ export function clipBalloon(ctx,layer) {
 
 export function paintBalloon(ctx,layer) {
   balloonPath(ctx,layer);
-  ctx.save();ctx.globalAlpha*=1-layer.transparency/100;ctx.fillStyle=layer.color;ctx.fill();ctx.restore();
+  ctx.save();
+  ctx.globalAlpha*=1-layer.transparency/100;
+  if(layer.shadowEnabled){
+    const rgb=[1,3,5].map(i=>parseInt(layer.shadowColor.slice(i,i+2),16));
+    ctx.shadowColor='rgba('+rgb.join(',')+','+layer.shadowOpacity/100+')';
+    ctx.shadowBlur=layer.shadowBlur;ctx.shadowOffsetX=layer.shadowOffsetX;ctx.shadowOffsetY=layer.shadowOffsetY;
+  }
+  ctx.fillStyle=layer.color;ctx.fill();ctx.restore();
   if(layer.borderWidth>0){ctx.strokeStyle=layer.borderColor;ctx.lineWidth=layer.borderWidth;ctx.lineJoin='round';ctx.stroke();}
 }
 
