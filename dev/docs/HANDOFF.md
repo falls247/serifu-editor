@@ -1,0 +1,160 @@
+# Serifu Editor エージェント引継書
+
+- 記録日：2026-10-10（日本時間）
+- コード基準：`b721ad78a7c658f23b83a0da1f6ed13c950c9696`
+- リポジトリ：[falls247/serifu-editor](https://github.com/falls247/serifu-editor)
+- 公開版：[GitHub Pages](https://falls247.github.io/serifu-editor/)
+
+## 1. 現在地と作業方針
+
+複数画像へ台詞・効果音・吹き出し・キャプションを配置する、ブラウザ内処理の静的Webアプリ。元画像／入力／ライブプレビューの3列を画像ごとに縦へ並べる。これまでの依頼機能は上記コミットで実装・公開済み。
+
+ユーザーは以後、ローカル側リポジトリで開発を継続する方針。次のエージェントはローカルの実ファイルとGit差分を起点に作業する。クラウド側の作業ディレクトリや過去のアップロード先には依存しない。コミット、push、公開の範囲は、その時点のユーザー指示に従う。この文書は新たな追加機能や公開指示を定義しない。
+
+着手時は `git status --short --branch`、現在のHEAD、適用される `AGENTS.md` を確認し、既存変更を保ったまま作業する。この引継の作成時点で、リポジトリ内に `AGENTS.md` はない。
+
+先に [利用者向けREADME](../../README.md) と [ADR一覧](adr/README.md) を読む。動作と設計の詳細は対応するコードを確認する。
+
+## 2. ローカル起動と編集データの移行
+
+Node.js 22以降を使用。アプリ本体にnpm依存パッケージはなく、通常起動のための `npm install` は不要。
+
+初めて取得する場合：
+
+```bash
+git clone https://github.com/falls247/serifu-editor.git
+cd serifu-editor
+```
+
+取得済みのcloneは作業状態と追跡先を確認して更新する。作業中の変更や分岐がある場合、強制リセットで消さない。
+
+```bash
+git status --short --branch
+git fetch origin
+git pull --ff-only
+```
+
+リポジトリルートで実行：
+
+```bash
+node --version
+npm run fonts
+npm start
+```
+
+`http://localhost:5173` を開く。`server.mjs` は開発用サーバーで、画像処理用のバックエンドではない。ポートは環境変数 `PORT` で変更可能。HTMLを `file://` で直接開く運用は前提にしない。
+
+初回の `npm run fonts` はGoogle Fontsの固定バージョンを取得するためネットワーク接続が必要。添付由来の2書体はリポジトリ内の原本から準備する。`assets/fonts/` はGit管理外の生成物なので、clone直後に存在しなくても異常ではない。
+
+GitHub Pagesとlocalhostは別のorigin。公開版のIndexedDB一時保存・localStorageプリセットは、コードをcloneしてもlocalhostへ移らない。公開版で「編集データを保存」し、ローカル版で「編集データを読込」する。JSONに画像・レイヤー・プリセットを含む。読込後は元フォルダとの接続を持たず、元画像削除は無効。ブラウザやポートの変更時もoriginごとの保存領域を区別する。
+
+JSON読込は現在の画像一覧へ追加する。一時保存の復元は一覧を置き換える。どちらも `mergePresets` で未登録IDのユーザープリセットと既定選択を取り込むが、同じIDの既存プリセットを上書きしない。自動保存設定はデータに含まれるものの、現行の読込処理では適用しないため、移行先で周期とON／OFFを再設定する。
+
+## 3. 実装済みの機能
+
+| 領域 | 現在の仕様 |
+|---|---|
+| 台詞 | 男性 `#111111`、女性 `#ef4b91`、白縁。新規は縦書き。入力欄は1行開始、明示改行で高さを増やす |
+| 効果音 | 漫画装飾、縦横ブラー、残像、歪み、掠れ、ハネ、数値によるインクの太さ、文字サイズのばらつき・左右のズレ |
+| 先細り | `effect='taper'`。変化率 `taperRate` 初期10%。基準100pxなら100→90→80px、最小8px。改行や折返しでも順番を継続 |
+| 装飾なし | `effect='none'`。集中線・震え・立体影なし。独立指定したブラー・掠れ・歪みは保持 |
+| 吹き出し | `kind='balloon'`。独立した楕円、初期白・25%透過・テールなし・画像端からはみ出す配置。枠線色／太さとテール編集 |
+| キャプション | `kind='caption'`。本文付き長方形、初期白背景25%透過・黒枠・縦書き・左右上下中央揃え。文字・背景・枠線の各色を編集 |
+| 自動追従 | キャプションのみ `autoFit` 初期OFF。ONでボックス内に収まる文字サイズを算出。OFFの手動サイズは保持 |
+| 配置 | ドラッグ移動、角でサイズ、丸で回転、数値入力、矢印移動。縦書き句読点は右上 |
+| コピー | 選択レイヤーのCtrl／⌘+C/V、画像単位の一括コピー・カット・ペースト、次画像への追加。横長→縦長にも拡縮対応 |
+| プリセット | 台詞／効果音の書式と配置を記憶。選択した既定を＋ボタン・次の画像にも適用。吹き出し／キャプションは対象外 |
+| 保存 | 画像単体PNG、全画像一括、編集済みだけ一括、画像を含むJSON、一時保存、周期指定の自動保存（初期2分） |
+| 書体 | 21選択肢＝同梱19書体＋端末2書体。GEKIFUDE SFXと851チカラヨワクを含む |
+
+「確認済み」`done` と「編集済み」`edited` は別。選択や確認だけでは編集済みにしない。追加した文字を全カット・削除した画像も編集済みになり得る。最初の編集をUndoすると未編集へ戻る。レイヤーを持つ読込画像は編集済みとして扱う。
+
+## 4. コードの入口
+
+以下のパスはリポジトリルートからの相対パス。
+
+| ファイル | 責務・主な入口 |
+|---|---|
+| [app.js](../../app.js) | DOM、画像一覧、選択状態、イベント、ドラッグ、保存。`makeLayer`、`renderCards`、`updateControls`、`connectCanvas`、`saveImage`、`saveImages`、`temporarySave` |
+| [index.html](../../index.html) / [style.css](../../style.css) | 画面構造・各画像のテンプレート・3列とモバイルのレイアウト |
+| [model.js](../../model.js) | 保存データ検証、履歴、コピーの拡縮。`normalizeLayer`、`checkpoint`、`restore`、`pasteSelection`、`pasteLayers` |
+| [renderer.js](../../renderer.js) | `newLayer`、共通 `draw`、文字配置 `textGlyphs`、先細り `glyphFontSize`、インク描画、キャッシュ、選択・ハンドル判定 |
+| [ink.js](../../ink.js) | 太さ変更、ブラー、掠れ、ハネ、固定seedの文字ばらつき |
+| [typography.js](../../typography.js) | 書記素分割、縦書き記号の回転、句読点の右上配置 |
+| [balloons.js](../../balloons.js) | 楕円・テールの形状、描画、実形状のヒット判定、制約付きの描画順 `paintOrder` |
+| [captions.js](../../captions.js) | 本文配置 `captionLayout`、上下左右の揃え方、余白、文字サイズ自動追従、クリッピング |
+| [presets.js](../../presets.js) | 既定・ユーザープリセット、解像度比の保存、適用、旧設定の補完 |
+| [storage.js](../../storage.js) | IndexedDBの一時保存。メタ情報と画像を同一トランザクションで保存 |
+| [fonts.js](../../fonts.js) | 書体カタログ、実ウェイト、配信CSS、フォントと規約のGit blobチェックサム |
+| [scripts/fetch-font.mjs](../../scripts/fetch-font.mjs) | 固定版の書体取得／同梱原本の復元とチェックサム検証 |
+| [server.mjs](../../server.mjs) / [scripts/build.mjs](../../scripts/build.mjs) | 開発時の配信許可リスト／`_site/` にコピーする静的ファイル一覧 |
+
+新規追加の実際の既定値は、`newLayer` だけでなく `app.js` の `makeLayer` → `applyPreset` も確認する。ユーザーが記憶したプリセットが上書きされるため、コンストラクター変更だけでは既定の見た目が変わらない場合がある。
+
+## 5. 変更時に確認する範囲
+
+| 変更 | 同時に確認する箇所 |
+|---|---|
+| 新しいレイヤー／設定値 | 初期値、中央カードと右側入力、`normalizeLayer` と範囲、描画、コピー拡縮、Undo、JSONと一時保存、関連テスト |
+| 台詞／効果音の書式 | 上記に加え `presets.js` の `styleKeys`／`ratioKeys` と旧プリセットの既定値 |
+| 書体追加 | `FONT_CATALOG`、原本・規約・blob SHA、取得処理、実ウェイト、読込後キャッシュ破棄、保存時の読込待ち |
+| ボックス／テール | 回転前のローカル座標、ヒット判定、ハンドル、異なる縦横比へのコピー、吹き出しの描画順 |
+| 新規ブラウザ用JS | importに加え `server.mjs` と `scripts/build.mjs` の明示リスト、必要なら `package.json` の構文チェック |
+| 永続化の破壊的変更 | `PROJECT_VERSION`、JSON読込可能版、一時保存復元可能版、欠損値の補完、互換性テスト、ADR |
+
+単体保存・一括保存・プレビューは共通の `draw` を使う。保存は元解像度、選択枠なし、書体読込完了後。プレビューだけにCSSエフェクトを追加するとPNGに反映されないので、描画変更は共通経路へ入れる。
+
+コピーで作り直す `id` と、見た目を固定する `glyphSeed` を混同しない。描画のたびに乱数を振り直さない。保存・コピー・復元で見た目が変わる。
+
+吹き出しは常に台詞・キャプションより下。`paintOrder` を無視して単純な配列順描画に戻すと仕様を壊す。選択判定も描画順の逆順を使う。
+
+## 6. 保存形式とデータの境界
+
+現在の `PROJECT_VERSION` は6。JSONはversion 1〜6、一時保存はversion 3〜6の復元に対応。version 5以前でキャプションの `alignX`／`alignY` がない場合は旧配置の右／上を補完し、新規・version 6の既定は中央／中央。version 1の旧 `bubble` は男性台詞へ移行し、旧吹き出し形状は引き継がない。
+
+プリセット形式はversion 1のまま。localStorageキーは `serifu.preferences.v1`。IndexedDBは `serifu-editor-drafts`、DBスキーマ版1、`drafts` と `images` の2ストア。編集データの版とDBスキーマ版は別。詳細は [ADR-0004](adr/0004-edit-data-and-drafts.md)。
+
+一時保存は最新1件・origin単位。別タブの保存で置き換わり得る。持ち出し用バックアップはJSON。元フォルダのハンドルは永続化せず、復元後に実ファイルの削除権限を再現しない。
+
+## 7. 検証
+
+通常のローカル検証：
+
+```bash
+npm run check
+npm test
+npm run build
+git diff --check
+```
+
+描画・配置・保存・フォント・操作を変更した場合はブラウザ検証も実行。PlaywrightとChromiumはアプリ本体の依存に追加せず、テスト用に導入する。
+
+```bash
+npm install --no-save --package-lock=false playwright@1.56.1
+npx playwright install chromium
+npm run fonts
+npm run test:browser
+```
+
+Ubuntuでブラウザのシステム依存が不足する場合は `npx playwright install --with-deps chromium` を使用。CIはさらに `fonts-noto-cjk` を導入して端末書体の日本語フォールバックを用意している。Windows環境にUbuntuのapt手順をそのまま適用しない。
+
+| ブラウザ検証 | 主な対象 |
+|---|---|
+| [browser-smoke.mjs](../../scripts/browser-smoke.mjs) | 3列、複数画像、プリセット、太さ、ばらつき、コピー／カット、異なる縦横比、復元、フォルダ保存・元画像削除の模擬API |
+| [balloon-smoke.mjs](../../scripts/balloon-smoke.mjs) | 編集済みだけ保存、単体PNG、書体読込待ち／失敗、GEKIFUDE、透過、テール、順序、枠線色、PNG一致 |
+| [caption-smoke.mjs](../../scripts/caption-smoke.mjs) | 手動追加、自動追従、手動サイズ保持、中央揃え・方向変更、クリップ、コピー、PNG一致、version 4/5互換 |
+| [typography-smoke.mjs](../../scripts/typography-smoke.mjs) | 添付TTFのバイト一致、台詞・効果音の書体、5書体×2太さで句読点右上、装飾なし、先細りの実描画、変化率、復元 |
+
+各スクリプトはサーバーを起動・終了する。ポート5187／5189／5191／5193を使用。スクリーンショット等は `artifacts/`（Git管理外）へ出力する。実画像フォルダを使った削除テストは不要。現行テストは模擬ハンドルを使用する。
+
+引継基準コミットでは、49件の単体テストと4本のブラウザ検証に成功。[Pages実行38016273473](https://github.com/falls247/serifu-editor/actions/runs/38016273473)のbuild／deployも成功し、公開された主要コード・添付TTFが手元の内容と一致することを確認済み。この記録は基準コミットの結果であり、次の変更後の合格を意味しない。
+
+## 8. 公開・運用の制約
+
+GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手動実行で公開する。構文、単体、ブラウザ、フォント準備、静的ビルドを経て `_site/` を配信。通常CIの `.github/workflows/ci.yml` はpush／pull_requestで構文・単体だけを検証する。詳細は [ADR-0006](adr/0006-test-and-delivery.md)。
+
+画像の一括保存・元画像削除には `showDirectoryPicker` が必要。APIがない環境では画像読込の代替と単体PNG／JSON保存は使えるが、直接フォルダ保存・元画像削除は使えない。実装は利用者の元画像を上書きしない。元画像削除は確認後の完全削除で、Undoやゴミ箱復元は提供しない。
+
+大画像・多数画像・強いエフェクトの処理性能を網羅するベンチマークは未実施。描画はメインスレッドで行い、極端な設定では中間字形画像の解像度を制限する。出力PNGの寸法は元解像度のまま。ブラウザ・端末書体をまたぐバイト一致は受入基準にしておらず、同じ環境で選択枠なしのプレビューとPNGが一致することを検証している。
+
+次の追加機能はユーザーの次の指示から決める。変更点、検証結果、実際に残った制約を報告し、機能・データ構造が変わった場合はこの引継書とADRの該当箇所を更新する。
