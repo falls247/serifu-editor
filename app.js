@@ -329,6 +329,7 @@ function updateControls(p) {
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
     if(layer?.kind==='sfx'){
       card.querySelector('.taper-controls').hidden=layer.effect!=='taper';
+       card.querySelector('.grunge-controls').hidden=layer.inkTexture!=='grunge';
       const rate=card.querySelector('[data-field=taperRate]');if(rate!==document.activeElement)rate.value=String(layer.taperRate);
     }
     if(layer?.kind==='balloon'||layer?.kind==='caption')for(const input of card.querySelectorAll('[data-field]')){
@@ -639,6 +640,8 @@ $('deck').addEventListener('click', event => {
     saveSelectedPreset();
   } else if (action === 'delete-preset' && l) {
     deletePreset(card.querySelector('[data-preset-select]').value);
+  } else if (action === 'regenerate-texture' && l?.kind==='sfx') {
+    edit(p,()=>{l.textureSeed=(Math.imul(l.textureSeed??0,1664525)+1013904223)>>>0;l.presetId=null;});
   } else if (action === 'duplicate' && l) {
     edit(p, () => { const copy = duplicateLayer(l); p.layers.push(copy); p.selectedId = copy.id; });
   } else if (action === 'drop-layer' && l) {
