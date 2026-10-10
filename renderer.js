@@ -148,8 +148,11 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   for(let i=0;i<source.length;i++)source[i]=pixels[i*4+3];
   const thickened=adjustInkThickness(source,width,height,l.thickness);
   const body=distressMask(thickened,width,height,{size:l.size,roughness:l.roughness,dryInk:l.dryInk,seed:inkSeed(char)});
-  const alpha=distressMask(body,width,height,{size:l.size,brushTails:l.brushTails,seed:inkSeed(char)});
-  const edge=dilateMask(body,width,height,l.outline),fibreEdge=dilateMask(alpha,width,height,Math.min(l.outline,1));
+  const texture=textured?printDistressMask(body,width,height,{size:l.size,grungeAmount:l.grungeAmount,scratchLength:l.scratchLength,scratchAngle:l.scratchAngle,spatterAmount:l.spatterAmount,seed:inkSeed(String(l.textureSeed??0)+':'+glyphIndex+':'+char)}):null;
+  const texturedBody=texture?.body??body;
+  const alpha=distressMask(texturedBody,width,height,{size:l.size,brushTails:l.brushTails,seed:inkSeed(char)});
+  if(texture)for(let i=0;i<alpha.length;i++)alpha[i]=Math.max(alpha[i],texture.speckles[i]);
+  const edge=dilateMask(texturedBody,width,height,l.outline),fibreEdge=dilateMask(alpha,width,height,Math.min(l.outline,1));
   for(let i=0;i<edge.length;i++)edge[i]=Math.max(edge[i],fibreEdge[i]);
   const foreground=tintedMask(ctx,alpha,width,height,l.color),border=tintedMask(ctx,edge,width,height,'#ffffff');
   const result=createSurface(ctx,width,height),out=result.getContext('2d'),hasBlur=l.blurX>0||l.blurY>0;
