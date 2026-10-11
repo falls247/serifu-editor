@@ -1445,6 +1445,14 @@ window.addEventListener('keydown', event => {
   const p = active(); if (!p) return;
   const key=event.key.toLowerCase(),command=event.ctrlKey||event.metaKey;
   if(p.cropDraft&&!(command&&key==='z'))return;
+  if (!command && !event.altKey && ['f','b','c','u'].includes(key)) {
+    const layer=selected(p);if(!layer)return;
+    if(key==='c'||key==='u'){event.preventDefault();alignLayerText(p,layer,key==='c'?'center':'top');return;}
+    const presets=preferences.presets.filter(preset=>preset.kind===layer.kind);if(!presets.length)return;
+    const index=presets.findIndex(preset=>preset.id===layer.presetId),step=key==='f'?1:-1;
+    const preset=presets[index<0?(step===1?0:presets.length-1):(index+step+presets.length)%presets.length];
+    event.preventDefault();applyLayerPreset(p,layer,preset);return;
+  }
   if(key==='delete'&&p.selectedMaskId&&!command&&!event.altKey&&!event.shiftKey){event.preventDefault();removeMaskEffect(p,p.selectedMaskId);status('選択中のマスク加工を削除した。');return;}
   if (key === 'delete' && event.target === p.canvas && !command && !event.altKey) {
     if (!selected(p) || event.repeat) return;
@@ -1691,6 +1699,18 @@ function makeLayer(kind,width,height,speaker='male') {
   if(kind==='dialogue'&&layer.speaker!==speaker){layer.speaker=speaker;layer.presetId=null;}
   return layer;
 }
+function alignLayerText(p,layer,alignment) {
+  const changes=layer.kind==='caption'?{alignY:alignment}: {lineAlign:alignment};
+  if(layer.kind==='balloon'||layer.kind==='caption'){
+    changes.textOffsetY=0;
+    if(alignment==='center'){changes.textOffsetX=0;if(layer.kind==='caption')changes.alignX='center';}
+  }
+  if(Object.entries(changes).every(([field,value])=>layer[field]===value))return;
+  edit(p,()=>Object.assign(layer,changes,{presetId:null}),false);refreshPresetMenus();
+}
+function applyLayerPreset(p,layer,preset) {
+  edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height));preferences.defaults[layer.kind]=preset.id;persistPreferences();
+}
 function fillPresetSelect(select,kind,current,custom=false) {
   if(select===document.activeElement)return;
   select.replaceChildren();
@@ -1762,7 +1782,7 @@ $('deck').addEventListener('change',event=>{
   if(busy||!event.target.matches('[data-preset-select]')||!event.target.value)return;
   const p=pageFrom(event.target),layer=p.layers.find(l=>l.id===event.target.closest('.layer-card').dataset.layerId);
   const preset=preferences.presets.find(p=>p.id===event.target.value);if(!layer||!preset)return;
-  edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height));preferences.defaults[layer.kind]=preset.id;persistPreferences();
+  applyLayerPreset(p,layer,preset);
 });
 
 function savedTime(timestamp) {return new Date(timestamp).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
