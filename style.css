@@ -175,6 +175,10 @@ canvas.preview.cropping{cursor:crosshair}
 .sam3-prompt-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px}
 .sam3-prompt-row label,.sam3-effect-settings label{min-width:0}
 .sam3-prompt-row input{margin-top:4px}
+.sam3-model-path-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:7px}
+.sam3-model-path-row label{min-width:0}
+.sam3-model-path-row input{margin-top:4px;font-family:monospace;font-size:11px}
+.sam3-model-path-status{margin:0;font-size:10px;line-height:1.65;color:var(--muted);overflow-wrap:anywhere}
 .sam3-input-tools{justify-content:space-between}
 .sam3-input-tools label{flex:1;min-width:120px}
 .sam3-input-tools output{color:var(--lime);font-family:monospace;float:right}

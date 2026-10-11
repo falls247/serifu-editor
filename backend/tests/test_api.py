@@ -31,6 +31,76 @@ def _settings(**overrides: object) -> Settings:
     return Settings(**values)  # type: ignore[arg-type]
 
 
+def test_model_path_save_persists_and_updates_engine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings_file = tmp_path / "settings.json"
+    config = _settings(model_settings_file=settings_file)
+    engine = MockSam3Engine(config)
+    with TestClient(create_app(config, engine=engine), base_url=BASE_URL) as client:
+        assert client.get("/api/sam3/health").json()["modelPath"] == str(config.model_path)
+        # Startup load must release the GPU lock before changing configuration.
+        deadline = time.monotonic() + 3
+        while client.app.state.sam3_jobs._gpu_lock.locked() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        response = client.post(
+            "/api/sam3/settings", json={"modelPath": f"  {tmp_path}/new sam3.pt  "},
+            headers={"Origin": ORIGIN},
+        )
+        assert response.status_code == 200, response.text
+        expected = str(tmp_path / "new sam3.pt")
+        assert response.json() == {"modelPath": expected}
+        assert engine.settings.model_path == Path(expected)
+        assert not engine.model_loaded
+        assert client.get("/api/sam3/health").json()["modelPath"] == expected
+        job = client.post(
+            "/api/sam3/infer",
+            json={"imageId": _upload(client)["imageId"], "requestId": "new-model:1", "mode": "text", "prompt": "face"},
+            headers={"Origin": ORIGIN},
+        )
+        assert _wait_job(client, job.json()["jobId"])["status"] == "ready"
+        assert engine.model_loaded
+
+    monkeypatch.setenv("SAM3_SETTINGS_FILE", str(settings_file))
+    monkeypatch.setenv("SAM3_MODEL_PATH", "/models/environment.pt")
+    monkeypatch.setenv("SAM3_MOCK", "1")
+    restored = Settings.from_env()
+    assert str(restored.model_path) == expected, "Saved path takes priority after restart"
+    with TestClient(create_app(restored), base_url=BASE_URL) as client:
+        assert client.get("/api/sam3/health").json()["modelPath"] == expected
+
+
+@pytest.mark.parametrize("value", ["", "   ", "path\ninvalid", "path\x00invalid"])
+def test_model_path_rejects_invalid_input(tmp_path: Path, value: str) -> None:
+    config = _settings(model_settings_file=tmp_path / "settings.json")
+    with TestClient(create_app(config, engine=MockSam3Engine(config)), base_url=BASE_URL) as client:
+        assert client.post("/api/sam3/settings", json={"modelPath": value}, headers={"Origin": ORIGIN}).status_code == 422
+        assert not config.model_settings_file.exists()
+
+
+def test_model_path_save_failure_preserves_active_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _settings(model_settings_file=tmp_path / "settings.json")
+    engine = MockSam3Engine(config)
+    def fail_save(_self: Settings, _path: Path) -> None:
+        raise PermissionError("read-only directory")
+    monkeypatch.setattr(Settings, "save_model_path", fail_save)
+    with TestClient(create_app(config, engine=engine), base_url=BASE_URL) as client:
+        deadline = time.monotonic() + 3
+        while client.app.state.sam3_jobs._gpu_lock.locked() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        response = client.post("/api/sam3/settings", json={"modelPath": "/models/new.pt"}, headers={"Origin": ORIGIN})
+        assert response.status_code == 500
+        assert response.json()["error"]["code"] == "SETTINGS_SAVE_FAILED"
+        assert engine.settings.model_path == config.model_path
+        assert engine.model_loaded
+        assert not config.model_settings_file.exists()
+
+
+def test_model_path_save_requires_origin(tmp_path: Path) -> None:
+    config = _settings(model_settings_file=tmp_path / "settings.json")
+    with TestClient(create_app(config, engine=MockSam3Engine(config)), base_url=BASE_URL) as client:
+        assert client.post("/api/sam3/settings", json={"modelPath": "/models/new.pt"}).status_code == 403
+        assert not config.model_settings_file.exists()
+
+
 def _png() -> bytes:
     output = io.BytesIO()
     Image.new("RGB", (32, 24), "white").save(output, format="PNG")

@@ -6,7 +6,7 @@ const assets=['index.html','favicon-32.png','apple-touch-icon.png','src/app.js',
 const files={'/':'index.html',...Object.fromEntries(assets.map(path=>['/'+path,path]))};
 const port=Number(process.env.PORT)||5173,backendPort=Number(process.env.SAM3_API_PORT)||8765;
 const identifier='[a-zA-Z0-9_-]{1,100}';
-const routes=[[/^\/api\/sam3\/health$/,['GET']], [/^\/api\/sam3\/images$/,['POST']], [/^\/api\/sam3\/infer$/,['POST']], [new RegExp(`^/api/sam3/jobs/${identifier}$`),['GET','DELETE']], [new RegExp(`^/api/sam3/images/${identifier}$`),['DELETE']]];
+const routes=[[/^\/api\/sam3\/health$/,['GET']], [/^\/api\/sam3\/settings$/,['POST']], [/^\/api\/sam3\/images$/,['POST']], [/^\/api\/sam3\/infer$/,['POST']], [new RegExp(`^/api/sam3/jobs/${identifier}$`),['GET','DELETE']], [new RegExp(`^/api/sam3/images/${identifier}$`),['DELETE']]];
 const rates=new Map();
 function error(res,status,code,message,retryable=false){
   if(res.headersSent){res.destroy();return;}

@@ -98,7 +98,20 @@ class HealthResponse(StrictModel):
     modelLoaded: bool
     gpuAvailable: bool
     version: str
+    modelPath: str
     error: HealthError | None = None
+
+
+class ModelSettingsRequest(StrictModel):
+    modelPath: str = Field(min_length=1, max_length=4096)
+
+    @field_validator("modelPath")
+    @classmethod
+    def validate_model_path(cls, value: str) -> str:
+        value = value.strip()
+        if not value or any(character in value for character in ("\x00", "\n", "\r")):
+            raise ValueError("model path is invalid")
+        return value
 
 
 class ImageResponse(StrictModel):
