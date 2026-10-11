@@ -25,7 +25,7 @@ try{
     const rows=await page.locator('.image-row').evaluateAll(rows=>rows.map(row=>{
       const rect=selector=>{const box=row.querySelector(selector).getBoundingClientRect();return {x:box.x,y:box.y,width:box.width,height:box.height};};
       const img=row.querySelector('.original'),title=row.querySelector('.original-toolbar .preview-label');
-      return {name:row.querySelector('.page-name').textContent,title:title?.textContent,original:rect('.original'),preview:rect('canvas.preview'),originalFrame:rect('.original-frame'),previewFrame:rect('.preview-frame'),aspect:img.naturalWidth/img.naturalHeight,maxHeight:parseFloat(getComputedStyle(row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))};
+      return {name:row.querySelector('.page-name').textContent,title:title?.textContent,original:rect('.original'),preview:rect('canvas.preview'),originalFrame:rect('.original-frame'),previewFrame:rect('.preview-frame'),aspect:img.naturalWidth/img.naturalHeight,columns:getComputedStyle(row.querySelector('.row-columns')).gridTemplateColumns.split(' ').length,maxHeight:parseFloat(getComputedStyle(row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))};
     }));
     results.push({width,sidebar,rows});await mkdir('artifacts',{recursive:true});await writeFile('artifacts/preview-layout-results.json',JSON.stringify(results,null,2));
     for(const row of rows){
@@ -34,11 +34,17 @@ try{
       assert.ok(Math.abs(row.preview.width-expected)<2,`preview must use its own column at ${width}px: ${JSON.stringify(row)}`);
       assert.ok(row.preview.width>=row.original.width-1,'preview must not shrink to the narrower ORIGINAL column');
       for(const image of [row.original,row.preview])assert.ok(Math.abs(image.width/image.height-row.aspect)<.02,'image aspect ratio must remain intact');
-      if(width>850)assert.ok(Math.abs(row.originalFrame.y-row.previewFrame.y)<1,'side-by-side frames must start at the same height');
+      if(row.columns===3)assert.ok(Math.abs(row.originalFrame.y-row.previewFrame.y)<1,'side-by-side frames must start at the same height');
     }
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   };
   for(const width of [1680,1440,1100,850,640,420])await checkLayout(width,true);
+  await page.setViewportSize({width:1920,height:1100});
+  await page.locator('#thumbnailResize').focus();
+  for(let i=0;i<15;i++)await page.keyboard.press('Shift+ArrowRight');
+  await checkLayout(1920,true);
+  assert.equal(await page.locator('#thumbnailSidebar').evaluate(node=>node.getBoundingClientRect().width),1280);
+  await page.locator('.image-row').first().scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/preview-layout-wide-sidebar.png'});
   await page.setViewportSize({width:1680,height:1100});await page.click('#toggleThumbnails');await checkLayout(1680,false);
   await page.locator('.image-row').first().scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/preview-layout-desktop.png'});
   await checkLayout(420,false);await page.locator('.image-row').first().scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/preview-layout-mobile.png'});

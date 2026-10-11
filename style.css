@@ -122,3 +122,22 @@ canvas.preview.cropping{cursor:crosshair}
 .thumbnail-resize:hover::after,.thumbnail-resize:focus-visible::after,.resizing-sidebar .thumbnail-resize::after{background:var(--lime)}
 .resizing-sidebar,.resizing-sidebar *{cursor:col-resize!important;user-select:none!important}
 @media(max-width:1000px){.thumbnail-resize{display:none}}
+
+/* ページの状態による表示フィルター */
+.thumbnail-filters{display:flex;flex-wrap:wrap;gap:5px;flex-shrink:0}
+.thumbnail-filters button{padding:6px 8px;font-size:10px;white-space:nowrap}
+.thumbnail-filters button[aria-pressed=true]{background:var(--lime);border-color:var(--lime);color:#151920}
+.thumbnail-filter-count{margin:0;font-size:10px;line-height:1.5;color:var(--muted);flex-shrink:0}
+.thumbnail[hidden],.thumbnail-filter-empty[hidden],.filtered-empty[hidden]{display:none}
+.thumbnail-filter-empty{margin:0;font-size:11px;line-height:1.6;color:var(--muted)}
+.filtered-empty{padding:32px 16px;text-align:center;color:var(--muted)}
+@media(max-width:1000px){.thumbnail-sidebar{height:365px}}
+@media(max-width:520px){.thumbnail-sidebar{height:380px}}
+.workspace main{container-type:inline-size}
+@container(max-width:900px){
+  .row-columns{grid-template-columns:minmax(140px,.8fr) minmax(220px,1fr)}
+  .preview-pane{grid-column:1/-1}
+  .column-headings{display:none}
+  .row-header{flex-wrap:wrap}
+  .row-header>.page-actions{margin-left:auto}
+}

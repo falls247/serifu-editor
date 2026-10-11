@@ -63,13 +63,16 @@ $('bulkCancel').onclick=()=>currentTask?.cancel();
 function releasePage(p){unmountPage(p);p.thumbnailReleased=true;clearTimeout(p.thumbnailTimer);p.thumbnailGeneration++;p.thumbnail?.remove();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);for(const url of new Set([p.thumbnailBaseSrc,p.thumbnailSrc]))if(url?.startsWith('blob:'))URL.revokeObjectURL(url);pngCache.invalidate(p.id);}
 
 const VIEW_KEY = 'serifu.view.v1';
-let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null }, batchStart = 0, syncingView = false;
+const PAGE_FILTERS = ['all', 'unedited', 'edited', 'pending', 'done'];
+let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null, filter: 'all' }, batchStart = 0, syncingView = false;
+let displayedOrder = '';
 try {
   const saved = JSON.parse(localStorage.getItem(VIEW_KEY));
   if ([50, 100, 'all'].includes(saved?.pageSize)) view.pageSize = saved.pageSize;
   if (typeof saved?.thumbnails === 'boolean') view.thumbnails = saved.thumbnails;
   if (Number.isFinite(saved?.scale)) view.scale = clamp(saved.scale, 50, 200);
-  if (Number.isFinite(saved?.sidebarWidth)) view.sidebarWidth = clamp(saved.sidebarWidth, 220, 720);
+  if (Number.isFinite(saved?.sidebarWidth)) view.sidebarWidth = Math.max(220, saved.sidebarWidth);
+  if (PAGE_FILTERS.includes(saved?.filter)) view.filter = saved.filter;
 } catch {}
 let layerClipboard=null;
 let pageClipboard=null;
@@ -159,8 +162,22 @@ async function prepareImage(blob,task,dimensions=null){
 function jobEstimate(p){const pixels=(p.expectedSize?.width||p.img?.width||0)*(p.expectedSize?.height||p.img?.height||0);return pixels?{work:pixels*12,result:pixels*4+65536}:{work:256*1024**2,result:64*1024**2};}
 function queueOptions(task,preparing=false){return {signal:task.signal,concurrency:preparing?imagePool.size:Math.min(2,imagePool.size),estimate:p=>{const estimate=jobEstimate(p);if(preparing)estimate.result=320*320*4+65536;return estimate;},onMetrics:metrics=>Object.assign(task.metrics,metrics),onStop:()=>{if(!task.signal.aborted)task.controller.abort(new DOMException('残りの画像処理を停止','AbortError'));}};}
 
+function matchesPageFilter(p) {
+  return view.filter === 'all' || view.filter === 'unedited' && !p.edited || view.filter === 'edited' && p.edited
+    || view.filter === 'pending' && !p.done || view.filter === 'done' && p.done;
+}
+function displayedPages() { return pages.filter(p => matchesPageFilter(p) || p.id === activeId); }
+
 function updateGlobal() {
   if (syncingView) return;
+  const displayed = displayedPages();
+  if (displayedOrder !== displayed.map(p => p.id).join(',')) { refreshJump(); return; }
+  const matchingCount = pages.filter(matchesPageFilter).length;
+  const pinned = displayed.length > matchingCount;
+  $('filteredEmpty').hidden = !pages.length || !!displayed.length;
+  $('thumbnailFilterEmpty').hidden = !pages.length || !!displayed.length;
+  $('thumbnailFilterCount').textContent = `${matchingCount} / ${pages.length}枚${pinned ? ' · 編集中の1枚を表示中' : ''}`;
+  for (const button of $('thumbnailFilters').querySelectorAll('button')) button.disabled = viewLocked();
   $('empty').hidden = pages.length > 0;
   $('count').textContent = `${pages.length} 枚`;
   $('progress').textContent = pages.length ? `確認済み ${pages.filter(p => p.done).length} / ${pages.length} 枚` : '画像ごとに編集内容を保持';
@@ -171,19 +188,20 @@ function updateGlobal() {
   $('textTarget').disabled = !pages.length || busy;
   $('textSave').disabled = !pages.length || busy;
   for (const id of ['open', 'files', 'projectLoad', 'demo']) $(id).disabled = busy;
-  const index = pages.findIndex(p => p.id === activeId);
+  const index = displayed.findIndex(p => p.id === activeId);
   $('previous').disabled = viewLocked() || index <= 0;
-  $('next').disabled = viewLocked() || index < 0 || index >= pages.length - 1;
-  $('jump').disabled = viewLocked() || !pages.length;
+  $('next').disabled = viewLocked() || index < 0 || index >= displayed.length - 1;
+  $('jump').disabled = viewLocked() || !displayed.length;
   if ($('jump').value !== activeId) $('jump').value = activeId || '';
   $('deck').inert = editLocked();
   $('thumbnailList').inert = viewLocked();
   for (const id of ['pageSize', 'toggleThumbnails', 'thumbnailScale']) $(id).disabled = viewLocked();
-  const batchEnd = view.pageSize === 'all' ? pages.length : Math.min(pages.length, batchStart + view.pageSize);
-  $('viewRange').textContent = pages.length ? `${batchStart + 1}–${batchEnd} / ${pages.length}枚` : '0 / 0枚';
+  const batchEnd = view.pageSize === 'all' ? displayed.length : Math.min(displayed.length, batchStart + view.pageSize);
+  $('viewRange').textContent = displayed.length ? `${batchStart + 1}–${batchEnd} / ${displayed.length}枚` : '0 / 0枚';
   $('previousBatch').disabled = viewLocked() || batchStart === 0;
-  $('nextBatch').disabled = viewLocked() || batchEnd >= pages.length;
-  $('thumbnailProgress').textContent = `現在 ${index < 0 ? 0 : index + 1} / ${pages.length} · 確認済み ${pages.filter(p=>p.done).length}`;
+  $('nextBatch').disabled = viewLocked() || batchEnd >= displayed.length;
+  const pageIndex = pages.findIndex(p => p.id === activeId);
+  $('thumbnailProgress').textContent = `現在 ${pageIndex < 0 ? 0 : pageIndex + 1} / ${pages.length} · 確認済み ${pages.filter(p=>p.done).length}`;
   $('temporarySave').disabled=busy||!!draftTask||!pages.length;
   $('savePreset').disabled=busy||!active()||!selected(active())||!PRESET_KINDS.includes(selected(active()).kind);
   for(const id of [...presetControls.map(([id])=>id),'autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy;
@@ -191,6 +209,7 @@ function updateGlobal() {
   updateDraftUI();
   pages.forEach((p, i) => {
     if (p.thumbnail) {
+      p.thumbnail.hidden = !matchesPageFilter(p) && p.id !== activeId;
       p.thumbnail.draggable = !busy;
       const state = `${i}:${p.edited}:${p.done}:${p.id === activeId}`;
       if (p.thumbnailState !== state) {
@@ -224,7 +243,7 @@ function updateGlobal() {
     p.row.querySelector('[data-action=move-after]').disabled=busy||pages.length<2;
     const destination=p.row.querySelector('[data-page-destination]');destination.max=String(pages.length);destination.disabled=busy||pages.length<2;
     const copy = p.row.querySelector('[data-action=copy-next]');
-    if (copy) copy.disabled = busy || !p.layers.length || i === pages.length - 1;
+    if (copy) copy.disabled = busy || !p.layers.length || displayed.indexOf(p) === displayed.length - 1;
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=cut-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=paste-all]').disabled = busy || !pageClipboard?.layers.length;
@@ -441,10 +460,15 @@ function speechStyleControls(layer) {
 }
 
 function activate(p, id = p.selectedId, scroll = false) {
+  if (!matchesPageFilter(p) && !p.row) {
+    p = pages.find(page => page.id === activeId && matchesPageFilter(page)) || pages.find(matchesPageFilter);
+    if (!p) { activeId = null;refreshJump();return; }
+    id = p.selectedId;
+  }
   const previous = active();
   if(previous&&previous!==p)persistPageControl(previous);
   activeId = p.id;selectObject(p,id);
-  const index = pages.indexOf(p);
+  const index = displayedPages().indexOf(p);
   const nextStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
   if (!p.row || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
   if (previous && previous !== p) { updateControls(previous); drawPage(previous); }
@@ -463,9 +487,11 @@ function unmountPage(p) {
 }
 
 function syncVisiblePages() {
-  const count = view.pageSize === 'all' ? Math.max(1, pages.length) : view.pageSize;
-  batchStart = Math.min(batchStart, Math.floor(Math.max(0, pages.length - 1) / count) * count);
-  const visible = new Set(pages.slice(batchStart, batchStart + count));
+  const displayed = displayedPages();
+  const count = view.pageSize === 'all' ? Math.max(1, displayed.length) : view.pageSize;
+  const activeIndex = displayed.findIndex(p => p.id === activeId);
+  batchStart = activeIndex < 0 ? 0 : Math.floor(activeIndex / count) * count;
+  const visible = new Set(displayed.slice(batchStart, batchStart + count));
   const wasSyncing=syncingView;syncingView = true;
   try {
     for (const p of pages) if (!visible.has(p)) unmountPage(p);
@@ -504,13 +530,14 @@ function applyViewSettings() {
   $('thumbnailScaleValue').value = `${view.scale}%`;
   $('workspace').style.setProperty('--thumbnail-width', `${160 * view.scale / 100}px`);
   applySidebarWidth();
+  for (const button of $('thumbnailFilters').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.pageFilter === view.filter));
 }
 
 const workspace = document.getElementById('workspace');
 const thumbnailSidebar = document.getElementById('thumbnailSidebar');
 const thumbnailList = document.getElementById('thumbnailList');
 const sidebarHandle = document.getElementById('thumbnailResize');
-function sidebarWidthLimit() { return Math.max(220, Math.min(720, workspace.clientWidth - 640)); }
+function sidebarWidthLimit() { return Math.max(220, workspace.clientWidth - 640); }
 function applySidebarWidth() {
   if (view.sidebarWidth === null) workspace.style.removeProperty('--sidebar-width');
   else workspace.style.setProperty('--sidebar-width', `${clamp(view.sidebarWidth, 220, sidebarWidthLimit())}px`);
@@ -557,11 +584,23 @@ function rememberView() {
   applyViewSettings();
   try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch { status('表示設定を記憶できなかった。現在の表示には適用した。'); }
 }
+$('thumbnailFilters').onclick = event => {
+  if (viewLocked()) return;
+  const filter = event.target.closest('[data-page-filter]')?.dataset.pageFilter;
+  if (!PAGE_FILTERS.includes(filter)) return;
+  if (active()) persistPageControl(active());
+  finishThumbnailDrag();view.filter = filter;
+  const matching = pages.filter(matchesPageFilter), current = active();
+  const next = matching.includes(current) ? current : matching[0];
+  activeId = next?.id ?? null;batchStart = 0;
+  rememberView();refreshJump();
+  if (next) activate(next);
+};
 $('toggleThumbnails').onclick = () => { view.thumbnails = !view.thumbnails; rememberView(); };
 $('thumbnailScale').oninput = event => { view.scale = Number(event.target.value); rememberView(); };
 $('pageSize').onchange = event => {
   view.pageSize = event.target.value === 'all' ? 'all' : Number(event.target.value);
-  const index = Math.max(0, pages.indexOf(active()));
+  const index = Math.max(0, displayedPages().indexOf(active()));
   batchStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
   rememberView(); syncVisiblePages();
   if (active()) activate(active());
@@ -635,12 +674,15 @@ thumbnailList.addEventListener('keydown', event => {
   if (!event.altKey || !direction) return;
   event.preventDefault();event.stopPropagation();
   const p = pages.find(p => p.id === event.target.closest('.thumbnail')?.dataset.pageId);
-  if (p) movePageTo(p, pages.indexOf(p) + direction);
+  if (p) {
+    const displayed = displayedPages(), target = displayed[displayed.indexOf(p) + direction];
+    if (target) movePageTo(p, pages.indexOf(target));
+  }
 });
 
 for (const [id, offset] of [['previousBatch', -1], ['nextBatch', 1]]) $(id).onclick = () => {
   if (viewLocked() || view.pageSize === 'all') return;
-  const p = pages[batchStart + offset * view.pageSize];
+  const p = displayedPages()[batchStart + offset * view.pageSize];
   if (p) activate(p, p.selectedId, true);
 };
 
@@ -881,10 +923,14 @@ function mountPage(p) {
 }
 
 function refreshJump() {
+  const current = active();
+  if (!current || !current.row && !matchesPageFilter(current)) activeId = pages.find(matchesPageFilter)?.id ?? null;
   const wasSyncing=syncingView;syncingView=true;
   try{syncVisiblePages();refreshThumbnails();
-    while($('jump').options.length>pages.length)$('jump').lastElementChild.remove();
-    pages.forEach((p,i)=>{let option=$('jump').options[i];if(!option){option=element('option');$('jump').append(option);}const name=`${i+1}. ${p.name}`;if(option.value!==p.id)option.value=p.id;if(option.textContent!==name)option.textContent=name;});
+    const displayed = displayedPages();displayedOrder = displayed.map(p => p.id).join(',');
+    while($('jump').options.length>displayed.length)$('jump').lastElementChild.remove();
+    const positions = new Map(pages.map((p, i) => [p.id, i + 1]));
+    displayed.forEach((p,i)=>{let option=$('jump').options[i];if(!option){option=element('option');$('jump').append(option);}const name=`${positions.get(p.id)}. ${p.name}`;if(option.value!==p.id)option.value=p.id;if(option.textContent!==name)option.textContent=name;});
   }finally{syncingView=wasSyncing;}
   updateGlobal();
 }
@@ -1047,8 +1093,8 @@ $('deck').addEventListener('click', event => {
   } else if (action === 'move-after') {
     event.preventDefault();movePageAfter(p);
   } else if (action === 'complete') {
+    const displayed = displayedPages(), next = displayed[displayed.indexOf(p) + 1];
     p.done = true; dirty(); updateGlobal();
-    const next = pages[pages.indexOf(p) + 1];
     if (next) activate(next, next.selectedId, true); else status('最後の画像まで確認済み。一括保存で書き出せる。');
   } else if (['copy-all','cut-all','paste-all','copy-next'].includes(action)) {
     guard(task=>bulkLayers(action,p,task),'レイヤー一括操作',3);
@@ -1065,7 +1111,7 @@ $('deck').addEventListener('click', event => {
 
 async function bulkLayers(action,p,task){
   const source=action==='paste-all'?pageClipboard:{layers:p.layers,width:p.img.width,height:p.img.height,name:p.name};
-  const target=action==='copy-next'?pages[pages.indexOf(p)+1]:p;if(!source?.layers.length||!target){task.stage('対象なし',0);return;}
+  const displayed=displayedPages(),target=action==='copy-next'?displayed[displayed.indexOf(p)+1]:p;if(!source?.layers.length||!target){task.stage('対象なし',0);return;}
   const copies=await prepareLayers(source.layers,layer=>action==='copy-all'||action==='cut-all'?structuredClone(layer):scaledCopy(layer,source.width,source.height,target.img.width,target.img.height),task);
   checkAbort(task.signal);task.stage('データ適用',copies.length);
   if(action==='copy-all'||action==='cut-all')pageClipboard={layers:copies,width:source.width,height:source.height,name:p.name,cut:action==='cut-all'};
@@ -1221,13 +1267,14 @@ async function duplicateImage(p,task){
 }
 
 function removePage(p) {
+  const displayedIndex = displayedPages().indexOf(p);
   const index = pages.indexOf(p); pages.splice(index, 1); releasePage(p);
-  if (activeId === p.id) activeId = pages[Math.min(index, pages.length - 1)]?.id || null;
+  if (activeId === p.id) { const displayed = displayedPages();activeId = displayed[Math.min(displayedIndex, displayed.length - 1)]?.id || null; }
   dirty(); refreshJump(); if (active()) activate(active());
 }
 
-$('previous').onclick = () => { const p = pages[pages.indexOf(active()) - 1]; if (p) activate(p, p.selectedId, true); };
-$('next').onclick = () => { const p = pages[pages.indexOf(active()) + 1]; if (p) activate(p, p.selectedId, true); };
+$('previous').onclick = () => { const displayed=displayedPages(),p = displayed[displayed.indexOf(active()) - 1]; if (p) activate(p, p.selectedId, true); };
+$('next').onclick = () => { const displayed=displayedPages(),p = displayed[displayed.indexOf(active()) + 1]; if (p) activate(p, p.selectedId, true); };
 $('jump').onchange = () => { const p = pages.find(p => p.id === $('jump').value); if (p) { activate(p, p.selectedId, true);p.canvas.focus({preventScroll:true}); } };
 
 async function guard(fn,kind='処理',stageCount=1) {

@@ -52,11 +52,21 @@
       <div class="thumbnail-heading"><strong>ページ一覧</strong><span id="thumbnailProgress"></span></div>
       <label class="thumbnail-zoom">サムネイル倍率 <output id="thumbnailScaleValue">100%</output><input id="thumbnailScale" type="range" min="50" max="200" step="10" value="100"></label>
       <p class="thumbnail-legend"><span>未編集</span><span class="edited">編集済み</span><span class="done">✓ 確認済み</span></p>
+      <div id="thumbnailFilters" class="thumbnail-filters" role="group" aria-label="ページの表示フィルター">
+        <button type="button" data-page-filter="all" aria-pressed="true">すべて</button>
+        <button type="button" data-page-filter="unedited" aria-pressed="false">未編集のみ</button>
+        <button type="button" data-page-filter="edited" aria-pressed="false">編集済みのみ</button>
+        <button type="button" data-page-filter="pending" aria-pressed="false">未確認のみ</button>
+        <button type="button" data-page-filter="done" aria-pressed="false">確認済みのみ</button>
+      </div>
+      <p id="thumbnailFilterCount" class="thumbnail-filter-count" aria-live="polite"></p>
       <div id="thumbnailList" class="thumbnail-list"></div>
+      <p id="thumbnailFilterEmpty" class="thumbnail-filter-empty" hidden>条件に合うページがない</p>
       <p class="thumbnail-hint">ドラッグで順序変更 · Alt + ↑↓でも移動</p>
       <div id="thumbnailResize" class="thumbnail-resize" role="separator" tabindex="0" aria-label="ページ一覧の幅" aria-orientation="vertical" aria-controls="thumbnailSidebar" title="ドラッグまたは←→で幅変更。ダブルクリックで初期幅に戻す"></div>
     </aside>
   <main>
+    <p id="filteredEmpty" class="filtered-empty" hidden>条件に合うページがない。フィルターを切り替えて表示。</p>
     <div class="column-headings" aria-hidden="true"><span><b>01</b> 元画像</span><span><b>02</b> セリフ・効果音</span><span><b>03</b> プレビュー・位置調整</span></div>
     <section id="empty" class="empty">
       <div class="empty-symbol">Aa<span>✦</span></div>
