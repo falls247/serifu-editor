@@ -52,7 +52,7 @@ try {
   assert.equal(await first.locator('textarea').nth(0).inputValue(), '男性の編集テスト');
   assert.equal(await second.locator('textarea').nth(0).inputValue(), '二枚目の編集');
   await selectCard(first,0);
-  const selectionRect = await first.locator('canvas').boundingBox();
+  const selectionRect = await first.locator('canvas.preview').boundingBox();
   await page.mouse.click(selectionRect.x + selectionRect.width * .3, selectionRect.y + selectionRect.height * 170 / 750);
   assert.equal(await first.locator('[data-action=redo]').isEnabled(), true, 'selecting text must preserve redo history');
   await first.locator('[data-action=speaker-female]').first().click();
@@ -61,7 +61,7 @@ try {
   await first.locator('textarea').first().fill('MEN');
   await (await selectCard(first,1)).locator('textarea').fill('WOMEN');
   await selectCard(first,0);
-  const pixels = await first.locator('canvas').evaluate(canvas => {
+  const pixels = await first.locator('canvas.preview').evaluate(canvas => {
     const bytes = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
     const counts = { male: 0, female: 0, white: 0 };
     for (let i = 0; i < bytes.length; i += 4) {
@@ -73,7 +73,7 @@ try {
   });
   assert.ok(pixels.male > 100 && pixels.female > 100 && pixels.white > 100, 'black male, pink female and white keylines must be painted');
   // Preview copy/paste snapshots the whole selected layer; input shortcuts stay native.
-  const shortcutCanvas=first.locator('canvas'),secondCanvas=second.locator('canvas');
+  const shortcutCanvas=first.locator('canvas.preview'),secondCanvas=second.locator('canvas.preview');
   const layerCount=await first.locator('.layer-card').count();
   await first.locator('.position-controls [data-field=thickness]').fill('2.5');
   const originalX=Number(await first.locator('.position-controls [data-field=x]').inputValue());
@@ -83,7 +83,7 @@ try {
   await shortcutCanvas.focus();await page.keyboard.press('Control+v');
   assert.equal(await first.locator('.layer-card').count(),layerCount+1);
   assert.equal(await first.locator('textarea').last().inputValue(),'MEN');
-  assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
+  assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'3','integer thickness controls normalize fractional input before copy/paste');
   assert.equal(Number(await first.locator('.position-controls [data-field=x]').inputValue()),originalX+20);
   await page.keyboard.press('Control+z');assert.equal(await first.locator('.layer-card').count(),layerCount);
   const secondCount=await second.locator('.layer-card').count();await secondCanvas.focus();await page.keyboard.press('Meta+v');
@@ -105,7 +105,7 @@ try {
   await shortcutCanvas.focus();await page.keyboard.press('Meta+c');await page.keyboard.press('Meta+v');
   assert.equal(await first.locator('.layer-card').count(),layerCount+1);
   assert.equal(await first.locator('.layer-card').last().locator('.kind-label').textContent(),'✦ 効果音');
-  assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'3.5');
+  assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'4','integer thickness controls normalize fractional input before copy/paste');
   await page.keyboard.press('Meta+z');assert.equal(await first.locator('.layer-card').count(),layerCount);
   // Image-wide buttons work across nonadjacent images and retain an independent snapshot.
   const batchTexts=await first.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value));
@@ -164,8 +164,8 @@ try {
   await portrait.locator('[data-action=paste-all]').click();
   assert.deepEqual(await portrait.locator('textarea').evaluateAll(inputs=>inputs.map(input=>input.value)),batchTexts);
   const portraitCoordinates=await portrait.locator('.position-controls').evaluate(controls=>Object.fromEntries(['x','y','w','h','size','outline','thickness'].map(field=>[field,Number(controls.querySelector(`[data-field=${field}]`).value)])));
-  for(const field of ['x','w','size','outline','thickness'])assert.ok(Math.abs(portraitCoordinates[field]-landscapeCoordinates[field]*.5)<1e-8,`landscape-to-portrait ${field} scales correctly`);
-  for(const field of ['y','h'])assert.ok(Math.abs(portraitCoordinates[field]-landscapeCoordinates[field]*1000/750)<1e-8,`landscape-to-portrait ${field} preserves relative placement`);
+  for(const field of ['x','w','size','outline','thickness'])assert.equal(portraitCoordinates[field],Math.round(landscapeCoordinates[field]*.5),`landscape-to-portrait ${field} scales correctly in integer controls`);
+  for(const field of ['y','h'])assert.equal(portraitCoordinates[field],Math.round(landscapeCoordinates[field]*1000/750),`landscape-to-portrait ${field} preserves relative placement in integer controls`);
   await mkdir('artifacts',{recursive:true});await portrait.screenshot({path:'artifacts/portrait-paste.png'});
   page.once('dialog',dialog=>dialog.accept());await portrait.locator('[data-action=remove]').click();
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3);
@@ -190,7 +190,7 @@ try {
   await (await selectCard(first,0)).locator('textarea').first().focus();
   const xInput = first.locator('.position-controls [data-field=x]'), yInput = first.locator('.position-controls [data-field=y]');
   await xInput.fill('300'); await yInput.fill('170'); await yInput.blur();
-  const canvas = first.locator('canvas'); await canvas.scrollIntoViewIfNeeded();
+  const canvas = first.locator('canvas.preview'); await canvas.scrollIntoViewIfNeeded();
   const rect = await canvas.boundingBox(), initialX = Number(await xInput.inputValue());
   await page.mouse.move(rect.x + rect.width * .3, rect.y + rect.height * 170 / 750);
   await page.mouse.down(); await page.mouse.move(rect.x + rect.width * .35, rect.y + rect.height * 190 / 750, { steps: 6 }); await page.mouse.up();
@@ -223,7 +223,7 @@ try {
   const dialoguePreset=await page.locator('#defaultDialogue').inputValue();
   await first.locator('[data-action=add-male]').click();
   assert.equal(await first.locator('.position-controls [data-field=size]').inputValue(),'66');
-  assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
+  assert.equal(await first.locator('.position-controls [data-field=thickness]').inputValue(),'3','integer thickness controls retain their normalized preset value');
   assert.equal(await first.locator('.position-controls [data-field=vertical]').inputValue(),'true');
   const secondLayerCount=await second.locator('.layer-card').count();await second.locator('[data-action=add-female]').click();
   assert.equal(await second.locator('.layer-card').count(),secondLayerCount+1,'the first click on another page must add a layer without moving the button during focus');
@@ -235,15 +235,15 @@ try {
   await effectCard.locator('.placement-settings summary').click();await effectCard.locator('.effect-details:not(.placement-settings) summary').click();
   assert.equal(await effectCard.locator('[data-field=sizeVariation]').inputValue(),'5');assert.equal(await effectCard.locator('[data-field=horizontalJitter]').inputValue(),'3');
   await effectCard.locator('[data-field=sizeVariation]').fill('0');await effectCard.locator('[data-field=horizontalJitter]').fill('0');
-  const uniformLetters=await first.locator('canvas').evaluate(c=>c.toDataURL());
+  const uniformLetters=await first.locator('canvas.preview').evaluate(c=>c.toDataURL());
   await effectCard.locator('[data-field=sizeVariation]').fill('8.5');
-  assert.notEqual(await first.locator('canvas').evaluate(c=>c.toDataURL()),uniformLetters,'letter-size variation must change the live preview');
+  assert.notEqual(await first.locator('canvas.preview').evaluate(c=>c.toDataURL()),uniformLetters,'letter-size variation must change the live preview');
   await effectCard.locator('[data-field=sizeVariation]').fill('0');await effectCard.locator('[data-field=horizontalJitter]').fill('3.5');
-  assert.notEqual(await first.locator('canvas').evaluate(c=>c.toDataURL()),uniformLetters,'horizontal letter jitter must change the live preview independently');
+  assert.notEqual(await first.locator('canvas.preview').evaluate(c=>c.toDataURL()),uniformLetters,'horizontal letter jitter must change the live preview independently');
   await effectCard.locator('[data-field=sizeVariation]').fill('8.5');
-  const beforeBlur=await first.locator('canvas').evaluate(c=>c.toDataURL());
+  const beforeBlur=await first.locator('canvas.preview').evaluate(c=>c.toDataURL());
   await effectCard.locator('[data-field=blur]').fill('4');await effectCard.locator('[data-field=distortion]').fill('70');await effectCard.locator('[data-field=motionBlur]').fill('30');
-  assert.notEqual(await first.locator('canvas').evaluate(c=>c.toDataURL()),beforeBlur,'blur/warp must change rasterized preview');
+  assert.notEqual(await first.locator('canvas.preview').evaluate(c=>c.toDataURL()),beforeBlur,'blur/warp must change rasterized preview');
   page.once('dialog',d=>d.accept('ぼかし漫画'));await page.click('#savePreset');
   const effectPreset=await page.locator('#defaultSfx').inputValue();
   const addSfxButton=second.locator('[data-action=add-sfx]');
@@ -252,7 +252,7 @@ try {
   const secondEffectCard=await selectCard(second,await second.locator('.layer-card').count()-1);
   assert.equal(await secondEffectCard.getAttribute('data-kind'),'sfx','adding an effect must create a selected effect card');
   assert.equal(await secondEffectCard.locator('[data-field=blur]').inputValue(),'4');
-  assert.equal(await second.locator('.position-controls [data-field=thickness]').inputValue(),'3.5');
+  assert.equal(await second.locator('.position-controls [data-field=thickness]').inputValue(),'4','integer thickness controls retain their normalized preset value');
   assert.equal(await second.locator('.layer-card').last().locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await second.locator('.layer-card').last().locator('[data-field=horizontalJitter]').inputValue(),'3.5');
   assert.equal(await second.locator('.layer-card').last().locator('[data-preset-select]').inputValue(),effectPreset);
   const third=rows.nth(2),tensionCard=await selectCard(third,2);
@@ -267,17 +267,17 @@ try {
   await tension.locator('[data-field=sizeVariation]').fill('9');await tension.locator('[data-field=horizontalJitter]').fill('4');
   await tension.locator('textarea').fill('ゾワッ');
   await third.screenshot({path:'artifacts/tension.png'});
-  await third.locator('canvas').screenshot({path:'artifacts/tension-preview.png'});
+  await third.locator('canvas.preview').screenshot({path:'artifacts/tension-preview.png'});
   await page.locator('#defaultSfx').selectOption(effectPreset);
   const downloadPromise = page.waitForEvent('download'); await page.click('#projectSave');
   const download = await downloadPromise; await download.saveAs('artifacts/project.json');
   const project = JSON.parse(await readFile('artifacts/project.json', 'utf8'));
   assert.equal(project.version,PROJECT_VERSION); assert.equal(project.pages.length, 3); assert.equal(project.pages[0].layers[0].speaker, 'male');
-  assert.equal(project.pages[0].layers[0].thickness,2.5);assert.equal(project.pages[0].layers[2].thickness,3.5);
+  assert.equal(project.pages[0].layers[0].thickness,3);assert.equal(project.pages[0].layers[2].thickness,4);
   assert.equal(project.pages[0].layers[2].sizeVariation,8.5);assert.equal(project.pages[0].layers[2].horizontalJitter,3.5);assert.ok(Number.isInteger(project.pages[0].layers[2].glyphSeed));
   assert.equal(project.pages[2].layers[2].font,'brush');assert.equal(project.pages[2].layers[2].blurY,96);assert.equal(project.pages[2].layers[2].dryInk,90);assert.equal(project.pages[2].layers[2].brushTails,90);
   await selectCard(first,0);
-  const expectedPreview=await third.locator('canvas').evaluate(canvas=>canvas.toDataURL());
+  const expectedPreview=await third.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL());
   const repeated=await page.evaluate(async p=>{
     const {draw}=await import('./src/renderer.js'),img=new Image();img.src=p.src;await img.decode();
     const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
@@ -288,7 +288,7 @@ try {
   assert.equal(repeated[0],expectedPreview,'export must match unselected live preview, including directional blur and dry brush');
   assert.equal(repeated[0],repeated[2],'restoring regenerated layer IDs must preserve the exact letter-size/jitter pattern');
   await (await selectCard(second,0)).locator('textarea').first().focus();
-  const thickPreview=await first.locator('canvas').evaluate(canvas=>canvas.toDataURL());
+  const thickPreview=await first.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL());
   const thickExport=await page.evaluate(async p=>{
     const {draw}=await import('./src/renderer.js'),img=new Image();img.src=p.src;await img.decode();
     const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;draw(canvas.getContext('2d'),img,p.layers);return canvas.toDataURL();
@@ -301,17 +301,20 @@ try {
   for(const key of addedFonts){
     await fontSelect.selectOption(key);await page.evaluate(()=>document.fonts.ready);
     assert.equal(await page.evaluate(async key=>{const {fontDescription}=await import('./src/fonts.js');return document.fonts.check(fontDescription({font:key,kind:'sfx'}).load);},key),true,`${key} must load its bundled Japanese font`);
-    fontPictures.push(await first.locator('canvas').evaluate(canvas=>canvas.toDataURL()));
+    fontPictures.push(await first.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL()));
   }
   assert.equal(new Set(fontPictures).size,addedFonts.length,'added font choices must produce distinct letter shapes');
   await fontSelect.selectOption(originalFont);
   await page.locator('#projectInput').setInputFiles('artifacts/project.json');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 6 && !document.querySelector('#projectLoad').disabled);
   assert.equal(await rows.nth(3).locator('textarea').first().inputValue(), 'MEN');
-  await (await selectCard(rows.nth(3),0)).locator('textarea').first().focus();assert.equal(await rows.nth(3).locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
+  await (await selectCard(rows.nth(3),0)).locator('textarea').first().focus();assert.equal(await rows.nth(3).locator('.position-controls [data-field=thickness]').inputValue(),'3');
   assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=blurY]').inputValue(),'96');
   assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'9');assert.equal(await rows.nth(5).locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'4');
-  const old = { version: 1, pages: [{ ...project.pages[0], layers: [{ ...project.pages[0].layers[0], kind: 'bubble', shape: 'ellipse', fill: '#ffffff', tailX: 0, tailY: 0 }] }] };
+  const oldPage = { ...project.pages[0], layers: [{ ...project.pages[0].layers[0], kind: 'bubble', shape: 'ellipse', fill: '#ffffff', tailX: 0, tailY: 0 }] };
+  delete oldPage.maskEffects; delete oldPage.maskAssets; delete oldPage.selectedMaskId;
+  delete oldPage.imageWidth; delete oldPage.imageHeight;
+  const old = { version: 1, pages: [oldPage] };
   await writeFile('artifacts/old.json', JSON.stringify(old)); await page.locator('#projectInput').setInputFiles('artifacts/old.json');
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 7 && !document.querySelector('#projectLoad').disabled);
   assert.equal(await rows.nth(6).locator('.layer-card').first().getAttribute('data-speaker'), 'male');
@@ -372,7 +375,7 @@ try {
   await page.click('#restoreDraft');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===7&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await page.locator('.image-row').first().locator('textarea').first().inputValue(),'短周期の保存');
-  assert.equal(await page.locator('.image-row').first().locator('.position-controls [data-field=thickness]').inputValue(),'2.5');
+  assert.equal(await page.locator('.image-row').first().locator('.position-controls [data-field=thickness]').inputValue(),'3');
   assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'3.5');
   assert.equal(await page.locator('.image-row').nth(2).locator('.layer-card').nth(2).locator('[data-field=brushTails]').inputValue(),'90');
   assert.deepEqual(await rows.nth(6).locator('textarea').evaluateAll(inputs=>inputs.slice(1).map(input=>input.value)),savedBatchTexts,'draft recovery keeps batch copies independent of later source edits');

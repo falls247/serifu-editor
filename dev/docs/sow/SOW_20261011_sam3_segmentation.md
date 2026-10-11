@@ -7,9 +7,9 @@
 | 対象リポジトリ | [falls247/serifu-editor](https://github.com/falls247/serifu-editor) |
 | 調査基準 | `main` / `a4f6f6b238339080a636b5ac9856d61289834ef5`（2026-10-11確認） |
 | 文書予定配置 | `dev/docs/sow/SOW_20261011_sam3_segmentation.md` |
-| 状態 | **実装指示書／インタビュー全27問確定**。実装・実機検証は未実施 |
+| 状態 | **実装済み／インタビュー全27問確定**。最終受入検証は第16節とGPU検証記録を参照。未コミット |
 | 対象環境 | Windowsブラウザ＋WSL2 Ubuntu、CUDA対応GPU、Node.js、Python 3.12＋uv |
-| 実装ブランチ | `feat/sam3-segmentation-20261011`（作業開始時に最新`main`から作成） |
+| 実装ブランチ | `feat/sam3_detect`（ユーザー指定。最新mainとの差分確認済み） |
 
 > **開発エージェントへの指示**：この文書を機能要求の一次仕様とする。最初に最新`main`を取得し、基準SHA以降の変更を確認する。既存のデータ、保存形式、ページング、文字描画、GitHub Pages公開を破壊しない。専用featureブランチで小さくコミットし、各Phaseの品質ゲートを通過させる。GPU実機未検証を「完了」にしない。`main`へ直接push・mergeしない。
 
@@ -651,3 +651,18 @@ GPU実機: PASS/FAIL/未実施（sam3.pt形式、GPU名、peak VRAM、アイド�
 ---
 
 **最終指示**：本SOWは仕様書。これを作成した時点ではアプリコード／モデル／GitHubリポジトリは変更しない。実装指示を受けたエージェントがfeatureブランチを切り、Phase 0から順番に進めること。
+
+
+## 16. 実装時の仕様差分（2026-10-11）
+
+- ユーザーの実装指示に従い、ブランチは`feat/sam3_detect`を維持する。最新mainは`cf3437e8a1a494132806ca26258336712439f42e`として取得・確認済み。基準後の統一文字順とサムネイルファイル追加を保持する。
+- 編集データ版11は既存の文字順変更に使用済みのため、マスク保存は**版12**に変更する。旧版1〜11の読込を維持し、コンテナ版2は計画どおり。ADR番号0022も使用済みのため、マスク設計は[ADR-0023](../adr/0023-sam3-mask-effects-and-storage.md)に記録する。
+- 一時保存のマスクは圧縮Blobの現行スナップショットとして格納する。画像・メタデータと同一トランザクションで置換し、旧IndexedDBのストアを保持する。
+- SAM3は`0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc`へ固定し、GPU依存はuvのgpu extraへ分離する。重みを自動取得しない。ライセンスはupstream LICENSEのSAM License。
+- コミットはAGENTS指示に従ってユーザー承認を待つ。実装・検証結果は[検証記録](../sam3-gpu-validation.md)に記載する。
+
+- 実機スモークで固定upstreamのinteractive predictorはbackboneなしと確認。SOWの`predictor.set_image`直接呼出から、公式`model.predict_inst`へprocessorのinference stateを渡す経路へ変更する。操作仕様とAPIの要求形式は維持する。
+
+この節は実装済みの差分を記録する。Node163件、Python GPU不要29件、既存ブラウザ21本、マスク／モックE2E、一括保存と静的ビルドが合格。実GPUでtext・points・refine、600秒アイドル後のVRAM解放と再ロード、ブラウザからの候補確定・PNG保存も確認した。
+
+Windows→WSLの画面初期化とhealth応答は確認済み。Windows GUIでの全編集操作、実写・漫画での精度、実VRAM圧迫によるOOMは未確認で、詳細は検証記録に残す。コミット・PR・GitHub Actionsはコミット承認後の作業として残る。テストの未実施・失敗を合格と扱わない。

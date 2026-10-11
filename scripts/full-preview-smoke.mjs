@@ -24,7 +24,7 @@ try {
   assert.equal(await opener.evaluate(b => b.nextElementSibling.dataset.action), 'crop-image');
   assert.equal(await page.locator('.shortcut-hint,.preview-hint').count(), 0);
   const dimensions = await row.evaluate(r => ({ original: r.querySelector('.original').getBoundingClientRect().width,
-    preview: r.querySelector('canvas').getBoundingClientRect().width, frame: r.querySelector('.preview-frame').clientWidth }));
+    preview: r.querySelector('canvas.preview').getBoundingClientRect().width, frame: r.querySelector('.preview-frame').clientWidth }));
   assert.ok(dimensions.preview > dimensions.original * 1.2); assert.ok(Math.abs(dimensions.preview - (dimensions.frame - 2)) < 1);
   const integerFields = ['shapeSeed','spikeCount','brushSeed','glyphSeed','x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth','textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth','shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY'];
   const values = await row.locator('input[data-field][type=number],input[data-numeric-field][type=number]').evaluateAll(inputs => inputs.map(i => ({ field: i.dataset.field ?? i.dataset.numericField, value: i.value, step: i.step })));
@@ -76,8 +76,12 @@ try {
   }, [png.toString('base64'), modalPixels]); assert.equal(parity, 0, 'original-resolution modal includes all edits without selection handles');
   await page.locator('#projectFormat').selectOption('json'); pending = page.waitForEvent('download'); await page.locator('#projectSave').click(); download = await pending;
   const project = JSON.parse(await readFile(await download.path()));
-  assert.equal(project.pages[0].layers[0].x, fixture.pages[0].layers[0].x, 'display rounding and modal opening do not mutate source precision');
-  assert.equal(project.pages[0].layers[0].y, fixture.pages[0].layers[0].y);
+  for (const original of fixture.pages[0].layers) {
+    const saved = project.pages[0].layers.find(layer => layer.kind === original.kind);
+    assert.ok(saved, `legacy migration retains ${original.kind}`);
+    assert.equal(saved.x, original.x, `${original.kind} display rounding and modal opening do not mutate source precision`);
+    assert.equal(saved.y, original.y);
+  }
   await page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);
   const sizeInput = row.locator('.position-controls [data-field=size]'); await sizeInput.fill('41.23456');
   assert.equal(await row.locator('.position-controls [data-numeric-field=size]').inputValue(), '41'); await sizeInput.blur(); assert.equal(await sizeInput.inputValue(), '41');

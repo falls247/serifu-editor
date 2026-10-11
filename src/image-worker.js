@@ -26,7 +26,7 @@ self.onmessage=async({data})=>{
       }else if(kind==='render-png'){
         if(image.width!==payload.width||image.height!==payload.height)throw new Error('画像寸法が既存デコードと一致しない');
         const edit=normalizeImageEdit(payload.imageEdit,image.width,image.height),size=imageSize(image.width,image.height,edit);
-        canvas=new OffscreenCanvas(size.width,size.height);const drawn=performance.now();draw(canvas.getContext('2d'),image,payload.layers,null,1,1,edit);timings.drawMs=performance.now()-drawn;
+        canvas=new OffscreenCanvas(size.width,size.height);const drawn=performance.now();draw(canvas.getContext('2d'),image,payload.layers,null,1,1,edit,{width:payload.width,height:payload.height},{maskEffects:payload.maskEffects??[],maskAssets:payload.maskAssets??{}});timings.drawMs=performance.now()-drawn;
         const encoded=performance.now();value=await canvas.convertToBlob({type:'image/png'});timings.pngMs=performance.now()-encoded;
       }else throw new Error('未知の画像ジョブ');
     }

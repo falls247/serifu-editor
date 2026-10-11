@@ -1,0 +1,60 @@
+[
+  {
+    "id": "bitpack-lsb-v1",
+    "imageWidth": 4,
+    "imageHeight": 3,
+    "bbox": {
+      "x": 0,
+      "y": 0,
+      "width": 4,
+      "height": 3
+    },
+    "codec": "bitpack-lsb-v1",
+    "byteLength": 2,
+    "sha256": "6c2cde59b057d2be5b5e8a239ac2e7413fa2ba93f2566d8b21687dc936292703",
+    "dataBase64": "JQs=",
+    "decoded": [
+      1,
+      0,
+      1,
+      0,
+      0,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      1
+    ]
+  },
+  {
+    "id": "rle32le-v1",
+    "imageWidth": 4,
+    "imageHeight": 3,
+    "bbox": {
+      "x": 0,
+      "y": 0,
+      "width": 4,
+      "height": 3
+    },
+    "codec": "rle32le-v1",
+    "byteLength": 40,
+    "sha256": "a2b246aeb074200eea4fe8769a8723f0b9946e894bcd986e86ae634db0f8ae02",
+    "dataBase64": "AAAAAAEAAAABAAAAAQAAAAIAAAABAAAAAgAAAAIAAAABAAAAAQAAAA==",
+    "decoded": [
+      1,
+      0,
+      1,
+      0,
+      0,
+      1,
+      0,
+      0,
+      1,
+      1,
+      0,
+      1
+    ]
+  }
+]

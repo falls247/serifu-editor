@@ -106,7 +106,7 @@
 
 ## 編集データ・元画像
 
-「編集データを保存」は画像、男女の区分、効果音スタイルと先細りの変化率、文字と位置、吹き出しの楕円・透過・テール・重なり、キャプションの本文・色・書体・ボックス・自動追従モード・配置方向、編集済みの判定を1ファイルに含める。「編集データを読込」で現在の一覧に追加し、再編集できる。初期保存形式は、元画像をBase64化せず収録する高速形式 `.serifu`。以前の版へ渡す場合は「保存形式」で従来形式 `.json` を選ぶ。一括PNGに添える編集データもこの選択に従う。高速形式はコンテナ版1、内部の編集データはversion 6。従来JSONもversion 6で出力する。version 1〜5の読込と、version 3〜5の一時保存の復元にも対応する。旧version 1の文字付き吹き出しは、テキストと位置を保って白縁の男性セリフに変換する。旧吹き出しの形状・しっぽは引き継がない。
+「編集データを保存」は画像、男女の区分、効果音スタイルと先細りの変化率、文字と位置、吹き出しの楕円・透過・テール・重なり、キャプションの本文・色・書体・ボックス・自動追従モード・配置方向、編集済みの判定を1ファイルに含める。「編集データを読込」で現在の一覧に追加し、再編集できる。初期保存形式は、元画像をBase64化せず収録する高速形式 `.serifu`。JSON形式が必要な場合は「保存形式」で `.json` を選ぶ。JSONもversion 12のため旧アプリへの受け渡しには使用できない。一括PNGに添える編集データもこの選択に従う。高速形式はコンテナ版2、編集データとJSONはversion 12で出力する。旧コンテナ版1、JSON version 1〜11、従来の一時保存も読み込める。マスク素材は圧縮保存し、推論サーバーなしでも加工を復元・再編集できる。新しい保存データは旧アプリでは開けない。旧version 1の文字付き吹き出しは、テキストと位置を保って白縁の男性セリフに変換する。旧吹き出しの形状・しっぽは引き継がない。
 
 - 編集は元画像を上書きしない。
 - 「一覧から外す」は元ファイルを残す。未保存の当該画像の編集は失われる。
@@ -137,11 +137,11 @@ npm run build
 
 ## 開発者向けディレクトリ構成（2026-10-11）
 
-アプリ用JavaScript 22件は `src/` 直下に集約。ネイティブES Modules構成とし、バンドラーは導入しない。
+アプリ用JavaScriptは `src/` 直下に集約。ネイティブES Modules構成とし、バンドラーは導入しない。
 
 ```text
 serifu-editor/
-├── src/                # app.js、renderer.js、Workerなどブラウザ用JS22件
+├── src/                # app.js、renderer.js、Workerなどブラウザ用JS
 ├── assets/             # 同梱フォント原本・生成フォント
 ├── scripts/            # ビルド、フォント準備、ブラウザ・一括処理テスト
 ├── test/               # Node標準ランナーによる単体テスト
@@ -185,3 +185,49 @@ Pages公開前にはPlaywrightによるブラウザ検証も実行。3列配置�
 編集データはモデル版**7**で保存。旧JSON v1～v6と旧高速 `.serifu` v6を読み込める。新しいv7形式を旧アプリで開くことは避ける。描画はPNG書き出しも同じパイプラインで処理する。
 
 設計と検証上の注意は `dev/docs/adr/0012-distressed-ink-and-balloon-effects.md` を参照。
+
+## SAM3による元画像のマスク加工
+
+各画像のORIGINAL下にあるSAM3カードで、テキストによる検出、前景・背景ポイントによる領域指定を行う。候補は番号・色・信頼度で表示し、複数選択してOKで独立した加工オブジェクトへ確定する。入力を変更した後は最新結果が届くまでOKを押せない。確定前の仮加工はLIVE PREVIEWにだけ表示し、PNGや編集データには含めない。
+
+加工はピクセレート（初期20px）、ぼかし（初期12px）、黒塗り、白塗り。中央のマスクカードで加工・輪郭補正・表示・X/Y/W/Hを変更し、LIVE PREVIEWでは移動と8方向リサイズを行う。クロップ・回転後も元画像と同じ位置を保つ。文字・吹き出しは画像加工の前面に描画する。重複領域は後から追加した加工を優先する。文字専用コピー・ペーストにはマスクを含めない。ピクセレートとぼかしは匿名化を保証しない。
+
+新規推論はWSLのローカルGPU環境だけで利用する。GitHub Pagesではローカル推論利用不可と表示するが、保存済みマスクの編集・PNG保存は利用できる。モデル重みは自動ダウンロードしない。`sam3.pt`を`~/dev/models/vision/sam3.pt`へ置き、必要に応じて`SAM3_MODEL_PATH`を指定する。モデルの利用条件は[Meta公式SAM License](https://github.com/facebookresearch/sam3/blob/0570b3a5be9c4e694f23d85232fb55f4a6f1f7fc/LICENSE)を確認する。
+
+新規推論が受け付ける元画像はPNG・JPEG・WebP、30MiB／40Mpxまで。GIF・AVIF・アニメーション画像の推論は拒否する。マスク素材はプロジェクト全体で圧縮・展開後それぞれ256MiBまで、推論応答は最大32候補・展開後128MiBまで。省略時はカードに理由を表示する。
+
+```bash
+# uv、Python 3.12、CUDA対応GPUが必要
+uv python install 3.12
+cd backend
+uv sync --locked --extra gpu
+uv run --locked --extra gpu python scripts/check_setup.py
+cd ..
+npm run dev
+# http://localhost:5173
+```
+
+`npm run dev`はNode（5173）とFastAPI（8765）をまとめて起動し、終了時に両方を停止する。両ポートは127.0.0.1限定。モデルは起動時にロードし、推論終了後10分アイドルで解放、次回要求で再ロードする。通常の静的編集だけなら既存の`npm start`を使用する。GPU依存のバージョンと実機検証状況は[検証記録](dev/docs/sam3-gpu-validation.md)を参照する。
+
+UIポートが使用中なら`PORT=5254 npm run dev`のように変更する。APIポートは`SAM3_API_PORT`で変更でき、launcherがUIのOrigin許可先も合わせる。直接APIへPOST／DELETEするCLIは許可済みの`Origin`ヘッダーが必要。
+
+GPUなしの開発・CIでは、`cd backend && uv sync --locked`の後、ルートで`SAM3_MOCK=1 npm run dev`を実行する。モックは実際の画像を認識しない。実機完成の判定には使用しない。
+
+```bash
+npm run check
+npm test
+npm run build
+npm run test:browser
+npm run test:bulk
+npm run test:mask-render
+npm run test:mask-storage
+npm run test:mask-stress
+npm run test:sam3-browser
+cd backend && uv run --locked pytest -m 'not gpu' -q
+# 実GPU限定
+SAM3_RUN_GPU_TESTS=1 uv run --locked --extra gpu pytest -m gpu -v
+cd ..
+# 別ターミナルでnpm run devを起動した状態で、リポジトリのルートから実行
+npm run test:sam3-gpu-lifecycle
+npm run test:sam3-real-browser
+```

@@ -37,7 +37,7 @@ try {
   const rows = page.locator('.image-row'), thumbs = page.locator('.thumbnail');
   const first = () => rows.first();
   assert.equal(await rows.count(), 50); assert.equal(await thumbs.count(), 500);
-  assert.equal(await page.locator('#deck canvas').count(), 50);
+  assert.equal(await page.locator('#deck canvas.preview').count(), 50);
   const thumbWidth = await thumbs.first().locator('img').evaluate(async img => { await img.decode(); return img.naturalWidth; });
   assert.equal(thumbWidth, 320);
   assert.equal(await page.locator('#viewRange').textContent(), '1–50 / 500枚');
@@ -47,14 +47,14 @@ try {
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '5');
   await first().locator('.position-controls [data-field=textOutlineColor]').fill('#ff6600');
   assert.equal(await first().locator('[data-kind=caption] [data-field=textOutlineColor]').inputValue(), '#ff6600');
-  const colored = await first().locator('canvas').evaluate(canvas => {
+  const colored = await first().locator('canvas.preview').evaluate(canvas => {
     const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
     let count = 0; for (let i = 0; i < pixels.length; i += 4) if (pixels[i] === 255 && pixels[i + 1] === 102 && pixels[i + 2] === 0) count++;
     return count;
   });
   assert.ok(colored > 30, 'caption text outline must appear in Canvas pixels');
-  await rows.nth(1).locator('canvas').focus(); await page.evaluate(() => document.fonts.ready);
-  const preview = await first().locator('canvas').evaluate(canvas => canvas.toDataURL());
+  await rows.nth(1).locator('canvas.preview').focus(); await page.evaluate(() => document.fonts.ready);
+  const preview = await first().locator('canvas.preview').evaluate(canvas => canvas.toDataURL());
   const pngPending = page.waitForEvent('download'); await first().locator('[data-action=save-image]').click();
   const png = await pngPending;
   const savedPreview = await page.evaluate(async base64 => {
@@ -66,14 +66,14 @@ try {
   const text = first().locator('[data-kind=caption] textarea');
   await text.fill('ABCD'); await text.press('Home'); await text.press('Delete');
   assert.equal(await text.inputValue(), 'BCD'); assert.equal(await first().locator('.layer-card').count(), 1);
-  await first().locator('canvas').focus(); await page.keyboard.press('Delete');
+  await first().locator('canvas.preview').focus(); await page.keyboard.press('Delete');
   assert.equal(await first().locator('.layer-card').count(), 0);
   await page.keyboard.press('Control+z'); assert.equal(await text.inputValue(), 'BCD');
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '5');
-  await first().locator('[data-action=add-balloon]').click(); await first().locator('canvas').focus(); await page.keyboard.press('Delete');
+  await first().locator('[data-action=add-balloon]').click(); await first().locator('canvas.preview').focus(); await page.keyboard.press('Delete');
   assert.equal(await first().locator('[data-kind=balloon]').count(), 0); await page.keyboard.press('Control+z');
   assert.equal(await first().locator('[data-kind=balloon]').count(), 1);
-  await first().locator('[data-kind=balloon]').click(); await first().locator('canvas').focus(); await page.keyboard.press('Delete');
+  await first().locator('[data-kind=balloon]').click(); await first().locator('canvas.preview').focus(); await page.keyboard.press('Delete');
 
   await rows.nth(49).locator('[data-action=add-female]').click(); await rows.nth(49).locator('textarea').fill('境界の台詞');
   const femaleSummary=rows.nth(49).locator('.layer-summary');
@@ -153,7 +153,7 @@ try {
   await moved.locator('[data-page-destination]').fill('49');await moved.locator('[data-action=move-after]').click();
   assert.equal(await page.locator('#viewRange').textContent(),'1–50 / 500枚');assert.equal(await rows.last().locator('.page-name').textContent(),'050.png');assert.equal(await moved.locator('textarea').inputValue(),'境界の台詞');
   await thumbs.nth(0).click();
-  await first().locator('canvas').focus(); await page.keyboard.press('Delete');
+  await first().locator('canvas.preview').focus(); await page.keyboard.press('Delete');
   await page.keyboard.press('Control+z');
   assert.equal(await first().locator('[data-kind=caption]').count(), 1);
   await zoom(150);

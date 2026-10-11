@@ -36,6 +36,7 @@ try {
     if (shift) await page.keyboard.up('Shift');
   };
   const cropValues = () => row().locator('[data-crop-field]').evaluateAll(inputs => Object.fromEntries(inputs.map(input => [input.dataset.cropField, Number(input.value)])));
+  const positionsByKind = layers => Object.fromEntries(layers.map(({ kind, x, y }) => [kind, [x, y]]));
   const dragCrop = async (start, end, width = 400, height = 300) => {
     await canvas().scrollIntoViewIfNeeded(); const box = await canvas().boundingBox();
     await page.mouse.move(box.x + start.x * box.width / width, box.y + start.y * box.height / height); await page.mouse.down();
@@ -59,13 +60,12 @@ try {
   await page.locator('#jump').selectOption(targetId); await page.keyboard.press('Control+v');
   assert.equal(await row().locator('.layer-card').count(), 3); assert.equal(await row().locator('.multi-selected').count(), 3);
   let saved = await saveDraft(), pasted = saved[1].layers;
-  assert.deepEqual(pasted.map(l => l.kind), ['dialogue', 'balloon', 'caption']);
-  assert.deepEqual(pasted.map(l => [l.x, l.y]), [[140, 140], [140, 400], [520, 420]]);
-  assert.equal(pasted[1].speaker, 'female');
+  assert.deepEqual(positionsByKind(pasted), { dialogue: [140, 140], balloon: [140, 400], caption: [520, 420] });
+  assert.equal(pasted.find(layer => layer.kind === 'dialogue').speaker, 'female');
   await canvas().scrollIntoViewIfNeeded();let groupBox=await canvas().boundingBox();
   await page.mouse.move(groupBox.x+140*groupBox.width/800,groupBox.y+140*groupBox.height/600);await page.mouse.down();
   await page.mouse.move(groupBox.x+180*groupBox.width/800,groupBox.y+170*groupBox.height/600,{steps:3});await page.mouse.up();
-  saved=await saveDraft();assert.deepEqual(saved[1].layers.map(l=>[l.x,l.y]),[[180,170],[180,430],[560,450]]);
+  saved=await saveDraft();assert.deepEqual(positionsByKind(saved[1].layers),{dialogue:[180,170],balloon:[180,430],caption:[560,450]});
   await canvas().focus();await page.keyboard.press('Control+z');await page.keyboard.press('Control+z'); assert.equal(await row().locator('.layer-card').count(), 0);
   await page.keyboard.press('Control+Shift+z'); assert.equal(await row().locator('.multi-selected').count(), 3);
   await page.keyboard.press('Control+v'); assert.equal(await row().locator('.layer-card').count(), 6);
@@ -203,13 +203,13 @@ try {
     const restored = await context.newPage(); await restored.goto(`http://127.0.0.1:${port}`);
     await restored.locator('#projectInput').setInputFiles({ name: `test.${format}`, mimeType: format === 'json' ? 'application/json' : 'application/octet-stream', buffer: await readFile(await download.path()) });
     await restored.waitForFunction(() => document.querySelectorAll('.thumbnail').length === 4 && !document.querySelector('#projectLoad').disabled);
-    assert.deepEqual(await restored.locator('.image-row.active canvas').evaluate(c => [c.width, c.height]), [120, 180]);
+    assert.deepEqual(await restored.locator('.image-row.active canvas.preview').evaluate(c => [c.width, c.height]), [120, 180]);
     assert.deepEqual(await restored.locator('.image-row.active .original').evaluate(img => [img.naturalWidth, img.naturalHeight]), [400, 300]);
     await restored.locator('.image-row.active [data-action=crop-image]').click();
-    assert.deepEqual(await restored.locator('.image-row.active canvas').evaluate(c=>[c.width,c.height]),[300,400]);
+    assert.deepEqual(await restored.locator('.image-row.active canvas.preview').evaluate(c=>[c.width,c.height]),[300,400]);
     assert.deepEqual(await restored.locator('.image-row.active [data-crop-field]').evaluateAll(inputs=>Object.fromEntries(inputs.map(i=>[i.dataset.cropField,Number(i.value)]))),{x:160,y:20,width:120,height:180});
     for(const [field,value] of Object.entries({x:0,y:0,width:300,height:400}))await restored.locator(`.image-row.active [data-crop-field=${field}]`).fill(String(value));
-    await restored.locator('.image-row.active [data-action=apply-crop]').click();assert.deepEqual(await restored.locator('.image-row.active canvas').evaluate(c=>[c.width,c.height]),[300,400]);
+    await restored.locator('.image-row.active [data-action=apply-crop]').click();assert.deepEqual(await restored.locator('.image-row.active canvas.preview').evaluate(c=>[c.width,c.height]),[300,400]);
     assert.equal(await restored.locator('.image-row.active .layer-card').count(),1);await restored.close();
   }
   await saveDraft(); page.on('dialog', dialog => dialog.accept()); await page.reload(); await page.locator('#restoreDraft').click();

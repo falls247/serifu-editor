@@ -119,7 +119,7 @@ try {
   await thumbs.first().click(); await thumbs.nth(51).click();
   assert.equal(await restored.locator('.image-row').last().locator('textarea').inputValue(), '読込済みの台詞～');
   const thumbnailSource = await thumbs.nth(51).locator('img').getAttribute('src');
-  await restored.locator('.image-row').last().locator('canvas').focus(); await restored.keyboard.press('Delete');
+  await restored.locator('.image-row').last().locator('canvas.preview').focus(); await restored.keyboard.press('Delete');
   await restored.waitForFunction(previous => document.querySelectorAll('.thumbnail img')[51].src !== previous, thumbnailSource);
   assert.equal(await lightPixels(thumbs.nth(51).locator('img')), 0, 'deleting the balloon must also remove it from the thumbnail');
   const deletedSource = await thumbs.nth(51).locator('img').getAttribute('src');
