@@ -16,8 +16,8 @@ try {
   const errors=[];page.on('pageerror',error=>errors.push(error.message));
   await page.goto('http://127.0.0.1:'+port);
   const result=await page.evaluate(async()=>{
-    const {newLayer,draw,clearGlyphCache}=await import('./renderer.js');
-    const {paintBalloon}=await import('./balloons.js');
+    const {newLayer,draw,clearGlyphCache}=await import('./src/renderer.js');
+    const {paintBalloon}=await import('./src/balloons.js');
     const base=document.createElement('canvas');base.width=720;base.height=700;
     const bctx=base.getContext('2d');bctx.fillStyle='#efeae0';bctx.fillRect(0,0,720,700);
     const canvas=document.createElement('canvas');canvas.width=720;canvas.height=700;const ctx=canvas.getContext('2d');

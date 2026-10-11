@@ -64,7 +64,7 @@ try {
     assert.equal(output.files.filter(name => name.endsWith('.serifu'))[0], '作業フォルダ_20261010_133502_007.serifu');
     assert.equal(output.files.filter(name => name.endsWith('.png')).length, button === 'save' ? 2 : 1);
     assert.equal(await page.evaluate(async () => {
-      const { readProject } = await import('./project-io.js'), { draw } = await import('./renderer.js');
+      const { readProject } = await import('./src/project-io.js'), { draw } = await import('./src/renderer.js');
       const files = window.outputs.at(-1).files, projectName = Object.keys(files).find(name => name.endsWith('.serifu'));
       const data = await readProject(files[projectName]), original = await createImageBitmap(data.pages[0].blob);
       const actual = await createImageBitmap(files[Object.keys(files).find(name => name.endsWith('.png'))]);
@@ -92,7 +92,7 @@ try {
   await imported.locator('.thumbnail').nth(1).click(); await imported.locator('.thumbnail').first().click();
   assert.equal(await imported.locator('[data-kind=balloon] textarea').inputValue(), '吹き出しの台詞～');
   const fixture = await page.evaluate(async () => {
-    const { newLayer } = await import('./renderer.js'), { projectBlob } = await import('./project-io.js');
+    const { newLayer } = await import('./src/renderer.js'), { projectBlob } = await import('./src/project-io.js');
     const file = await (await window.source.values().next()).value.getFile();
     const layer = { ...newLayer('balloon', 400, 300), x: 200, y: 150, w: 180, h: 240, text: '読込済みの台詞～', speaker: 'female', size: 24, shape: 'distorted-rect', distortion: 70 };
     const pages = Array.from({ length: 52 }, (_, i) => ({ name: `${i}.png`, file, img: { width: 400, height: 300 }, layers: i === 0 || i === 51 ? [{ ...layer, id: crypto.randomUUID() }] : [], done: i === 51, edited: false }));

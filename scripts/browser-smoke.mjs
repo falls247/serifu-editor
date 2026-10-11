@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { FONT_CATALOG } from '../fonts.js';
+import { FONT_CATALOG } from '../src/fonts.js';
 const { chromium } = createRequire(import.meta.url)('playwright');
 const port = 5187;
 const server = spawn(process.execPath, ['server.mjs'], { env: { ...process.env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -169,7 +169,7 @@ try {
   page.once('dialog',dialog=>dialog.accept());await portrait.locator('[data-action=remove]').click();
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3);
   const inkCoverage=await page.evaluate(async()=>{
-    const {draw,newLayer}=await import('./renderer.js');await document.fonts.load('900 80px MangaBold');
+    const {draw,newLayer}=await import('./src/renderer.js');await document.fonts.load('900 80px MangaBold');
     const original=document.createElement('canvas');original.width=320;original.height=240;original.getContext('2d').fillStyle='#ffffff';original.getContext('2d').fillRect(0,0,320,240);
     const canvas=document.createElement('canvas');canvas.width=320;canvas.height=240;const ctx=canvas.getContext('2d');
     const results=[];
@@ -277,10 +277,10 @@ try {
   await selectCard(first,0);
   const expectedPreview=await third.locator('canvas').evaluate(canvas=>canvas.toDataURL());
   const repeated=await page.evaluate(async p=>{
-    const {draw}=await import('./renderer.js'),img=new Image();img.src=p.src;await img.decode();
+    const {draw}=await import('./src/renderer.js'),img=new Image();img.src=p.src;await img.decode();
     const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;
     draw(canvas.getContext('2d'),img,p.layers);const first=canvas.toDataURL();draw(canvas.getContext('2d'),img,p.layers);const second=canvas.toDataURL();
-    const {normalizeLayer}=await import('./model.js');draw(canvas.getContext('2d'),img,p.layers.map(l=>normalizeLayer(l,3)));return [first,second,canvas.toDataURL()];
+    const {normalizeLayer}=await import('./src/model.js');draw(canvas.getContext('2d'),img,p.layers.map(l=>normalizeLayer(l,3)));return [first,second,canvas.toDataURL()];
   },project.pages[2]);
   assert.equal(repeated[0],repeated[1],'brush texture must stay fixed on repaint');
   assert.equal(repeated[0],expectedPreview,'export must match unselected live preview, including directional blur and dry brush');
@@ -288,7 +288,7 @@ try {
   await (await selectCard(second,0)).locator('textarea').first().focus();
   const thickPreview=await first.locator('canvas').evaluate(canvas=>canvas.toDataURL());
   const thickExport=await page.evaluate(async p=>{
-    const {draw}=await import('./renderer.js'),img=new Image();img.src=p.src;await img.decode();
+    const {draw}=await import('./src/renderer.js'),img=new Image();img.src=p.src;await img.decode();
     const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;draw(canvas.getContext('2d'),img,p.layers);return canvas.toDataURL();
   },project.pages[0]);assert.equal(thickExport,thickPreview,'dialogue and SFX thickness must match in preview and PNG export');
   await (await selectCard(first,2)).locator('textarea').focus();
@@ -298,7 +298,7 @@ try {
   const addedFonts=['chikara','gekifude','pop','angular','rock','hand','round','flowing','decorative','daruma','potta','yomogi','kurenai','syuku','train','dot','stick'];
   for(const key of addedFonts){
     await fontSelect.selectOption(key);await page.evaluate(()=>document.fonts.ready);
-    assert.equal(await page.evaluate(async key=>{const {fontDescription}=await import('./fonts.js');return document.fonts.check(fontDescription({font:key,kind:'sfx'}).load);},key),true,`${key} must load its bundled Japanese font`);
+    assert.equal(await page.evaluate(async key=>{const {fontDescription}=await import('./src/fonts.js');return document.fonts.check(fontDescription({font:key,kind:'sfx'}).load);},key),true,`${key} must load its bundled Japanese font`);
     fontPictures.push(await first.locator('canvas').evaluate(canvas=>canvas.toDataURL()));
   }
   assert.equal(new Set(fontPictures).size,addedFonts.length,'added font choices must produce distinct letter shapes');
@@ -357,10 +357,10 @@ try {
   await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済'));
   await (await selectCard(first,0)).locator('textarea').first().fill('自動保存テスト');
   await page.clock.fastForward(121000);
-  await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='自動保存テスト';});
+  await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='自動保存テスト';});
   await page.locator('#autosaveMinutes').fill('0.1');await page.locator('#autosaveMinutes').blur();
   await (await selectCard(first,0)).locator('textarea').first().fill('短周期の保存');await page.clock.fastForward(6000);
-  await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='短周期の保存';});
+  await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='短周期の保存';});
   await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済')&&!document.querySelector('#draftStatus').textContent.includes('変更あり'));
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');
   assert.equal(await page.locator('.image-row').count(),0);
@@ -376,9 +376,9 @@ try {
   assert.deepEqual(await rows.nth(6).locator('textarea').evaluateAll(inputs=>inputs.slice(1).map(input=>input.value)),savedBatchTexts,'draft recovery keeps batch copies independent of later source edits');
   assert.equal(await rows.nth(6).locator('[data-action=paste-all]').isDisabled(),true,'reloading starts with an empty clipboard');
   await page.locator('#autosaveEnabled').uncheck();
-  const savedAt=await page.evaluate(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta()).savedAt;});
+  const savedAt=await page.evaluate(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta()).savedAt;});
   await (await selectCard(page.locator('.image-row').first(),0)).locator('textarea').first().fill('自動保存OFF');await page.clock.fastForward(120000);
-  assert.equal(await page.evaluate(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta()).savedAt;}),savedAt,'disabled autosave must not write');
+  assert.equal(await page.evaluate(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta()).savedAt;}),savedAt,'disabled autosave must not write');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => window.scrollTo(0, 0)); await page.screenshot({ path: 'artifacts/mobile.png' });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false, 'mobile layout must not overflow horizontally');

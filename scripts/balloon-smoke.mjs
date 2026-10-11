@@ -90,7 +90,7 @@ try {
   await page.mouse.click(rect.x+rect.width*.3,rect.y+rect.height*180/750);
   assert.equal(await source.locator('.layer-card.selected').getAttribute('data-kind'),'dialogue','hit testing must select dialogue above an overlapping balloon');
   const pixels=await page.evaluate(async()=>{
-    const {newLayer,draw}=await import('./renderer.js');
+    const {newLayer,draw}=await import('./src/renderer.js');
     const image=document.createElement('canvas');image.width=100;image.height=100;image.getContext('2d').fillStyle='#0000c8';image.getContext('2d').fillRect(0,0,100,100);
     const canvas=document.createElement('canvas');canvas.width=100;canvas.height=100;const context=canvas.getContext('2d');
     const b={...newLayer('balloon',100,100),x:50,y:50,w:90,h:90,borderWidth:0};
@@ -156,9 +156,9 @@ try {
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===3&&window.outputs[2].files['serifu-project.json']&&!document.querySelector('#projectLoad').disabled);
   const filtered=await page.evaluate(()=>window.outputs[2].files['serifu-project.json']);assert.deepEqual(filtered.pages.map(page=>page.name),['01-source.png','03-portrait.png']);
   await source.locator('[data-action=cut-all]').click();assert.equal(await source.locator('.layer-card').count(),0);
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');const meta=await getDraftMeta();return meta?.version===9&&meta.pages[0].edited&&meta.pages[0].layers.length===0;});
+  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');const meta=await getDraftMeta();return meta?.version===9&&meta.pages[0].edited&&meta.pages[0].layers.length===0;});
   await source.locator('[data-action=undo]').click();assert.equal(await source.locator('[data-kind=balloon]').count(),1);
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta())?.pages[0].layers.some(layer=>layer.kind==='balloon');});
+  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.some(layer=>layer.kind==='balloon');});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await source.locator('[data-kind=balloon] [data-field=transparency]').inputValue(),'45');assert.equal(await source.locator('[data-kind=balloon] [data-field=tail]').isChecked(),true);

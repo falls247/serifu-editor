@@ -16,7 +16,7 @@ try {
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
     await page.goto(`http://127.0.0.1:${port}`);await page.evaluate(()=>document.fonts.ready);
     let fixture=fixtures.get(kind);if(!fixture){fixture=await page.evaluate(async({count,width,height,kind})=>{
-      const {newLayer}=await import('./renderer.js');
+      const {newLayer}=await import('./src/renderer.js');
       const c=document.createElement('canvas');c.width=width;c.height=height;const ctx=c.getContext('2d');
       const g=ctx.createLinearGradient(0,0,width,height);g.addColorStop(0,'#153852');g.addColorStop(.5,'#bd8668');g.addColorStop(1,'#e8d7ad');ctx.fillStyle=g;ctx.fillRect(0,0,width,height);
       for(let i=0;i<80;i++){ctx.fillStyle=`hsla(${i*37%360},45%,45%,.4)`;ctx.fillRect((i*139)%width,(i*197)%height,100+i*3,60+i*2);}

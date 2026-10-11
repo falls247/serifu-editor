@@ -40,7 +40,7 @@ try {
   }
   await source.locator('[data-action=add-male]').click();assert.equal(await field('textOffsetX').isVisible(),false);assert.equal(await field('padding').isVisible(),false);await source.locator('[data-action=undo]').click();
   const pixels=await page.evaluate(async()=>{
-    const {newLayer,draw,textGlyphs}=await import('./renderer.js'),{captionLayout}=await import('./captions.js');
+    const {newLayer,draw,textGlyphs}=await import('./src/renderer.js'),{captionLayout}=await import('./src/captions.js');
     const base=document.createElement('canvas');base.width=base.height=600;const bc=base.getContext('2d');bc.fillStyle='#ffffff';bc.fillRect(0,0,600,600);
     const canvas=document.createElement('canvas');canvas.width=canvas.height=600;const ctx=canvas.getContext('2d');
     await document.fonts.load('600 64px MangaSans');await document.fonts.ready;
@@ -62,7 +62,7 @@ try {
     const offscreenBytes=offscreen.getContext('2d').getImageData(0,0,600,600).data;
     let offscreenDiff=0;for(let i=0;i<html.length;i++)if(html[i]!==offscreenBytes[i])offscreenDiff++;
     const blob=await new Promise(resolve=>base.toBlob(resolve,'image/png'));
-    const worker=new Worker(new URL('./image-worker.js',location.href),{type:'module'});
+    const worker=new Worker(new URL('./src/image-worker.js',location.href),{type:'module'});
     const png=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Worker timed out')),15000);worker.onmessage=({data})=>{clearTimeout(timer);data.error?reject(new Error(data.error)):resolve(data.value);};worker.onerror=reject;worker.postMessage({operationId:'positions',jobId:'positions',kind:'render-png',payload:{blob,width:600,height:600,layers:workerLayers}});}).finally(()=>worker.terminate());
     const bitmap=await createImageBitmap(png);offscreen.getContext('2d').drawImage(bitmap,0,0);bitmap.close();
     draw(ctx,base,workerLayers);const preview=ctx.getImageData(0,0,600,600).data,exported=offscreen.getContext('2d').getImageData(0,0,600,600).data;
@@ -83,7 +83,7 @@ try {
   },[(await readFile(await png.path())).toString('base64'),preview]);assert.equal(pngDiff.channels,0,`saved PNG must match the preview pixels: ${JSON.stringify(pngDiff)}`);
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);saving=page.waitForEvent('download');await page.click('#projectSave');const json=await saving,projectBytes=await readFile(await json.path()),project=JSON.parse(projectBytes.toString());
   for(const layer of project.pages[0].layers){assert.equal(layer.textOffsetX,-25.5);assert.equal(layer.textOffsetY,33.5);assert.equal(layer.padding,layer.kind==='caption'?60.5:18.5);}
-  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25.5&&layer.textOffsetY===33.5);});
+  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25.5&&layer.textOffsetY===33.5);});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   for(const kind of ['balloon','caption']){const card=source.locator(`[data-kind=${kind}]`);assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-25.5');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'33.5');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'60.5':'18.5');}
   await target.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await source.locator('canvas').evaluate(canvas=>canvas.toDataURL()),preview);

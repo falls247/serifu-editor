@@ -19,7 +19,7 @@ try {
   await page.selectOption('#projectFormat','json');
   assert.equal(await page.locator('#pageSize').inputValue(), '50');
   const fixture = await page.evaluate(async () => {
-    const { newLayer } = await import('./renderer.js');
+    const { newLayer } = await import('./src/renderer.js');
     const canvas = document.createElement('canvas'); canvas.width = 240; canvas.height = 180;
     const ctx = canvas.getContext('2d'); ctx.fillStyle = '#303060'; ctx.fillRect(0, 0, 240, 180);
     const src = canvas.toDataURL();

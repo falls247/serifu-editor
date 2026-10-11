@@ -40,7 +40,7 @@ try{
   await position.locator('[data-numeric-field=outline]').focus();await position.locator('[data-numeric-field=outline]').press('ArrowRight');assert.equal(await number('outline').inputValue(),'7');
   await page.evaluate(()=>document.fonts.ready);
   const rendering=await page.evaluate(async()=>{
-    const {newLayer,draw,textGlyphs,clearGlyphCache}=await import('./renderer.js'),{fontDescription,glyphFontDescription,fontLoadQueries}=await import('./fonts.js'),{captionLayout}=await import('./captions.js');
+    const {newLayer,draw,textGlyphs,clearGlyphCache}=await import('./src/renderer.js'),{fontDescription,glyphFontDescription,fontLoadQueries}=await import('./src/fonts.js'),{captionLayout}=await import('./src/captions.js');
     const ctx=document.createElement('canvas').getContext('2d');const missing=[],hearts=[];
     for(const font of ['chikara','hand','brush','comic','round']){
       await Promise.all(fontLoadQueries({font}).map(query=>document.fonts.load(query)));clearGlyphCache();
@@ -82,7 +82,7 @@ try{
   await page.evaluate(()=>document.querySelector('canvas.preview').focus());await page.keyboard.press('Escape');
   downloading=page.waitForEvent('download');await row.locator('[data-action=save-image]').click();download=await downloading;const png=(await readFile(await download.path())).toString('base64');
   const parity=await page.evaluate(async({project,png})=>{
-    const {draw}=await import('./renderer.js'),{ImagePool}=await import('./bulk-pool.js');const img=await createImageBitmap(await (await fetch(project.pages[0].src)).blob()),canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;draw(canvas.getContext('2d'),img,project.pages[0].layers);
+    const {draw}=await import('./src/renderer.js'),{ImagePool}=await import('./src/bulk-pool.js');const img=await createImageBitmap(await (await fetch(project.pages[0].src)).blob()),canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;draw(canvas.getContext('2d'),img,project.pages[0].layers);
     const decode=async(blob)=>{const bitmap=await createImageBitmap(blob),c=document.createElement('canvas');c.width=800;c.height=600;c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();return c.getContext('2d').getImageData(0,0,800,600).data;};
     const expected=canvas.getContext('2d').getImageData(0,0,800,600).data,actual=await decode(await (await fetch(`data:image/png;base64,${png}`)).blob());
     const pool=new ImagePool({size:1});const blob=await pool.run('render-png',{blob:await (await fetch(project.pages[0].src)).blob(),width:800,height:600,layers:project.pages[0].layers},undefined,()=>{throw new Error('Worker unavailable');});const worker=await decode(blob);pool.close();img.close();
