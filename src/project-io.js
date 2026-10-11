@@ -32,12 +32,12 @@ export async function* projectParts(pages,preferences,{format='serifu',task,sour
     const folder=typeof sourceFolderName==='string'&&sourceFolderName?`,"sourceFolderName":${await projectJSON('stringify',sourceFolderName,{signal})}`:'';
     yield `{"version":${PROJECT_VERSION},"preferences":${await projectJSON('stringify',preferences,{signal})}${folder},"pages":[`;
     for(let i=0;i<pages.length;i++){checkAbort(signal);const p=pages[i],src=p.src?.startsWith('data:')?p.src:await blobDataURL(await originalBlob(p),signal);
-      yield (i?',':'')+await projectJSON('stringify',{name:p.name,src,layers:p.layers,done:p.done===true,edited:p.edited===true},{signal});task?.result(p.name);await yieldToBrowser();}
+      yield (i?',':'')+await projectJSON('stringify',{name:p.name,src,layers:p.layers,done:p.done===true,edited:p.edited===true,...(p.imageEdit?{imageEdit:p.imageEdit}:{})},{signal});task?.result(p.name);await yieldToBrowser();}
     yield ']}';return;
   }
   const assets=[],blobs=[],records=[];
   for(const p of pages){checkAbort(signal);const blob=await originalBlob(p);if(!mimePattern.test(blob.type))throw new Error(`未対応の原画像形式: ${p.name}`);
-    records.push({name:p.name,assetIndex:assets.length,layers:p.layers,done:p.done===true,edited:p.edited===true});assets.push({size:blob.size,mimeType:blob.type,width:p.img.width,height:p.img.height});blobs.push(blob);if(blobs.length%20===0)await yieldToBrowser();}
+    records.push({name:p.name,assetIndex:assets.length,layers:p.layers,done:p.done===true,edited:p.edited===true,...(p.imageEdit?{imageEdit:p.imageEdit}:{})});assets.push({size:blob.size,mimeType:blob.type,width:p.img.width,height:p.img.height});blobs.push(blob);if(blobs.length%20===0)await yieldToBrowser();}
   const manifestData={containerVersion:1,projectVersion:PROJECT_VERSION,preferences,pages:records,assets};
   if(typeof sourceFolderName==='string'&&sourceFolderName)manifestData.sourceFolderName=sourceFolderName;
   const manifest=new TextEncoder().encode(await projectJSON('stringify',manifestData,{signal}));
@@ -54,7 +54,7 @@ function validatePages(data,container=false){
 }
 export async function readProject(file,{signal}={}){
   checkAbort(signal);const head=new Uint8Array(await file.slice(0,12).arrayBuffer());
-  if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);return {version:data.version,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages:data.pages.map(({name,src,layers,done,edited})=>({name,src,layers,done,edited}))};}
+  if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);return {version:data.version,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages:data.pages.map(({name,src,layers,done,edited,imageEdit})=>({name,src,layers,done,edited,...(imageEdit?{imageEdit}:{})}))};}
   if(head.length!==12||!MAGIC.every((b,i)=>head[i]===b))throw new Error('未対応の高速編集データ');
   const length=new DataView(head.buffer).getUint32(8,true);if(!length||length>MANIFEST_LIMIT||12+length>file.size)throw new Error('manifest長が不正');
   const data=await projectJSON('parse',file.slice(12,12+length),{signal});
@@ -63,7 +63,7 @@ export async function readProject(file,{signal}={}){
   for(const a of data.assets){checkAbort(signal);if(!a||!Number.isSafeInteger(a.size)||a.size<=0||!mimePattern.test(a.mimeType)||![a.width,a.height].every(n=>Number.isSafeInteger(n)&&n>0)||!Number.isSafeInteger(offset+a.size)||offset+a.size>file.size)throw new Error('asset範囲または画像形式が不正');blobs.push(file.slice(offset,offset+a.size,a.mimeType));offset+=a.size;}
   if(offset!==file.size)throw new Error('ファイル全長がasset総和と一致しない');
   for(const p of data.pages){if(!Number.isSafeInteger(p.assetIndex)||p.assetIndex<0||p.assetIndex>=blobs.length)throw new Error('画像参照が範囲外');}
-  return {version:data.projectVersion,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages:data.pages.map(p=>({name:p.name,layers:p.layers,done:p.done,edited:p.edited,blob:blobs[p.assetIndex],expectedSize:data.assets[p.assetIndex]}))};
+  return {version:data.projectVersion,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages:data.pages.map(p=>({name:p.name,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),blob:blobs[p.assetIndex],expectedSize:data.assets[p.assetIndex]}))};
 }
 export async function writeParts(directory,name,parts,signal,onWrite=()=>{},onClosing=()=>{}){
   checkAbort(signal);const file=await directory.getFileHandle(name,{create:true});checkAbort(signal);const writer=await file.createWritable();let closed=false;

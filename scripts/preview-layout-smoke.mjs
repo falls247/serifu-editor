@@ -25,15 +25,16 @@ try{
     const rows=await page.locator('.image-row').evaluateAll(rows=>rows.map(row=>{
       const rect=selector=>{const box=row.querySelector(selector).getBoundingClientRect();return {x:box.x,y:box.y,width:box.width,height:box.height};};
       const img=row.querySelector('.original'),title=row.querySelector('.original-toolbar .preview-label');
-      return {name:row.querySelector('.page-name').textContent,title:title?.textContent,original:rect('.original'),preview:rect('canvas.preview'),originalFrame:rect('.original-frame'),previewFrame:rect('.preview-frame'),aspect:img.naturalWidth/img.naturalHeight};
+      return {name:row.querySelector('.page-name').textContent,title:title?.textContent,original:rect('.original'),preview:rect('canvas.preview'),originalFrame:rect('.original-frame'),previewFrame:rect('.preview-frame'),aspect:img.naturalWidth/img.naturalHeight,maxHeight:parseFloat(getComputedStyle(row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))};
     }));
     results.push({width,sidebar,rows});await mkdir('artifacts',{recursive:true});await writeFile('artifacts/preview-layout-results.json',JSON.stringify(results,null,2));
     for(const row of rows){
       assert.equal(row.title,'ORIGINAL');
-      assert.ok(Math.abs(row.original.height-row.preview.height)<1,`paired image heights at ${width}px: ${JSON.stringify(row)}`);
-      assert.ok(Math.abs(row.originalFrame.height-row.previewFrame.height)<1);
+      const expected=Math.min(row.previewFrame.width-4,row.maxHeight*row.aspect);
+      assert.ok(Math.abs(row.preview.width-expected)<2,`preview must use its own column at ${width}px: ${JSON.stringify(row)}`);
+      assert.ok(row.preview.width>=row.original.width-1,'preview must not shrink to the narrower ORIGINAL column');
       for(const image of [row.original,row.preview])assert.ok(Math.abs(image.width/image.height-row.aspect)<.02,'image aspect ratio must remain intact');
-      if(width>850){assert.ok(Math.abs(row.original.y-row.preview.y)<1,'side-by-side images must start at the same height');assert.ok(Math.abs(row.originalFrame.y-row.previewFrame.y)<1);}
+      if(width>850)assert.ok(Math.abs(row.originalFrame.y-row.previewFrame.y)<1,'side-by-side frames must start at the same height');
     }
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
   };
@@ -41,6 +42,6 @@ try{
   await page.setViewportSize({width:1680,height:1100});await page.click('#toggleThumbnails');await checkLayout(1680,false);
   await page.locator('.image-row').first().scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/preview-layout-desktop.png'});
   await checkLayout(420,false);await page.locator('.image-row').first().scrollIntoViewIfNeeded();await page.screenshot({path:'artifacts/preview-layout-mobile.png'});
-  assert.deepEqual(errors,[]);console.log(`Preview layout browser smoke passed: ${results.length*3} landscape/portrait/panorama layouts, ORIGINAL titles, matching image/frame heights and desktop top edges, preserved aspect ratios, sidebar resize and mobile without horizontal overflow.`);
+  assert.deepEqual(errors,[]);console.log(`Preview layout browser smoke passed: ${results.length*3} layouts, preview fills its own column, ORIGINAL titles, aligned desktop frames, preserved aspect ratios, sidebar resize and mobile without horizontal overflow.`);
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/preview-layout-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}

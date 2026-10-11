@@ -1,5 +1,5 @@
-export const RENDER_VERSION=8;
-export function exportKey(page,fontVersion=0){return JSON.stringify([page.id,page.img.width,page.img.height,RENDER_VERSION,fontVersion,page.layers.map(({id,presetId,...rendered})=>rendered)]);}
+export const RENDER_VERSION=9;
+export function exportKey(page,fontVersion=0){return JSON.stringify([page.id,page.img.width,page.img.height,RENDER_VERSION,fontVersion,page.imageEdit??null,page.layers.map(({id,presetId,...rendered})=>rendered)]);}
 export class ExportCache {
   constructor(limit=128*1024**2){this.limit=limit;this.bytes=0;this.entries=new Map();this.hits=0;this.misses=0;}
   get(key){const entry=this.entries.get(key);if(!entry){this.misses++;return null;}this.entries.delete(key);this.entries.set(key,entry);this.hits++;return entry.blob;}

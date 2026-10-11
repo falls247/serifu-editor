@@ -4,6 +4,7 @@ import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder, balloonC
 import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
+import { imageMatrix } from './image-edit.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -222,10 +223,13 @@ function paintText(ctx, l) {
   }
 }
 
-export function draw(ctx, img, layers, selected = null, scale = 1, selectionScale = scale) {
+export function draw(ctx, img, layers, selected = null, scale = 1, selectionScale = scale, imageEdit = null, originalSize = null) {
   ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.scale(scale, scale); ctx.drawImage(img, 0, 0);
+  ctx.scale(scale, scale);
+  if (imageEdit) ctx.transform(...imageMatrix(originalSize?.width ?? img.width, originalSize?.height ?? img.height, imageEdit));
+  if (originalSize) ctx.drawImage(img, 0, 0, originalSize.width, originalSize.height);
+  else ctx.drawImage(img, 0, 0);
   for (const l of paintOrder(layers)) {
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon'){
@@ -236,11 +240,12 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
     else {ornament(ctx, l); paintText(ctx, l);}
     ctx.restore();
   }
-  const l=layers.find(layer=>layer.id===selected);
-  if(l){
+  const ids = Array.isArray(selected) ? selected : [selected];
+  for(const l of layers.filter(layer => ids.includes(layer.id))){
       ctx.save();ctx.translate(l.x,l.y);ctx.rotate(l.rotation*Math.PI/180);
       ctx.strokeStyle = '#b2dd78'; ctx.fillStyle = '#c8ee91'; ctx.lineWidth = 1.5 / selectionScale;
       ctx.setLineDash([5 / selectionScale, 4 / selectionScale]); ctx.strokeRect(-l.w / 2, -l.h / 2, l.w, l.h); ctx.setLineDash([]);
+      if (l.id !== ids[0]) { ctx.restore(); continue; }
       ctx.beginPath(); ctx.moveTo(0, -l.h / 2); ctx.lineTo(0, -l.h / 2 - 24 / selectionScale); ctx.stroke();
       ctx.fillRect(l.w / 2 - 5 / selectionScale, l.h / 2 - 5 / selectionScale, 10 / selectionScale, 10 / selectionScale);
       ctx.beginPath(); ctx.arc(0, -l.h / 2 - 24 / selectionScale, 5 / selectionScale, 0, Math.PI * 2); ctx.fill();

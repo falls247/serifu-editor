@@ -4,7 +4,7 @@ import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } 
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
-export const PROJECT_VERSION=9;
+export const PROJECT_VERSION=10;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
@@ -84,8 +84,31 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   };
 }
 
+export const hasEdits = page => page.layers.length > 0 || !!page.imageEdit;
+
+export function selectedLayers(page) {
+  const ids = new Set(page.selectedIds ?? [page.selectedId]);
+  return page.layers.filter(layer => ids.has(layer.id));
+}
+
+export function setSelection(page, ids, primary = ids[0]) {
+  const valid = new Set(page.layers.map(layer => layer.id));
+  page.selectedIds = [...new Set(ids)].filter(id => valid.has(id));
+  page.selectedId = page.selectedIds.includes(primary) ? primary : page.selectedIds[0] ?? null;
+}
+
+export function syncSelection(page) {
+  const ids = page.selectedId && page.selectedIds?.includes(page.selectedId) ? page.selectedIds : [page.selectedId];
+  setSelection(page, ids, page.selectedId);
+}
+
+function historyState(page) {
+  return JSON.stringify({ layers: page.layers, done: page.done, imageEdit: page.imageEdit ?? null,
+    selectedId: page.selectedId, selectedIds: page.selectedIds ?? [page.selectedId] });
+}
+
 export function checkpoint(page) {
-  page.undo.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.edited===true }));
+  page.undo.push(historyState(page));
   if (page.undo.length > 100) page.undo.shift();
   page.redo = []; page.done = false;page.edited=true;
 }
@@ -94,10 +117,10 @@ export function restore(page, direction) {
   const from = direction === 'undo' ? page.undo : page.redo;
   const to = direction === 'undo' ? page.redo : page.undo;
   if (!from.length) return false;
-  to.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.edited===true }));
+  to.push(historyState(page));
   const state = JSON.parse(from.pop());
-  page.layers = state.layers; page.done = state.done;page.edited=state.edited===true;
-  page.selectedId = page.layers.some(l => l.id === page.selectedId) ? page.selectedId : page.layers[0]?.id || null;
+  page.layers = state.layers; page.done = state.done; page.imageEdit = state.imageEdit ?? null; page.edited = hasEdits(page);
+  setSelection(page, state.selectedIds ?? [state.selectedId ?? page.layers[0]?.id], state.selectedId);
   return true;
 }
 
@@ -149,11 +172,15 @@ export function copyLayers(layers, width, height) {
   return { layers:structuredClone(layers), width, height };
 }
 
+export function pasteSelectedLayers(clipboard, width, height, offset = 20) {
+  return clipboard.layers.map(layer => pasteSelection({ layer, width: clipboard.width, height: clipboard.height }, width, height, offset));
+}
+
 export function cutLayers(source, width, height) {
   if (!source?.layers.length) return null;
   const clipboard=copyLayers(source.layers,width,height);
   checkpoint(source);
-  source.layers=[];source.selectedId=null;
+  source.layers=[];setSelection(source, []);source.edited=hasEdits(source);
   return clipboard;
 }
 

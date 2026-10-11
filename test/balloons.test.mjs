@@ -68,6 +68,7 @@ test('edited status follows visual edits and undo, while a confirmed empty image
   checkpoint(p);p.layers.push(newLayer('balloon',1000,750));assert.equal(p.edited,true);
   restore(p,'undo');assert.equal(p.layers.length,0);assert.equal(p.edited,false);assert.equal(p.done,true);
   restore(p,'redo');assert.equal(p.layers.length,1);assert.equal(p.edited,true);
-  cutLayers(p,1000,750);assert.equal(p.layers.length,0);assert.equal(p.edited,true,'removing authored overlays is also an edit');
+  cutLayers(p,1000,750);assert.equal(p.layers.length,0);assert.equal(p.edited,false,'an image without authored overlays is unedited');
   restore(p,'undo');assert.equal(p.layers.length,1);assert.equal(p.edited,true);
+  restore(p,'redo');assert.equal(p.layers.length,0);assert.equal(p.edited,false);
 });

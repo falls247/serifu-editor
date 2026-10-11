@@ -2,7 +2,7 @@ import { copyFile, mkdir, rm, writeFile, cp, access } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
 const output = new URL('_site/', root);
-const assets = ['index.html', 'favicon-32.png', 'apple-touch-icon.png', 'src/app.js', 'src/export.js', 'src/renderer.js','src/glyph-layout.js','src/brush-stroke.js', 'src/balloons.js', 'src/captions.js', 'src/typography.js', 'src/ink.js', 'src/fonts.js', 'src/model.js', 'src/presets.js', 'src/storage.js','src/bulk-task.js','src/bulk-pool.js','src/image-worker.js','src/image-metadata.js','src/export-cache.js','src/project-io.js','src/project-filenames.js','src/project-worker.js','src/zip.js', 'style.css'];
+const assets = ['index.html', 'favicon-32.png', 'apple-touch-icon.png', 'src/app.js', 'src/export.js', 'src/renderer.js','src/glyph-layout.js','src/brush-stroke.js', 'src/balloons.js', 'src/captions.js', 'src/typography.js', 'src/ink.js', 'src/fonts.js', 'src/model.js','src/image-edit.js','src/preview-modal.js', 'src/presets.js', 'src/storage.js','src/bulk-task.js','src/bulk-pool.js','src/image-worker.js','src/image-metadata.js','src/export-cache.js','src/project-io.js','src/project-filenames.js','src/project-worker.js','src/zip.js', 'style.css'];
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });

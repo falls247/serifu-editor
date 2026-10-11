@@ -227,7 +227,8 @@ try {
   const secondLayerCount=await second.locator('.layer-card').count();await second.locator('[data-action=add-female]').click();
   assert.equal(await second.locator('.layer-card').count(),secondLayerCount+1,'the first click on another page must add a layer without moving the button during focus');
   assert.equal(await second.locator('.position-controls [data-field=size]').inputValue(),'66');
-  assert.equal(await second.locator('.layer-card').last().locator('[data-preset-select]').inputValue(),dialoguePreset);
+  assert.equal(await second.locator('.layer-card').last().getAttribute('data-speaker'),'female','the add-female button must override the male default preset speaker');
+  assert.equal(await second.locator('.layer-card').last().locator('[data-preset-select]').inputValue(),'','overriding the saved speaker makes the new dialogue custom');
   const effectCard=await selectCard(first,2);await effectCard.locator('textarea').focus();
   await first.locator('.position-controls [data-field=thickness]').fill('3.5');
   await effectCard.locator('.placement-settings summary').click();await effectCard.locator('.effect-details:not(.placement-settings) summary').click();

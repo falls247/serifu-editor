@@ -28,16 +28,16 @@ try{
   const numericPairs=await row.evaluate(row=>[...row.querySelectorAll('input[data-field][type=number],input[data-field][type=range]')].map(input=>({field:input.dataset.field,paired:!!input.closest('.numeric-setting')?.querySelector(`[data-numeric-field="${input.dataset.field}"]`)})));
   assert.ok(numericPairs.length>30);assert.ok(numericPairs.every(pair=>pair.paired),'every layer and position numeric field must have the other input mode');
   await number('kerningStrength').fill('62');assert.equal(await slider('kerningStrength').inputValue(),'62');
-  await number('kerningStrength').press('ArrowUp');assert.equal(await number('kerningStrength').inputValue(),'63');assert.equal(await slider('kerningStrength').inputValue(),'63');
+  await number('kerningStrength').press('ArrowUp');assert.equal(await number('kerningStrength').inputValue(),'62.1');assert.equal(await slider('kerningStrength').inputValue(),'62.1');
   const track=await slider('kerningStrength').boundingBox();await page.mouse.move(track.x+track.width*.65,track.y+track.height/2);await page.mouse.down();await page.mouse.move(track.x+track.width*.81,track.y+track.height/2,{steps:8});await page.mouse.up();
   const dragged=await slider('kerningStrength').inputValue();assert.ok(Number(dragged)>75);assert.equal(await number('kerningStrength').inputValue(),dragged);
-  await slider('kerningStrength').press('ArrowLeft');assert.equal(await number('kerningStrength').inputValue(),String(Number(dragged)-1));
-  await row.locator('[data-action=undo]').click();assert.equal(await number('kerningStrength').inputValue(),dragged);await row.locator('[data-action=undo]').click();assert.equal(await number('kerningStrength').inputValue(),'63');
+  await slider('kerningStrength').press('ArrowLeft');assert.equal(await number('kerningStrength').inputValue(),String(Number((Number(dragged)-0.1).toFixed(1))));
+  await row.locator('[data-action=undo]').click();assert.equal(await number('kerningStrength').inputValue(),dragged);await row.locator('[data-action=undo]').click();assert.equal(await number('kerningStrength').inputValue(),'62.1');
   await row.locator('[data-action=redo]').click();assert.equal(await number('kerningStrength').inputValue(),dragged);
   await position.locator('[data-field=w]').fill('2500');assert.equal(await position.locator('[data-numeric-field=w]').inputValue(),'2500');assert.equal(await position.locator('[data-numeric-field=w]').getAttribute('max'),'2500');await position.locator('[data-field=w]').fill('740');
-  await number('minimumGlyphGap').fill('1.6');assert.equal(await slider('minimumGlyphGap').inputValue(),'1.6');await number('outline').fill('3.25');assert.equal(await slider('outline').inputValue(),'3.25');
-  await card.locator('[data-field=textOutlineColor]').fill('#a63870');await number('outline').fill('6.5');assert.equal(await slider('outline').inputValue(),'6.5');assert.equal(await position.locator('[data-field=outline]').inputValue(),'6.5');
-  await position.locator('[data-numeric-field=outline]').focus();await position.locator('[data-numeric-field=outline]').press('ArrowRight');assert.equal(await number('outline').inputValue(),'7');
+  await number('minimumGlyphGap').fill('1.6');assert.equal(await slider('minimumGlyphGap').inputValue(),'2');await number('outline').fill('3.25');assert.equal(await slider('outline').inputValue(),'3');
+  await card.locator('[data-field=textOutlineColor]').fill('#a63870');await number('outline').fill('6.5');assert.equal(await slider('outline').inputValue(),'7');assert.equal(await position.locator('[data-field=outline]').inputValue(),'7');
+  await position.locator('[data-numeric-field=outline]').focus();await position.locator('[data-numeric-field=outline]').press('ArrowRight');assert.equal(await number('outline').inputValue(),'8');
   await page.evaluate(()=>document.fonts.ready);
   const rendering=await page.evaluate(async()=>{
     const {newLayer,draw,textGlyphs,clearGlyphCache}=await import('./src/renderer.js'),{fontDescription,glyphFontDescription,fontLoadQueries}=await import('./src/fonts.js'),{captionLayout}=await import('./src/captions.js');
@@ -74,10 +74,10 @@ try{
   assert.ok(rendering.missing.filter(g=>g.font==='chikara').length===2);assert.ok(rendering.hearts.every(g=>g.ink>30&&g.diff===0));
   assert.match(rendering.captionFonts[0].font,/MangaChikaraYowaku/);for(const g of rendering.captionFonts.slice(1))assert.match(g.font,/MangaGekifude/);assert.ok(rendering.outlinePixels>100);
   page.once('dialog',dialog=>dialog.accept('色付き輪郭'));await card.locator('[data-action=save-preset]').click();const preset=await card.locator('[data-preset-select]').inputValue();
-  await card.locator('[data-field=textOutlineColor]').fill('#224466');await card.locator('[data-field=textOutlineColor]').blur();await card.locator('[data-preset-select]').selectOption(preset);assert.equal(await card.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');assert.equal(await number('outline').inputValue(),'7');assert.equal(await placement.getAttribute('open'),'');
+  await card.locator('[data-field=textOutlineColor]').fill('#224466');await card.locator('[data-field=textOutlineColor]').blur();await card.locator('[data-preset-select]').selectOption(preset);assert.equal(await card.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');assert.equal(await number('outline').inputValue(),'8');assert.equal(await placement.getAttribute('open'),'');
   await card.locator('[data-action=duplicate]').click();const duplicate=row.locator('[data-kind=sfx]').last();assert.equal(await duplicate.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');await duplicate.locator('[data-action=drop-layer]').click();
   await page.selectOption('#projectFormat','json');let downloading=page.waitForEvent('download');await page.click('#projectSave');let download=await downloading;const project=JSON.parse(await readFile(await download.path(),'utf8'));
-  assert.equal(project.pages[0].layers[0].textOutlineColor,'#a63870');assert.ok(Math.abs(project.pages[0].layers[0].outline-7)<1e-9);await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);
+  assert.equal(project.pages[0].layers[0].textOutlineColor,'#a63870');assert.ok(Math.abs(project.pages[0].layers[0].outline-8)<1e-9);await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);
   // Deselect the page before comparing preview with actual export (which has no selection handles).
   await page.evaluate(()=>document.querySelector('canvas.preview').focus());await page.keyboard.press('Escape');
   downloading=page.waitForEvent('download');await row.locator('[data-action=save-image]').click();download=await downloading;const png=(await readFile(await download.path())).toString('base64');
@@ -93,7 +93,7 @@ try{
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.screenshot({path:'artifacts/sfx-controls-desktop.png',fullPage:true});await page.setViewportSize({width:430,height:950});await page.screenshot({path:'artifacts/sfx-controls-mobile.png',fullPage:true});
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'sliders must fit mobile viewport');
   await page.reload();await page.locator('#projectInput').setInputFiles('artifacts/sfx-controls-project.json');await page.waitForFunction(()=>document.querySelector('.image-row')&&!document.querySelector('#projectLoad').disabled);
-  assert.equal(await card.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');assert.equal(await number('outline').inputValue(),'7');assert.deepEqual(errors,[]);
+  assert.equal(await card.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');assert.equal(await number('outline').inputValue(),'8');assert.deepEqual(errors,[]);
   console.log(`SFX controls browser smoke passed: ${numericPairs.length} numeric pairs, open details after regeneration/undo/presets, slider drag/arrows/direct input/undo, ${rendering.hearts.length} heart renders, caption fallback, colored outline persistence, mobile layout, PNG and actual Worker pixel difference 0.`);
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/sfx-controls-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}

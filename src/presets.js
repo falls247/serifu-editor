@@ -8,17 +8,17 @@ export const PREFS_KEY = 'serifu.preferences.v1';
 export const PRESET_KINDS = Object.freeze(['dialogue','sfx','balloon','caption']);
 export const MAX_USER_PRESETS = 100;
 const styleKeys = ['vertical','rotation','color','effect','font','warp','distortion','skew','stretchX','stretchY','blurStrength','inkCore','roughness','dryInk','brushTails','inkTexture','grungeAmount','scratchLength','scratchAngle','spatterAmount','sizeVariation','horizontalJitter','taperRate',...Object.keys(PLACEMENT_DEFAULTS).filter(key=>key!=='minimumGlyphGap'),'glyphSeed'];
-const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRatio',outline:'outlineRatio',blur:'blurRatio',motionBlur:'motionRatio',blurX:'blurXRatio',blurY:'blurYRatio',minimumGlyphGap:'minimumGlyphGapRatio'};
+const ratioKeys = {w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRatio',outline:'outlineRatio',blur:'blurRatio',motionBlur:'motionRatio',blurX:'blurXRatio',blurY:'blurYRatio',minimumGlyphGap:'minimumGlyphGapRatio'};
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
-const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
+const boxRatioKeys={w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
-  balloon:['shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
+  balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
   if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',padding:'paddingRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio',shadowBlur:'shadowBlurRatio',shadowOffsetX:'shadowOffsetXRatio',shadowOffsetY:'shadowOffsetYRatio'}};
   if(kind==='caption')return {styles:boxStyles.caption,ratios:{...boxRatioKeys,size:'sizeRatio',padding:'paddingRatio',textOutlineWidth:'textOutlineWidthRatio'}};
-  return {styles:[...styleKeys,'blurAngle','textOutlineColor',...(kind==='dialogue'?['textColor']:[])],ratios:ratioKeys};
+  return {styles:[...styleKeys,'blurAngle','textOutlineColor',...(kind==='dialogue'?['speaker','textColor']:[])],ratios:ratioKeys};
 }
 function presetDimension(kind,key,width,height) {
   if(['balloon','caption'].includes(kind)){
@@ -33,7 +33,7 @@ export function styleFromLayer(layer,width,height) {
   for(const [key,ratio] of Object.entries(ratios))style[ratio]=(key==='thickness'?(layer[key]??0):layer[key])/presetDimension(layer.kind,key,width,height);
   return style;
 }
-function builtin(id,name,kind,changes={}) { const layer={...newLayer(kind,1000,750),...changes},style=styleFromLayer(layer,1000,750);delete style.glyphSeed;delete style.brushSeed;if(kind==='balloon')delete style.shapeSeed;return {id,name,kind,builtin:true,style}; }
+function builtin(id,name,kind,changes={}) { const layer={...newLayer(kind,1000,750),...changes},style=styleFromLayer(layer,1000,750);delete style.speaker;delete style.glyphSeed;delete style.brushSeed;if(kind==='balloon')delete style.shapeSeed;return {id,name,kind,builtin:true,style}; }
 export function defaultPreferences() {
   const presets=[
     builtin('dialogue-standard','縦書き・標準セリフ','dialogue'),
@@ -52,12 +52,12 @@ export function defaultPreferences() {
     builtin('balloon-standard','標準の吹き出し','balloon'),
     builtin('caption-standard','標準のキャプション','caption'),
   ];
-  return {version:1,presets,defaults:{dialogue:'dialogue-standard',sfx:'sfx-impact',balloon:'balloon-standard',caption:'caption-standard'},autosave:{enabled:true,minutes:2}};
+  return {version:1,presets,defaults:{dialogue:'dialogue-standard',sfx:'sfx-impact',balloon:'balloon-standard',caption:'caption-standard'},fontSizePreset:70,autosave:{enabled:true,minutes:2}};
 }
 export function applyPreset(layer,preset,width,height) {
   if(!preset||preset.kind!==layer.kind) return layer;
   const {styles,ratios}=presetFields(layer.kind);
-  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]===undefined&&(layer.kind==='balloon'||['textColor','textOutlineColor','glyphSeed','brushSeed'].includes(k))?layer[k]:preset.style[k]])),presetId:preset.id};
+  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]===undefined&&(layer.kind==='balloon'||['speaker','textColor','textOutlineColor','glyphSeed','brushSeed'].includes(k))?layer[k]:preset.style[k]])),presetId:preset.id};
   for(const [key,ratio] of Object.entries(ratios)){
     const preservePosition=['textOffsetX','textOffsetY'].includes(key)||layer.kind==='balloon'&&key==='padding';
     const fallback=preservePosition?(layer[key]??0)/presetDimension(layer.kind,key,width,height):layer.kind==='balloon'?layer[key]/presetDimension(layer.kind,key,width,height):key==='minimumGlyphGap'?2/width:['thickness','blurX','blurY'].includes(key)?0:NaN;
@@ -81,9 +81,14 @@ export function applyPreset(layer,preset,width,height) {
 export function normalizePreferences(input) {
   const result=defaultPreferences(),builtinCount=result.presets.length;
   if(!input||input.version!==1) return result;
+  if(Number.isFinite(input.fontSizePreset)&&input.fontSizePreset>=8&&input.fontSizePreset<=500)result.fontSizePreset=Math.round(input.fontSizePreset);
   for(const p of Array.isArray(input.presets)?input.presets:[]) {
     if(!p||p.builtin||!PRESET_KINDS.includes(p.kind)||typeof p.id!=='string'||!p.id||result.presets.some(existing=>existing.id===p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>60)continue;
-    try { const probe=newLayer(p.kind,1000,750);applyPreset(probe,p,1000,750);result.presets.push({...p,name:p.name.trim(),builtin:false}); } catch {}
+    try {
+      const probe=newLayer(p.kind,1000,750);applyPreset(probe,p,1000,750);
+      const style={...p.style};for(const key of ['x','y','xRatio','yRatio'])delete style[key];
+      result.presets.push({...p,style,name:p.name.trim(),builtin:false});
+    } catch {}
   }
   result.presets=result.presets.slice(0,builtinCount+MAX_USER_PRESETS);
   for(const kind of PRESET_KINDS) if(result.presets.some(p=>p.id===input.defaults?.[kind]&&p.kind===kind))result.defaults[kind]=input.defaults[kind];

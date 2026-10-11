@@ -19,24 +19,24 @@ try {
     await card.locator('textarea').fill(kind==='balloon'?'吹き出しの本文\n上付き':'キャプションの本文\n位置調整');
     await field('x').fill('400');await field('y').fill(kind==='balloon'?'160':'450');await field('w').fill('420');await field('h').fill('230');
     for(const name of ['textOffsetX','textOffsetY']){assert.equal(await cardField(name).inputValue(),'0');assert.equal(await field(name).inputValue(),'0');assert.ok(await slider(name).isVisible());}
-    await field('textOffsetX').fill('-25.5');assert.equal(await cardField('textOffsetX').inputValue(),'-25.5');assert.equal(await slider('textOffsetX').inputValue(),'-25.5');
-    await cardField('textOffsetY').fill('33.5');assert.equal(await field('textOffsetY').inputValue(),'33.5');
+    await field('textOffsetX').fill('-25.5');assert.equal(await cardField('textOffsetX').inputValue(),'-25');assert.equal(await slider('textOffsetX').inputValue(),'-25');
+    await cardField('textOffsetY').fill('33.5');assert.equal(await field('textOffsetY').inputValue(),'34');
     await slider('textOffsetY').press('ArrowLeft');assert.equal(await field('textOffsetY').inputValue(),'33');
-    await source.locator('[data-action=undo]').click();assert.equal(await field('textOffsetY').inputValue(),'33.5');
+    await source.locator('[data-action=undo]').click();assert.equal(await field('textOffsetY').inputValue(),'34');
     await source.locator('[data-action=redo]').click();assert.equal(await field('textOffsetY').inputValue(),'33');
     await field('textOffsetX').fill('12.25');await cardField('textOffsetY').fill('-17.75');
-    assert.equal(await slider('textOffsetX').inputValue(),'12.25');assert.equal(await slider('textOffsetY').inputValue(),'-17.75');
-    const padding=kind==='caption'?'60.5':'18.5';await field('padding').fill(padding);assert.equal(await cardField('padding').inputValue(),padding);assert.equal(await slider('padding').inputValue(),padding);
+    assert.equal(await slider('textOffsetX').inputValue(),'12');assert.equal(await slider('textOffsetY').inputValue(),'-18');
+    const padding=kind==='caption'?'61':'19';await field('padding').fill(padding);assert.equal(await cardField('padding').inputValue(),padding);assert.equal(await slider('padding').inputValue(),padding);
     await field('textOffsetX').fill('-25.5');await field('textOffsetY').fill('33.5');
     page.once('dialog',dialog=>dialog.accept(`${kind}の文字位置`));await card.locator('[data-action=save-preset]').click();
     await source.locator(`[data-action=add-${kind}]`).click();const fresh=source.locator(`[data-kind=${kind}]`).last();
-    assert.equal(await fresh.locator('[data-field=textOffsetX]').inputValue(),'-25.5');assert.equal(await fresh.locator('[data-field=textOffsetY]').inputValue(),'33.5');assert.equal(await fresh.locator('[data-field=padding]').inputValue(),padding);
+    assert.equal(await fresh.locator('[data-field=textOffsetX]').inputValue(),'-25');assert.equal(await fresh.locator('[data-field=textOffsetY]').inputValue(),'34');assert.equal(await fresh.locator('[data-field=padding]').inputValue(),padding);
     await source.locator('[data-action=undo]').click();
   }
   await source.locator('[data-action=copy-all]').click();await target.locator('[data-action=paste-all]').click();
   for(const kind of ['balloon','caption']){
     const card=target.locator(`[data-kind=${kind}]`).first();
-    assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-12.75');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'50.25');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'30.25':'9.25');
+    assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-12');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'51');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'31':'10');
   }
   await source.locator('[data-action=add-male]').click();assert.equal(await field('textOffsetX').isVisible(),false);assert.equal(await field('padding').isVisible(),false);await source.locator('[data-action=undo]').click();
   const pixels=await page.evaluate(async()=>{
@@ -82,15 +82,15 @@ try {
     return {channels,maxDelta,left,right,top,bottom,samples};
   },[(await readFile(await png.path())).toString('base64'),preview]);assert.equal(pngDiff.channels,0,`saved PNG must match the preview pixels: ${JSON.stringify(pngDiff)}`);
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);saving=page.waitForEvent('download');await page.click('#projectSave');const json=await saving,projectBytes=await readFile(await json.path()),project=JSON.parse(projectBytes.toString());
-  for(const layer of project.pages[0].layers){assert.equal(layer.textOffsetX,-25.5);assert.equal(layer.textOffsetY,33.5);assert.equal(layer.padding,layer.kind==='caption'?60.5:18.5);}
-  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25.5&&layer.textOffsetY===33.5);});
+  for(const layer of project.pages[0].layers){assert.equal(layer.textOffsetX,-25);assert.equal(layer.textOffsetY,34);assert.equal(layer.padding,layer.kind==='caption'?61:19);}
+  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25&&layer.textOffsetY===34);});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
-  for(const kind of ['balloon','caption']){const card=source.locator(`[data-kind=${kind}]`);assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-25.5');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'33.5');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'60.5':'18.5');}
+  for(const kind of ['balloon','caption']){const card=source.locator(`[data-kind=${kind}]`);assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-25');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'34');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'61':'19');}
   await target.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await source.locator('canvas').evaluate(canvas=>canvas.toDataURL()),preview);
   await page.reload();await page.locator('#projectInput').setInputFiles({name:'text-positions.json',mimeType:'application/json',buffer:projectBytes});await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
-  for(const kind of ['balloon','caption'])assert.equal(await source.locator(`[data-kind=${kind}] [data-field=textOffsetY]`).inputValue(),'33.5');
+  for(const kind of ['balloon','caption'])assert.equal(await source.locator(`[data-kind=${kind}] [data-field=textOffsetY]`).inputValue(),'34');
   const balloonCard=source.locator('[data-kind=balloon]');if(!await balloonCard.evaluate(card=>card.classList.contains('selected')))await balloonCard.locator('.layer-summary').click();await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/text-position-desktop.png'});
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'artifacts/text-position-mobile.png'});
-  assert.deepEqual(errors,[]);console.log('Text position browser smoke passed: signed offsets, fractional values and sliders, undo/redo, padding and wrapping, presets, aspect-ratio copying, auto-fit, frame clipping, pixel translation, OffscreenCanvas/Worker parity, PNG, project/draft recovery and mobile layout.');
+  assert.deepEqual(errors,[]);console.log('Text position browser smoke passed: signed integer pixel offsets, fractional input rounding and sliders, undo/redo, padding and wrapping, presets, aspect-ratio copying, auto-fit, frame clipping, pixel translation, OffscreenCanvas/Worker parity, PNG, project/draft recovery and mobile layout.');
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/text-position-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}
