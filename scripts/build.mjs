@@ -2,10 +2,11 @@ import { copyFile, mkdir, rm, writeFile, cp, access } from 'node:fs/promises';
 
 const root = new URL('../', import.meta.url);
 const output = new URL('_site/', root);
-const assets = ['index.html', 'favicon-32.png', 'apple-touch-icon.png', 'app.js', 'export.js', 'renderer.js','glyph-layout.js','brush-stroke.js', 'balloons.js', 'captions.js', 'typography.js', 'ink.js', 'fonts.js', 'model.js', 'presets.js', 'storage.js','bulk-task.js','bulk-pool.js','image-worker.js','image-metadata.js','export-cache.js','project-io.js','project-filenames.js','project-worker.js','zip.js', 'style.css'];
+const assets = ['index.html', 'favicon-32.png', 'apple-touch-icon.png', 'src/app.js', 'src/export.js', 'src/renderer.js','src/glyph-layout.js','src/brush-stroke.js', 'src/balloons.js', 'src/captions.js', 'src/typography.js', 'src/ink.js', 'src/fonts.js', 'src/model.js', 'src/presets.js', 'src/storage.js','src/bulk-task.js','src/bulk-pool.js','src/image-worker.js','src/image-metadata.js','src/export-cache.js','src/project-io.js','src/project-filenames.js','src/project-worker.js','src/zip.js', 'style.css'];
 
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
+await mkdir(new URL('src/', output), { recursive: true });
 for (const asset of assets) {
   await copyFile(new URL(asset, root), new URL(asset, output));
 }

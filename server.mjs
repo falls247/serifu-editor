@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { FONT_FILES } from './fonts.js';
-const assets=['index.html','favicon-32.png','apple-touch-icon.png','app.js','export.js','renderer.js','glyph-layout.js','brush-stroke.js','balloons.js', 'captions.js', 'typography.js','ink.js','fonts.js','model.js','presets.js','storage.js','bulk-task.js','bulk-pool.js','image-worker.js','image-metadata.js','export-cache.js','project-io.js','project-filenames.js','project-worker.js','zip.js','style.css',...FONT_FILES.map(font=>'assets/fonts/'+font.file)];
+import { FONT_FILES } from './src/fonts.js';
+const assets=['index.html','favicon-32.png','apple-touch-icon.png','src/app.js','src/export.js','src/renderer.js','src/glyph-layout.js','src/brush-stroke.js','src/balloons.js', 'src/captions.js', 'src/typography.js','src/ink.js','src/fonts.js','src/model.js','src/presets.js','src/storage.js','src/bulk-task.js','src/bulk-pool.js','src/image-worker.js','src/image-metadata.js','src/export-cache.js','src/project-io.js','src/project-filenames.js','src/project-worker.js','src/zip.js','style.css',...FONT_FILES.map(font=>'assets/fonts/'+font.file)];
 const files={'/':'index.html',...Object.fromEntries(assets.map(path=>['/'+path,path]))};
 const port=Number(process.env.PORT)||5173;
 http.createServer(async(req,res)=>{

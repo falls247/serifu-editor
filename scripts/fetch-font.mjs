@@ -1,6 +1,6 @@
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { FONT_COMMIT, FONT_FILES } from '../fonts.js';
+import { FONT_COMMIT, FONT_FILES } from '../src/fonts.js';
 const output=new URL('../assets/fonts/',import.meta.url);
 function hash(buffer){return createHash('sha1').update(`blob ${buffer.length}\0`).update(buffer).digest('hex');}
 await mkdir(output,{recursive:true});
