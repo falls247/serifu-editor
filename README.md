@@ -135,6 +135,25 @@ npm run build
 
 `_site/` へ公開用HTML/CSS/JavaScript、書体とライセンスを出力する。公開先にNode.jsサーバーは不要。
 
+## 開発者向けディレクトリ構成（2026-10-11）
+
+アプリ用JavaScript 22件は `src/` 直下に集約。ネイティブES Modules構成とし、バンドラーは導入しない。
+
+```text
+serifu-editor/
+├── src/                # app.js、renderer.js、Workerなどブラウザ用JS22件
+├── assets/             # 同梱フォント原本・生成フォント
+├── scripts/            # ビルド、フォント準備、ブラウザ・一括処理テスト
+├── test/               # Node標準ランナーによる単体テスト
+├── dev/docs/           # SOW、ADR、引継書
+├── index.html          # ./src/app.js を読み込む
+├── style.css
+├── server.mjs          # 開発用静的ファイル配信
+└── package.json
+```
+
+`npm run build` は `_site/src/*.js` を出力し、`assets/fonts/` はサイトルートを基準に配信。ローカルとGitHub Pagesの `/serifu-editor/` でWorker・書体パスを保持する。詳細は [開発引継書](dev/docs/HANDOFF.md) と [ADR-0017](dev/docs/adr/0017-src-layout-and-static-assets.md)。
+
 ## 対応・制約
 
 - 新規フォルダへの直接一括保存・元画像削除には File System Access API が必要。PC版Chrome / Edgeと、localhostまたはHTTPSが対象。

@@ -90,22 +90,36 @@ JSON読込は現在の画像一覧へ追加する。一時保存の復元は一�
 
 ## 4. コードの入口
 
+2026-10-11の整理以後、アプリ用 `.js` 22件はすべて `src/` 直下。内部相互importは `./xxx.js`、Node単体テストとNode側scriptsは `../src/xxx.js`、ブラウザのHTMLと動的importは `./src/xxx.js`。
+
+```text
+index.html → ./src/app.js → ./src/{renderer,model,storage,fonts,...}.js
+             ./src/bulk-pool.js → ./src/image-worker.js
+             ./src/project-io.js → ./src/project-worker.js
+server.mjs → src/*.js + HTML/CSS/画像 + assets/fonts/*
+scripts/build.mjs → _site/src/*.js + _site/assets/fonts/*
+```
+
+Workerの `import.meta.url` 基準のフォントURLは `../assets/fonts/`、`src/fonts.js` がインラインCSSへ書くURLは**文書URL基準**の `./assets/fonts/`。両者を混同しない。Workerのフォールバックが異常を隠さないよう `npm run test:bulk` でWorker稼働とサブパス配信を確認。関連: [ADR-0017](adr/0017-src-layout-and-static-assets.md)、[移行SOW](sow/SOW_20261011_src_reorganization.md)。
+
+
+
 以下のパスはリポジトリルートからの相対パス。
 
 | ファイル | 責務・主な入口 |
 |---|---|
-| [app.js](../../app.js) | DOM、画像一覧、選択状態、イベント、ドラッグ、保存。`makeLayer`、`renderCards`、`updateControls`、`connectCanvas`、`saveImage`、`saveImages`、`temporarySave` |
-| [export.js](../../export.js) | 一括PNGのページ番号・桁数・名前 `pageExportName`、対象別本文整形 `textExport` |
+| [app.js](../../src/app.js) | DOM、画像一覧、選択状態、イベント、ドラッグ、保存。`makeLayer`、`renderCards`、`updateControls`、`connectCanvas`、`saveImage`、`saveImages`、`temporarySave` |
+| [export.js](../../src/export.js) | 一括PNGのページ番号・桁数・名前 `pageExportName`、対象別本文整形 `textExport` |
 | [index.html](../../index.html) / [style.css](../../style.css) | 画面構造・各画像のテンプレート・3列とモバイルのレイアウト |
-| [model.js](../../model.js) | 保存データ検証、履歴、コピーの拡縮。`normalizeLayer`、`checkpoint`、`restore`、`pasteSelection`、`pasteLayers` |
-| [renderer.js](../../renderer.js) | `newLayer`、共通 `draw`、文字配置 `textGlyphs`、先細り `glyphFontSize`、インク描画、キャッシュ、選択・ハンドル判定 |
-| [ink.js](../../ink.js) | 太さ変更、ブラー、掠れ、ハネ、固定seedの文字ばらつき |
-| [typography.js](../../typography.js) | 書記素分割、縦書き記号の回転、句読点の右上配置 |
-| [balloons.js](../../balloons.js) | 楕円・テールの形状、描画、実形状のヒット判定、制約付きの描画順 `paintOrder` |
-| [captions.js](../../captions.js) | 本文配置 `captionLayout`、上下左右の揃え方、余白、文字サイズ自動追従、クリッピング |
-| [presets.js](../../presets.js) | 既定・ユーザープリセット、解像度比の保存、適用、旧設定の補完 |
-| [storage.js](../../storage.js) | IndexedDBの一時保存。メタ情報と画像を同一トランザクションで保存 |
-| [fonts.js](../../fonts.js) | 書体カタログ、実ウェイト、配信CSS、フォントと規約のGit blobチェックサム |
+| [model.js](../../src/model.js) | 保存データ検証、履歴、コピーの拡縮。`normalizeLayer`、`checkpoint`、`restore`、`pasteSelection`、`pasteLayers` |
+| [renderer.js](../../src/renderer.js) | `newLayer`、共通 `draw`、文字配置 `textGlyphs`、先細り `glyphFontSize`、インク描画、キャッシュ、選択・ハンドル判定 |
+| [ink.js](../../src/ink.js) | 太さ変更、ブラー、掠れ、ハネ、固定seedの文字ばらつき |
+| [typography.js](../../src/typography.js) | 書記素分割、縦書き記号の回転、句読点の右上配置 |
+| [balloons.js](../../src/balloons.js) | 楕円・テールの形状、描画、実形状のヒット判定、制約付きの描画順 `paintOrder` |
+| [captions.js](../../src/captions.js) | 本文配置 `captionLayout`、上下左右の揃え方、余白、文字サイズ自動追従、クリッピング |
+| [presets.js](../../src/presets.js) | 既定・ユーザープリセット、解像度比の保存、適用、旧設定の補完 |
+| [storage.js](../../src/storage.js) | IndexedDBの一時保存。メタ情報と画像を同一トランザクションで保存 |
+| [fonts.js](../../src/fonts.js) | 書体カタログ、実ウェイト、配信CSS、フォントと規約のGit blobチェックサム |
 | [scripts/fetch-font.mjs](../../scripts/fetch-font.mjs) | 固定版の書体取得／同梱原本の復元とチェックサム検証 |
 | [server.mjs](../../server.mjs) / [scripts/build.mjs](../../scripts/build.mjs) | 開発時の配信許可リスト／`_site/` にコピーする静的ファイル一覧 |
 
@@ -121,7 +135,7 @@ JSON読込は現在の画像一覧へ追加する。一時保存の復元は一�
 | 全種類の書式 | 上記に加え `presets.js` の `presetFields`／`presetDimension` と旧プリセットの既定値 |
 | 書体追加 | `FONT_CATALOG`、原本・規約・blob SHA、取得処理、実ウェイト、読込後キャッシュ破棄、保存時の読込待ち |
 | ボックス／テール | 回転前のローカル座標、ヒット判定、ハンドル、異なる縦横比へのコピー、吹き出しの描画順 |
-| 新規ブラウザ用JS | importに加え `server.mjs` と `scripts/build.mjs` の明示リスト、必要なら `package.json` の構文チェック |
+| 新規ブラウザ用JS | `src/` に配置し、importに加え `server.mjs` と `scripts/build.mjs` の明示リスト、必要なら `package.json` の構文チェック |
 | 永続化の破壊的変更 | `PROJECT_VERSION`、JSON読込可能版、一時保存復元可能版、欠損値の補完、互換性テスト、ADR |
 
 単体保存・一括保存・プレビューは共通の `draw` を使う。保存は元解像度、選択枠なし、書体読込完了後。プレビューだけにCSSエフェクトを追加するとPNGに反映されないので、描画変更は共通経路へ入れる。
@@ -185,7 +199,7 @@ ADR-0009の追加実装：構文・差分確認を実施。単体・ブラウザ
 
 ## 8. 公開・運用の制約
 
-GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手動実行で公開する。構文、単体、ブラウザ、フォント準備、静的ビルドを経て `_site/` を配信。通常CIの `.github/workflows/ci.yml` はpush／pull_requestで構文・単体だけを検証する。詳細は [ADR-0006](adr/0006-test-and-delivery.md)。
+GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手動実行で公開する。構文、単体、ブラウザ、フォント準備、静的ビルドを経て `_site/` を配信。通常CIの `.github/workflows/ci.yml` はpush／pull_requestで構文・単体・ビルド・一括/ブラウザ回帰テストを検証する。詳細は [ADR-0006](adr/0006-test-and-delivery.md)。
 
 画像の一括保存・元画像削除には `showDirectoryPicker` が必要。APIがない環境では画像読込の代替と単体PNG／JSON保存は使えるが、直接フォルダ保存・元画像削除は使えない。実装は利用者の元画像を上書きしない。元画像削除は確認後の完全削除で、Undoやゴミ箱復元は提供しない。
 
