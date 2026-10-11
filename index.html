@@ -67,7 +67,7 @@
     <div id="deck"></div>
   </main>
   </div>
-  <footer><span id="status" role="status" aria-live="polite">画像の外部送信なし · ブラウザ内で編集</span><span class="shortcut-hint">ドラッグ：移動／角：サイズ／丸：回転　矢印：1px　Shift：10px</span></footer>
+  <footer><span id="status" role="status" aria-live="polite">画像の外部送信なし · ブラウザ内で編集</span><span class="shortcut-hint">ドラッグ：移動／Ctrl＋ドラッグ：複製／Ctrl＋Shift＋ドラッグ：水平・垂直に複製</span></footer>
   <input id="fileInput" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/avif" multiple hidden>
   <input id="folderInput" type="file" accept="image/*" webkitdirectory multiple hidden>
   <input id="projectInput" type="file" accept="application/json,.json,.serifu" hidden>
@@ -107,7 +107,7 @@
         <section class="preview-pane" aria-label="編集結果と位置調整">
           <div class="preview-toolbar"><span class="preview-label">LIVE PREVIEW</span><div class="preview-actions"><button data-action="save-image" title="この画像だけ元解像度のPNGで保存">画像を保存</button><button data-action="undo" title="この画像の編集を戻す">↶ 戻す</button><button data-action="redo" title="この画像の編集をやり直す">↷</button></div></div>
           <div class="preview-frame"><canvas class="preview" aria-label="文字をドラッグして位置調整"></canvas></div>
-          <p class="preview-hint">文字をドラッグで移動。右下の角でサイズ調整、上の丸で回転。プレビュー上で Delete：選択オブジェクトを削除、Ctrl／⌘＋C／V：コピー・貼付け。</p>
+          <p class="preview-hint">文字をドラッグで移動。Ctrl／⌘＋ドラッグで複製、Ctrl／⌘＋Shift＋ドラッグで縦横方向へガイド付き複製。右下の角でサイズ調整、上の丸で回転。Delete：選択オブジェクトを削除、Ctrl／⌘＋C／V：コピー・貼付け。</p>
           <fieldset class="position-controls"><legend class="selected-name">文字を選択して位置調整</legend><div class="control-grid">
             <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
             <label data-text-control>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>

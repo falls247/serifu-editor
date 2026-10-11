@@ -101,6 +101,17 @@ export function restore(page, direction) {
   return true;
 }
 
+// Pointer coordinates and the drag anchor are in original-image pixels.
+export function dragPlacement(start, point, anchor, constrain = false) {
+  const dx = point.x - anchor.x, dy = point.y - anchor.y;
+  const axis = constrain ? (Math.abs(dx) >= Math.abs(dy) ? 'horizontal' : 'vertical') : null;
+  return {
+    x: Math.round(start.x + (axis === 'vertical' ? 0 : dx)),
+    y: Math.round(start.y + (axis === 'horizontal' ? 0 : dy)),
+    axis,
+  };
+}
+
 export function duplicateLayer(layer) {
   return { ...layer, id: crypto.randomUUID(), x: layer.x + 20, y: layer.y + 20 };
 }

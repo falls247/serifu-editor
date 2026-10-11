@@ -3,7 +3,7 @@ import { BALLOON_LIMITS } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
-import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, copySelection, pasteSelection, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
+import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, dragPlacement, copySelection, pasteSelection, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
@@ -239,7 +239,17 @@ function drawPage(p) {
   if (!p.img.complete || !p.img.naturalWidth) return;
   const scale = p.canvas.width / p.img.width;
   const displayScale = p.canvas.getBoundingClientRect().width / p.img.width || scale;
-  draw(p.canvas.getContext('2d'), p.img, p.layers, p.id === activeId ? p.selectedId : null, scale, displayScale);
+  const ctx=p.canvas.getContext('2d');
+  draw(ctx, p.img, p.layers, p.id === activeId ? p.selectedId : null, scale, displayScale);
+  // A temporary alignment guide is preview-only, never part of the exported image.
+  if(drag?.page===p && drag.duplicated && drag.axis) {
+    const copy=selected(p);if(!copy)return;
+    ctx.save();ctx.setTransform(scale,0,0,scale,0,0);
+    ctx.strokeStyle='#00a0dc';ctx.lineWidth=2/displayScale;
+    ctx.setLineDash([7/displayScale,5/displayScale]);
+    ctx.beginPath();ctx.moveTo(drag.start.x,drag.start.y);ctx.lineTo(copy.x,copy.y);ctx.stroke();
+    ctx.restore();
+  }
 }
 
 function layerSummary(layer) {
@@ -848,21 +858,25 @@ function coords(event, p) {
 
 function connectCanvas(p) {
   p.canvas.addEventListener('pointerdown', event => {
-    if (editLocked()) return;
+    if (editLocked() || !event.isPrimary || event.button !== 0 || drag) return;
     const pos = coords(event, p), scale = p.canvas.getBoundingClientRect().width / p.img.width;
     const current = selected(p), handle = current && handleAt(current, pos.x, pos.y, scale);
     const l = handle ? current : paintOrder(p.layers).reverse().find(item => hit(item, pos.x, pos.y));
     activate(p, l?.id || null); p.canvas.focus({ preventScroll: true });
     if (!l) return;
-    drag = { page: p, id: event.pointerId, mode: handle || 'move', dx: pos.x - l.x, dy: pos.y - l.y, start: { ...l }, checkpointed: false };
+    drag = { page: p, id: event.pointerId, sourceId:l.id, mode: handle || 'move',
+      copy:!handle && (event.ctrlKey || event.metaKey) && !event.altKey,
+      anchor:pos, start:{...l}, checkpointed:false, duplicated:false, axis:null, previousRedo:p.redo.slice() };
     p.canvas.setPointerCapture(event.pointerId);
   });
   p.canvas.addEventListener('pointermove', event => {
     if (editLocked() || !drag || drag.page !== p || drag.id !== event.pointerId) return;
     const l = selected(p), pos = coords(event, p); if (!l) return;
-    let updates;
-    if (drag.mode === 'move') { updates = { x: Math.round(pos.x - drag.dx), y: Math.round(pos.y - drag.dy) }; }
-    else if (drag.mode === 'resize') {
+    let updates, axis = null;
+    if (drag.mode === 'move') {
+      const placement=dragPlacement(drag.start,pos,drag.anchor,drag.copy && event.shiftKey);
+      updates={x:placement.x,y:placement.y};axis=placement.axis;
+    } else if (drag.mode === 'resize') {
       const local = localPoint(l, pos.x, pos.y), w = clamp(Math.round(local.x * 2), 30, 30000), h = clamp(Math.round(local.y * 2), 30, 30000);
       updates = l.kind==='caption'?{w,h}:l.kind==='balloon'?{w,h,tailX:clamp(drag.start.tailX*w/drag.start.w,...BALLOON_LIMITS.tailX),tailY:clamp(drag.start.tailY*h/drag.start.h,...BALLOON_LIMITS.tailY),tailWidth:clamp(drag.start.tailWidth*Math.min(w/drag.start.w,h/drag.start.h),...BALLOON_LIMITS.tailWidth)}:{ w, h, size: clamp(Math.round(drag.start.size * Math.min(w / drag.start.w, h / drag.start.h)), 8, 500) };
     } else if(drag.mode==='tail'){
@@ -871,12 +885,37 @@ function connectCanvas(p) {
       const angle = Math.atan2(pos.y - l.y, pos.x - l.x) * 180 / Math.PI + 90;
       updates = { rotation: Math.round(((angle + 180) % 360 + 360) % 360 - 180) };
     }
-    if (Object.entries(updates).every(([key, value]) => l[key] === value)) return;
+    const axisChanged=drag.axis!==axis;
+    drag.axis=axis;
+    if (Object.entries(updates).every(([key, value]) => l[key] === value)) {
+      if(axisChanged && drag.duplicated)drawPage(p);
+      return;
+    }
     if (!drag.checkpointed) { checkpoint(p); drag.checkpointed = true; }
-    Object.assign(l, updates);
-    dirty(); l.presetId=null; p.done = false;p.edited=true;scheduleThumbnailRefresh(p);drawPage(p); updateControls(p); updateGlobal();
+    const firstCopy=drag.copy && !drag.duplicated;
+    if(firstCopy) {
+      const copy=duplicateLayer(l);
+      copy.x=drag.start.x;copy.y=drag.start.y;
+      p.layers.push(copy);p.selectedId=copy.id;drag.duplicated=true;
+    }
+    const target=selected(p);
+    Object.assign(target, updates);
+    dirty(); target.presetId=null; p.done = false;p.edited=true;scheduleThumbnailRefresh(p);
+    if(firstCopy)renderCards(p);
+    drawPage(p); updateControls(p); updateGlobal();
   });
-  const end = () => { if (drag?.page === p) { drag = null; updateControls(p);refreshPresetMenus(); } };
+  const end = event => {
+    if (!drag || drag.page !== p || drag.id !== event.pointerId) return;
+    const finished=drag;drag=null;
+    if(event.type==='pointercancel' && finished.duplicated) {
+      const snapshot=JSON.parse(p.undo.pop());
+      p.layers=snapshot.layers;p.done=snapshot.done;p.edited=snapshot.edited;
+      p.redo=finished.previousRedo;p.selectedId=finished.sourceId;
+      dirty();scheduleThumbnailRefresh(p);renderCards(p);updateGlobal();
+    }
+    if(finished.duplicated)drawPage(p); // Remove preview-only guide on release/cancel.
+    updateControls(p);refreshPresetMenus();
+  };
   p.canvas.addEventListener('pointerup', end); p.canvas.addEventListener('pointercancel', end);
 }
 

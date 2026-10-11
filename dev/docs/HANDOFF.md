@@ -232,3 +232,9 @@ GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手�
 - 既存 `main` で失敗していた先細りテストは、別列間の差分ではなく同列の配置を検証するよう修正。
 - 継続確認事項: PNG RGBA差分、実ブラウザでの参照画像比較、Workerレンダリング一致、性能P50/P95。未計測は成功扱いしない。
 - ADR: `dev/docs/adr/0012-distressed-ink-and-balloon-effects.md`。
+
+## 2026-10-11: プレビューのCtrl＋ドラッグ複製
+
+- 実装: `src/app.js` の `connectCanvas`。Ctrl／⌘＋ドラッグで選択レイヤーを同一ページ内に複製し、Ctrl／⌘＋Shift＋ドラッグでは移動量の大きい軸へ拘束。元の位置を起点とする水色破線ガイドはプレビュー限定、PNGには描かない。
+- 算出: `src/model.js:dragPlacement`。DOMの表示倍率に依存せず元画像座標系で扱い、単一のUndoチェックポイントで複製する。移動しないクリックは無変更、途中キャンセル時は複製を巻き戻す。
+- ハンドルのサイズ変更・回転・テール調整、通常ドラッグ、テキスト入力のショートカット動作は維持。確認: `test/drag-placement.test.mjs` と `scripts/drag-duplicate-smoke.mjs`。
