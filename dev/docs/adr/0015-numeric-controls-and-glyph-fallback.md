@@ -32,9 +32,9 @@ GEKIFUDEにもない文字は従来の端末書体へ進む。端末書体やフ
 
 ## 関連コードと検証
 
-- [app.js](../../../app.js)、[style.css](../../../style.css): 開閉状態と共通数値UI
-- [fonts.js](../../../fonts.js)、[renderer.js](../../../renderer.js)、[glyph-layout.js](../../../glyph-layout.js)、[captions.js](../../../captions.js)、[image-worker.js](../../../image-worker.js): 計測・描画・読込
-- [model.js](../../../model.js)、[presets.js](../../../presets.js): 効果音の輪郭色
+- [app.js](../../../src/app.js)、[style.css](../../../style.css): 開閉状態と共通数値UI
+- [fonts.js](../../../src/fonts.js)、[renderer.js](../../../src/renderer.js)、[glyph-layout.js](../../../src/glyph-layout.js)、[captions.js](../../../src/captions.js)、[image-worker.js](../../../src/image-worker.js): 計測・描画・読込
+- [model.js](../../../src/model.js)、[presets.js](../../../src/presets.js): 効果音の輪郭色
 - [fonts.test.mjs](../../../test/fonts.test.mjs)、[speech-style.test.mjs](../../../test/speech-style.test.mjs): 空字形・キャッシュ・色保存
 - [sfx-controls-smoke.mjs](../../../scripts/sfx-controls-smoke.mjs): 詳細保持、数値入力、スライダー、40条件のハート描画、PNG／Worker一致
 

@@ -36,10 +36,10 @@
 
 ## 関連コードと検証
 
-- [balloons.js](../../../balloons.js)、[renderer.js](../../../renderer.js): 吹き出しの改行領域・上付き・平行移動
-- [captions.js](../../../captions.js): 自動追従と独立した文字位置・枠内クリップ
-- [app.js](../../../app.js)、[index.html](../../../index.html): 共通数値UIと操作案内
-- [model.js](../../../model.js)、[presets.js](../../../presets.js)、[export-cache.js](../../../export-cache.js): 保存・互換性・拡縮・描画キャッシュ
+- [balloons.js](../../../src/balloons.js)、[renderer.js](../../../src/renderer.js): 吹き出しの改行領域・上付き・平行移動
+- [captions.js](../../../src/captions.js): 自動追従と独立した文字位置・枠内クリップ
+- [app.js](../../../src/app.js)、[index.html](../../../index.html): 共通数値UIと操作案内
+- [model.js](../../../src/model.js)、[presets.js](../../../src/presets.js)、[export-cache.js](../../../src/export-cache.js): 保存・互換性・拡縮・描画キャッシュ
 - [text-position.test.mjs](../../../test/text-position.test.mjs): 枠全体と余白による改行、1行の上付き、正負の移動、旧データ、不正値、解像度別コピー、プリセット、Undo/Redo
 - [text-position-smoke.mjs](../../../scripts/text-position-smoke.mjs): カードと右側欄の同期、端数・スライダー・Undo/Redo、プリセット、異なる縦横比へのコピー、実字形の移動、余白領域の表示、自動追従、HTML Canvas／OffscreenCanvas／Workerの画素一致、PNG、JSON・一時保存復元、モバイル幅
 - 実行入口: `npm test`、`npm run check`、`npm run test:text-position-browser`、`npm run test:browser`、`npm run build`
