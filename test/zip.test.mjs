@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ZipArchive} from '../zip.js';
+import {ZipArchive} from '../src/zip.js';
 test('ZIP stores UTF-8 filenames and original bytes with standard CRC32 and central references',async()=>{
   const zip=new ZipArchive(new Date(2026,9,10,12,34,56));await zip.add('声.png',new Blob(['123456789']));await zip.add('empty.txt',new Blob([]));const bytes=new Uint8Array(await zip.blob().arrayBuffer()),view=new DataView(bytes.buffer),end=bytes.length-22;
   assert.equal(view.getUint32(0,true),0x04034b50);assert.equal(view.getUint16(6,true),0x800);assert.equal(view.getUint32(14,true),0xcbf43926);const nameLength=view.getUint16(26,true);assert.equal(new TextDecoder().decode(bytes.slice(30,30+nameLength)),'声.png');assert.equal(new TextDecoder().decode(bytes.slice(30+nameLength,30+nameLength+9)),'123456789');assert.equal(view.getUint32(end,true),0x06054b50);assert.equal(view.getUint16(end+10,true),2);const central=view.getUint32(end+16,true);assert.equal(view.getUint32(central,true),0x02014b50);assert.equal(view.getUint32(central+42,true),0);assert.equal(central+view.getUint32(end+12,true),end);

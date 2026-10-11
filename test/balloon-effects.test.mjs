@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newLayer} from '../renderer.js';
-import {balloonBoundaryPoint,balloonHit,balloonSeedFromId} from '../balloons.js';
-import {normalizeLayer,scaledCopy} from '../model.js';
+import {newLayer} from '../src/renderer.js';
+import {balloonBoundaryPoint,balloonHit,balloonSeedFromId} from '../src/balloons.js';
+import {normalizeLayer,scaledCopy} from '../src/model.js';
 
 test('spiky balloons have reproducible peaks around a roomy text core',()=>{
   const b={...newLayer('balloon',1000,750),shape:'spiky',w:380,h:560,distortion:90,tail:false,shapeSeed:balloonSeedFromId('reference-shape')};

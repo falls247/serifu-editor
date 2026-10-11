@@ -1,7 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import { FONT_CATALOG, fontDescription, fontKeys, fontLoadQueries, glyphFontDescription, clearFontCache } from '../fonts.js';
-import { newLayer } from '../renderer.js';import { normalizeLayer } from '../model.js';
-import { createPreset, applyPreset, normalizePreferences, defaultPreferences } from '../presets.js';
+import { FONT_CATALOG, fontDescription, fontKeys, fontLoadQueries, glyphFontDescription, clearFontCache } from '../src/fonts.js';
+import { newLayer } from '../src/renderer.js';import { normalizeLayer } from '../src/model.js';
+import { createPreset, applyPreset, normalizePreferences, defaultPreferences } from '../src/presets.js';
 test('every selectable Japanese font survives project and default-preset restoration',()=>{
   for(const key of Object.keys(FONT_CATALOG)){
     const source={...newLayer('sfx',1000,750),font:key},restored=normalizeLayer(JSON.parse(JSON.stringify(source)),3);

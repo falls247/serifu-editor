@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { hit, handleAt, exportName, newLayer, draw } from '../renderer.js';
-import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers } from '../model.js';
-import { glyphVariation } from '../ink.js';
+import { hit, handleAt, exportName, newLayer, draw } from '../src/renderer.js';
+import { normalizeLayer, checkpoint, restore, swapText, copyToNext, copySelection, pasteSelection, copyLayers, cutLayers, pasteLayers } from '../src/model.js';
+import { glyphVariation } from '../src/ink.js';
 
 const page = layers => ({ layers, done: false, selectedId: layers[0]?.id || null, undo: [], redo: [] });
 test('rotation preserves pointer selection and handle coordinates', () => {

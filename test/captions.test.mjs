@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newLayer,hit,paintOrder} from '../renderer.js';
-import {captionLayout} from '../captions.js';
-import {normalizeLayer,copySelection,pasteSelection,copyLayers,pasteLayers,cutLayers,restore,swapText} from '../model.js';
+import {newLayer,hit,paintOrder} from '../src/renderer.js';
+import {captionLayout} from '../src/captions.js';
+import {normalizeLayer,copySelection,pasteSelection,copyLayers,pasteLayers,cutLayers,restore,swapText} from '../src/model.js';
 
 const page=layers=>({layers,edited:false,done:false,selectedId:layers[0]?.id||null,undo:[],redo:[]});
 const context=()=>({font:'',save(){this.saved=this.font;},restore(){this.font=this.saved;},measureText(char){const size=Number(this.font.match(/([\d.]+)px/)[1]),width=size*(/^[\x00-\x7f]+$/.test(char)?.6:1);return {width,actualBoundingBoxLeft:0,actualBoundingBoxRight:width,actualBoundingBoxAscent:size*.8,actualBoundingBoxDescent:size*.2};}});

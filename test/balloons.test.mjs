@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newLayer,hit,handleAt } from '../renderer.js';
-import { balloonGeometry,paintOrder } from '../balloons.js';
-import { normalizeLayer,checkpoint,restore,copyLayers,pasteLayers,copySelection,pasteSelection,cutLayers,swapText } from '../model.js';
+import { newLayer,hit,handleAt } from '../src/renderer.js';
+import { balloonGeometry,paintOrder } from '../src/balloons.js';
+import { normalizeLayer,checkpoint,restore,copyLayers,pasteLayers,copySelection,pasteSelection,cutLayers,swapText } from '../src/model.js';
 const page=layers=>({layers,done:false,edited:layers.length>0,selectedId:layers[0]?.id||null,undo:[],redo:[]});
 
 test('new balloons are white at 25% transparency, without a tail, and cross the top and right image edges',()=>{

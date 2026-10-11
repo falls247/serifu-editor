@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { pageExportName, textExport } from '../export.js';
+import { pageExportName, textExport } from '../src/export.js';
 
 test('一括PNGの桁数は一覧枚数に追従し、抽出後もページ番号を保つ', () => {
   for (const [count, first, last] of [

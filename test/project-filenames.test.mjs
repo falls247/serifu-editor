@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { filenameTimestamp, projectFileName, projectFolderName, safeFilenamePart, uploadedFolderName } from '../project-filenames.js';
+import { filenameTimestamp, projectFileName, projectFolderName, safeFilenamePart, uploadedFolderName } from '../src/project-filenames.js';
 
 test('編集データ名はフォルダ名とローカル日時を使い、編集済みでも末尾を変えない', () => {
   const date = new Date(2026, 9, 10, 8, 7, 6, 5);

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newLayer,glyphFontSize,textGlyphs,EFFECTS} from '../renderer.js';
-import {verticalPunctuationOffset,verticalRotation,graphemes} from '../typography.js';
-import {captionLayout} from '../captions.js';
-import {normalizeLayer,copySelection,pasteSelection,checkpoint,restore} from '../model.js';
-import {createPreset,applyPreset,defaultPreferences,normalizePreferences} from '../presets.js';
+import {newLayer,glyphFontSize,textGlyphs,EFFECTS} from '../src/renderer.js';
+import {verticalPunctuationOffset,verticalRotation,graphemes} from '../src/typography.js';
+import {captionLayout} from '../src/captions.js';
+import {normalizeLayer,copySelection,pasteSelection,checkpoint,restore} from '../src/model.js';
+import {createPreset,applyPreset,defaultPreferences,normalizePreferences} from '../src/presets.js';
 const context=()=>({font:'',save(){this.saved=this.font;},restore(){this.font=this.saved;},measureText(char){const size=Number(this.font.match(/([\d.]+)px/)[1]);return {width:size,actualBoundingBoxLeft:0,actualBoundingBoxRight:size,actualBoundingBoxAscent:size*.8,actualBoundingBoxDescent:size*.2};}});
 
 test('midline ellipsis and box-drawing line rotate only in vertical text across every layer',()=>{

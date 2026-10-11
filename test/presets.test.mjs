@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {newLayer} from '../renderer.js';import {defaultPreferences,createPreset,applyPreset,normalizePreferences} from '../presets.js';
+import {newLayer} from '../src/renderer.js';import {defaultPreferences,createPreset,applyPreset,normalizePreferences} from '../src/presets.js';
 test('presets scale placement and typography while preserving text and speaker',()=>{
   const source={...newLayer('dialogue',1000,750),x:200,y:300,size:66,text:'保存しない文字'};
   const preset=createPreset('設定',source,1000,750),target=newLayer('dialogue',2000,1500,'female');target.text='今のセリフ';

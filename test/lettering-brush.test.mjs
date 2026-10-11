@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { newLayer, textGlyphs, clearGlyphCache } from '../renderer.js';
-import { glyphVariation } from '../ink.js';
-import { glyphBounds, measureGlyph, contourAdvance, PLACEMENT_DEFAULTS } from '../glyph-layout.js';
-import { sampleClosedPath, brushDynamics, brushNoise, BRUSH_LIMITS } from '../brush-stroke.js';
-import { balloonOutline, balloonGeometry } from '../balloons.js';
-import { captionOutline } from '../captions.js';
-import { normalizeLayer, scaledCopy, copyLayers, pasteLayers, checkpoint, restore, PROJECT_VERSION } from '../model.js';
-import { createPreset, applyPreset, defaultPreferences } from '../presets.js';
-import { projectBlob, readProject } from '../project-io.js';
+import { newLayer, textGlyphs, clearGlyphCache } from '../src/renderer.js';
+import { glyphVariation } from '../src/ink.js';
+import { glyphBounds, measureGlyph, contourAdvance, PLACEMENT_DEFAULTS } from '../src/glyph-layout.js';
+import { sampleClosedPath, brushDynamics, brushNoise, BRUSH_LIMITS } from '../src/brush-stroke.js';
+import { balloonOutline, balloonGeometry } from '../src/balloons.js';
+import { captionOutline } from '../src/captions.js';
+import { normalizeLayer, scaledCopy, copyLayers, pasteLayers, checkpoint, restore, PROJECT_VERSION } from '../src/model.js';
+import { createPreset, applyPreset, defaultPreferences } from '../src/presets.js';
+import { projectBlob, readProject } from '../src/project-io.js';
 const context=()=>({save(){},restore(){},measureText(char){const size=Number(this.font.match(/([\d.]+)px/)[1]),width=size*(char==='I'?.28:1);return {width,actualBoundingBoxLeft:width*.4,actualBoundingBoxRight:width*.4,actualBoundingBoxAscent:size*.4,actualBoundingBoxDescent:size*.4};}});
 const base=()=>({...newLayer('sfx',2000,1500),text:'カIカIカ',size:100,w:1800,h:1000,effect:'none',vertical:false,skew:0,distortion:0,outline:0,sizeVariation:0,horizontalJitter:0,kerningMode:'optical',glyphSeed:123});
 

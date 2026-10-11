@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { inkSeed, printDistressMask } from '../ink.js';
+import { inkSeed, printDistressMask } from '../src/ink.js';
 
 const width=160,height=180;
 const source=new Uint8ClampedArray(width*height);

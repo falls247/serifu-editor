@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { directionalBlur, distressMask, dilateMask, inkSeed, adjustInkThickness, glyphVariation } from '../ink.js';
+import { directionalBlur, distressMask, dilateMask, inkSeed, adjustInkThickness, glyphVariation } from '../src/ink.js';
 
 test('vertical blur spreads ink only vertically and preserves left-right edges',()=>{
   const width=81,height=81,source=new Uint8ClampedArray(width*height);

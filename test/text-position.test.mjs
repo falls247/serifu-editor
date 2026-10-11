@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newLayer,textGlyphs} from '../renderer.js';
-import {captionLayout} from '../captions.js';
-import {normalizeLayer,scaledCopy,checkpoint,restore} from '../model.js';
-import {createPreset,applyPreset,defaultPreferences,normalizePreferences} from '../presets.js';
+import {newLayer,textGlyphs} from '../src/renderer.js';
+import {captionLayout} from '../src/captions.js';
+import {normalizeLayer,scaledCopy,checkpoint,restore} from '../src/model.js';
+import {createPreset,applyPreset,defaultPreferences,normalizePreferences} from '../src/presets.js';
 
 const context=()=>({font:'',save(){},restore(){},measureText(){
   const size=Number(this.font.match(/([\d.]+)px/)[1]);

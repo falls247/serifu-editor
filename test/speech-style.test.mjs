@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {newLayer,dialogueColor} from '../renderer.js';
-import {normalizeLayer,scaledCopy,checkpoint,restore} from '../model.js';
-import {createPreset,applyPreset,normalizePreferences,defaultPreferences} from '../presets.js';
-import {balloonBoundaryPoint,defaultSpikeCount} from '../balloons.js';
+import {newLayer,dialogueColor} from '../src/renderer.js';
+import {normalizeLayer,scaledCopy,checkpoint,restore} from '../src/model.js';
+import {createPreset,applyPreset,normalizePreferences,defaultPreferences} from '../src/presets.js';
+import {balloonBoundaryPoint,defaultSpikeCount} from '../src/balloons.js';
 
 test('SFX outline color and width survive copies, presets, old data and undo',()=>{
   const original={...newLayer('sfx',1000,750),textOutlineColor:'#123abc',outline:7.5};
