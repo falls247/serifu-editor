@@ -3,7 +3,7 @@ import { BALLOON_LIMITS } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
-import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
+import { PROJECT_VERSION, normalizeLayers, reorderLayers, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropHandles, cropModeAt, dragCropRectangle, uncroppedImageEdit, cropInFullView } from './image-edit.js';
 import { openFullPreview, previewIsOpen } from './preview-modal.js';
 import { exportName } from './renderer.js';
@@ -405,8 +405,6 @@ function updateControls(p) {
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
   controls.querySelector('.balloon-position-note').hidden=!balloon;
-  controls.querySelector('[data-action=backward]').textContent=balloon?'効果音の下へ':'背面へ';
-  controls.querySelector('[data-action=forward]').textContent=balloon?'効果音の上へ':'前面へ';
   for (const input of controls.querySelectorAll(CONTROL_SELECTOR)) {
     if (input !== document.activeElement) {
       if(input.type==='checkbox')input.checked=l?.[input.dataset.field]===true;
@@ -825,8 +823,6 @@ function renderCards(p) {
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
-      const orderLabel=element('label','','効果音との重なり'),order=element('select');order.dataset.field='sfxOrder';
-      for(const [value,text] of [['behind','効果音の下'],['above','効果音の上']]){const option=element('option','',text);option.value=value;order.append(option);}order.value=l.sfxOrder;orderLabel.append(order);grid.append(orderLabel);
       card.append(grid,brushControls(l));
       const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky'].includes(l.shape);
       for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount]]){
@@ -1062,8 +1058,9 @@ $('deck').addEventListener('click', event => {
     edit(p, () => { const copies = selectedLayers(p).map(duplicateLayer); p.layers.push(...copies);setSelection(p,copies.map(l=>l.id)); });
   } else if (action === 'drop-layer' && l) {
     edit(p, () => { const ids=new Set(selectedLayers(p).map(l=>l.id));p.layers = p.layers.filter(item => !ids.has(item.id));setSelection(p,p.layers.slice(0,1).map(l=>l.id)); });
-  } else if (['backward', 'forward'].includes(action) && l) {
-    edit(p, () => {if(l.kind==='balloon'){l.sfxOrder=action==='forward'?'above':'behind';l.presetId=null;return;} const i = p.layers.indexOf(l), j = clamp(i + (action === 'forward' ? 1 : -1), 0, p.layers.length - 1); [p.layers[i], p.layers[j]] = [p.layers[j], p.layers[i]]; });
+  } else if (['forward','backward','frontmost','backmost'].includes(action) && l) {
+    const ordered=reorderLayers(p.layers,selectedLayers(p).map(layer=>layer.id),action);
+    if(ordered.some((layer,index)=>layer!==p.layers[index]))edit(p,()=>{p.layers=ordered;});
   } else if (action === 'center' && l) {
     edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2;l.presetId=null; }, false);refreshPresetMenus();
   } else if (['undo', 'redo'].includes(action)) {
@@ -1318,10 +1315,36 @@ $('open').onclick = () => {
   },'画像追加',2);
 };
 $('files').onclick = () => {if(!busy)$('fileInput').click();};
+function addImageFiles(files) {
+  if (busy) return;
+  const images = [...files].filter(file => /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
+  if (!images.length) { status('追加できる画像がない。PNG / JPEG / WebP / GIF / AVIFを選択してほしい。'); return; }
+  return guard(task => addFiles(images.map(file => ({file})), task), '画像追加');
+}
 for (const id of ['fileInput', 'folderInput']) $(id).onchange = event => {
-  const files = [...event.target.files].sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true })); event.target.value = '';
-  guard(task=>addFiles(files.map(file=>({file})),task),'画像追加');
+  const files = [...event.target.files]; event.target.value = '';
+  addImageFiles(files);
 };
+function isFileDrop(event) {
+  return !thumbnailDrag && [...(event.dataTransfer?.types || [])].includes('Files');
+}
+for (const type of ['dragenter', 'dragover']) thumbnailSidebar.addEventListener(type, event => {
+  if (!isFileDrop(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+  thumbnailSidebar.classList.toggle('file-drop', !busy);
+});
+thumbnailSidebar.addEventListener('dragleave', event => {
+  if (!thumbnailSidebar.contains(event.relatedTarget)) thumbnailSidebar.classList.remove('file-drop');
+});
+thumbnailSidebar.addEventListener('drop', event => {
+  thumbnailSidebar.classList.remove('file-drop');
+  if (!isFileDrop(event)) return;
+  event.preventDefault();
+  addImageFiles(event.dataTransfer.files);
+});
+thumbnailSidebar.addEventListener('dragend', () => thumbnailSidebar.classList.remove('file-drop'));
 function snapshotPages() { return pages.map(p => ({ ...p, layers: structuredClone(p.layers) })); }
 function download(blob, name) {
   const a = document.createElement('a'), url = URL.createObjectURL(blob); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
@@ -1385,7 +1408,7 @@ $('projectSave').onclick = () => guard(async task => {
 },'編集データ保存',3);
 async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
   task.stage('検証',records.length);const validated=[];
-  for(const p of records){checkAbort(task.signal);try{validated.push({...p,layers:p.layers.map(l=>normalizeLayer(l,version))});task.result(p.name);}catch(error){task.result(p.name,false);throw new Error(`${p.name}: ${error.message}`);}if(validated.length%20===0)await yieldToBrowser();}
+  for(const p of records){checkAbort(task.signal);try{validated.push({...p,layers:normalizeLayers(p.layers,version)});task.result(p.name);}catch(error){task.result(p.name,false);throw new Error(`${p.name}: ${error.message}`);}if(validated.length%20===0)await yieldToBrowser();}
   const loaded=[],sources=new Map();if(records.length>=4)imagePool.resize(4);task.stage('画像準備',records.length);
   try{for(let start=0;start<validated.length;start+=20){
     const batch=validated.slice(start,start+20),ready=[];

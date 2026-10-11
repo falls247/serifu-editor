@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normalizeImageEdit, imageSize, imagePoint, rotateImage, cropImage, cropRectangle, cropModeAt, dragCropRectangle, uncroppedImageEdit, cropInFullView } from '../src/image-edit.js';
 import { newLayer } from '../src/renderer.js';
-import { checkpoint, restore, hasEdits, cutLayers, setSelection, selectedLayers, copyLayers, pasteSelectedLayers } from '../src/model.js';
+import { PROJECT_VERSION, checkpoint, restore, hasEdits, cutLayers, setSelection, selectedLayers, copyLayers, pasteSelectedLayers } from '../src/model.js';
 import { projectBlob, readProject } from '../src/project-io.js';
 import { exportKey } from '../src/export-cache.js';
 
@@ -114,7 +114,7 @@ test('both project formats retain image edits and original bytes, and edits inva
     file: new Blob(['original image bytes'], { type: 'image/png' }), src: 'data:image/png;base64,b3JpZ2luYWw=', layers: [], imageEdit: edit, edited: true };
   for (const format of ['json', 'serifu']) {
     const project = await readProject(await projectBlob([page], {}, { format }));
-    assert.equal(project.version, 10); assert.deepEqual(project.pages[0].imageEdit, edit);
+    assert.equal(project.version, PROJECT_VERSION); assert.deepEqual(project.pages[0].imageEdit, edit);
     if (format === 'serifu') { assert.equal(await project.pages[0].blob.text(), await page.file.text()); assert.equal(project.pages[0].expectedSize.width, 400); }
     else assert.equal(project.pages[0].src, page.src);
   }

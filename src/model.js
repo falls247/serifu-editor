@@ -4,7 +4,7 @@ import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } 
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
-export const PROJECT_VERSION=10;
+export const PROJECT_VERSION=11;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
@@ -41,12 +41,13 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
     for(const key of ['color','borderColor','shadowColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('吹き出しの色が不正');
     for(const [key,[min,max]] of Object.entries(BALLOON_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('吹き出しの設定が範囲外');
     if(typeof input.shadowEnabled!=='boolean'||!['solid','brush','dry-brush'].includes(input.borderStyle))throw new Error('吹き出しの影・ブラシ設定が不正');
-    if(typeof input.tail!=='boolean'||!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しのテール・重なり設定が不正');
+    if(typeof input.tail!=='boolean')throw new Error('吹き出しのテール設定が不正');
+    if(version<11&&input.sfxOrder!==undefined&&!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しの重なり設定が不正');
     const shape=input.shape??'ellipse';
     if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295||!Number.isInteger(input.spikeCount))throw new Error('吹き出しの形状が不正');
     if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font)||!['top','center'].includes(input.lineAlign))throw new Error('吹き出しのセリフ設定が不正');
     if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<0||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
-    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,...normalizeBrush(input),shadowEnabled:input.shadowEnabled,shadowColor:input.shadowColor,borderStyle:input.borderStyle,text:input.text,speaker:input.speaker,...speechColors(input),size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail','sfxOrder',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
+    return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,...normalizeBrush(input),shadowEnabled:input.shadowEnabled,shadowColor:input.shadowColor,borderStyle:input.borderStyle,text:input.text,speaker:input.speaker,...speechColors(input),size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
   }
   if (!input || typeof input.text !== 'string' || typeof input.vertical !== 'boolean') throw new Error('文字設定が不正');
   const legacy = version === 1;
@@ -85,6 +86,36 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
 }
 
 export const hasEdits = page => page.layers.length > 0 || !!page.imageEdit;
+
+// Resolve legacy kind constraints once, before dropping the obsolete sfxOrder field.
+export function normalizeLayers(layers, version = PROJECT_VERSION) {
+  let ordered=layers;
+  if(version<11){
+    const behind=layers.filter(layer=>layer.kind==='balloon'&&layer.sfxOrder!=='above');
+    const above=layers.filter(layer=>layer.kind==='balloon'&&layer.sfxOrder==='above');
+    const text=layers.filter(layer=>layer.kind!=='balloon');
+    ordered=above.length?[...behind,...text.filter(layer=>layer.kind==='sfx'),...above,...text.filter(layer=>layer.kind!=='sfx')]:[...behind,...text];
+  }
+  return ordered.map(layer=>normalizeLayer(layer,version));
+}
+
+export function reorderLayers(layers, ids, action) {
+  const selected=new Set(ids),ordered=[...layers];
+  if(action==='frontmost'||action==='backmost'){
+    const chosen=ordered.filter(layer=>selected.has(layer.id)),others=ordered.filter(layer=>!selected.has(layer.id));
+    return action==='frontmost'?[...others,...chosen]:[...chosen,...others];
+  }
+  if(action==='forward'){
+    for(let i=ordered.length-2;i>=0;i--)if(selected.has(ordered[i].id)&&!selected.has(ordered[i+1].id)){
+      [ordered[i],ordered[i+1]]=[ordered[i+1],ordered[i]];
+    }
+  }else if(action==='backward'){
+    for(let i=1;i<ordered.length;i++)if(selected.has(ordered[i].id)&&!selected.has(ordered[i-1].id)){
+      [ordered[i],ordered[i-1]]=[ordered[i-1],ordered[i]];
+    }
+  }
+  return ordered;
+}
 
 export function selectedLayers(page) {
   const ids = new Set(page.selectedIds ?? [page.selectedId]);

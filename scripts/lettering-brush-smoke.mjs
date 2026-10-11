@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {PROJECT_VERSION} from '../src/model.js';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -68,7 +69,7 @@ try {
   const preview=await source.locator('canvas').evaluate(c=>c.toDataURL());let downloading=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();const png=await downloading;
   const exported=await page.evaluate(async base64=>{const image=new Image();image.src='data:image/png;base64,'+base64;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;c.getContext('2d').drawImage(image,0,0);return c.toDataURL();},(await readFile(await png.path())).toString('base64'));
   await page.selectOption('#projectFormat','json');downloading=page.waitForEvent('download');await page.click('#projectSave');const project=JSON.parse(await readFile(await (await downloading).path(),'utf8'));
-  assert.equal(project.version,9);assert.equal(project.pages[0].layers[0].glyphSeed,Number(newSeed));assert.equal(project.pages[0].layers[1].brushSeed,0);assert.equal(project.pages[0].layers[1].brushTexture,80);
+  assert.equal(project.version,PROJECT_VERSION);assert.equal(project.pages[0].layers[0].glyphSeed,Number(newSeed));assert.equal(project.pages[0].layers[1].brushSeed,0);assert.equal(project.pages[0].layers[1].brushTexture,80);
   const expected=await page.evaluate(async project=>{const {draw}=await import('./src/renderer.js'),image=new Image();image.src=project.pages[0].src;await image.decode();const c=document.createElement('canvas');c.width=image.width;c.height=image.height;draw(c.getContext('2d'),image,project.pages[0].layers);return c.toDataURL();},project);assert.equal(expected,exported,'same full-resolution preview and PNG pixels');assert.equal(preview,exported,'actual app preview matches PNG');
   const workerPNG=await page.evaluate(async project=>{
     const {ImagePool}=await import('./src/bulk-pool.js'),pool=new ImagePool(),blob=await (await fetch(project.pages[0].src)).blob();

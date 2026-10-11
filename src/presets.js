@@ -12,7 +12,7 @@ const ratioKeys = {w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRa
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
-  balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
+  balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
@@ -86,7 +86,7 @@ export function normalizePreferences(input) {
     if(!p||p.builtin||!PRESET_KINDS.includes(p.kind)||typeof p.id!=='string'||!p.id||result.presets.some(existing=>existing.id===p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>60)continue;
     try {
       const probe=newLayer(p.kind,1000,750);applyPreset(probe,p,1000,750);
-      const style={...p.style};for(const key of ['x','y','xRatio','yRatio'])delete style[key];
+      const style={...p.style};for(const key of ['x','y','xRatio','yRatio','sfxOrder'])delete style[key];
       result.presets.push({...p,style,name:p.name.trim(),builtin:false});
     } catch {}
   }

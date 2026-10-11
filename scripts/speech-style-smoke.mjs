@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {PROJECT_VERSION} from '../src/model.js';
 import {spawn} from 'node:child_process';
 import {mkdir,readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
@@ -92,8 +93,8 @@ try {
   let saving=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();const png=await saving;
   const pngPixels=await page.evaluate(async base64=>{const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;canvas.getContext('2d').drawImage(img,0,0);return canvas.toDataURL();},(await readFile(await png.path())).toString('base64'));assert.ok(pngPixels===preview,'saved PNG must match the unselected color/outline preview');
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);saving=page.waitForEvent('download');await page.click('#projectSave');const download=await saving,projectBytes=await readFile(await download.path()),project=JSON.parse(projectBytes.toString());
-  assert.equal(project.version,10);assert.equal(project.pages[0].layers[0].textColor,'#2468aa');assert.equal(project.pages[0].layers[0].textOutlineColor,'#cc3300');assert.equal(project.pages[0].layers[0].outline,6);assert.equal(project.pages[0].layers[1].shapeSeed,4321);assert.equal(project.pages[0].layers[1].spikeCount,24);
-  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');const meta=await getDraftMeta();return meta?.version===10&&meta.pages[0].layers[1].spikeCount===24;});
+  assert.equal(project.version,PROJECT_VERSION);assert.equal(project.pages[0].layers[0].textColor,'#2468aa');assert.equal(project.pages[0].layers[0].textOutlineColor,'#cc3300');assert.equal(project.pages[0].layers[0].outline,6);assert.equal(project.pages[0].layers[1].shapeSeed,4321);assert.equal(project.pages[0].layers[1].spikeCount,24);
+  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].layers[1].spikeCount===24;});
   await page.reload();await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await dialogue.locator('[data-field=textColor]').inputValue(),'#2468aa');assert.equal(await balloon.locator('[data-field=shapeSeed]').inputValue(),'4321');assert.equal(await balloon.locator('[data-field=spikeCount]').inputValue(),'24');
   await page.reload();await page.locator('#projectInput').setInputFiles({name:'speech-style.json',mimeType:'application/json',buffer:projectBytes});await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);

@@ -72,7 +72,7 @@ export function newBalloon(width,height,speaker='male') {
     text:'',speaker,textColor:null,textOutlineColor:'#ffffff',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',textOffsetX:0,textOffsetY:0,padding:0,
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
     ...brushDefaults(id),shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
-    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),sfxOrder:'behind',
+    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),
   };
 }
 
@@ -233,10 +233,7 @@ export function paintBalloon(ctx,layer) {
   }
 }
 
-// Every balloon stays below dialogue and captions. Front balloons also require SFX below them.
+// Array order is the shared back-to-front order for every object kind.
 export function paintOrder(layers) {
-  const behind=layers.filter(layer=>layer.kind==='balloon'&&layer.sfxOrder!=='above');
-  const above=layers.filter(layer=>layer.kind==='balloon'&&layer.sfxOrder==='above');
-  const text=layers.filter(layer=>layer.kind!=='balloon');
-  return above.length?[...behind,...text.filter(layer=>layer.kind==='sfx'),...above,...text.filter(layer=>layer.kind!=='sfx')]:[...behind,...text];
+  return [...layers];
 }
