@@ -1,5 +1,5 @@
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
-import { BALLOON_LIMITS } from './balloons.js';
+import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
@@ -1445,8 +1445,13 @@ window.addEventListener('keydown', event => {
   const p = active(); if (!p) return;
   const key=event.key.toLowerCase(),command=event.ctrlKey||event.metaKey;
   if(p.cropDraft&&!(command&&key==='z'))return;
-  if (!command && !event.altKey && ['f','b','c','u'].includes(key)) {
+  if (!command && !event.altKey && ['f','b','c','u','e'].includes(key)) {
     const layer=selected(p);if(!layer)return;
+    if(key==='e'){
+      if(layer.kind!=='balloon')return;
+      const shapes=Object.keys(BALLOON_SHAPES),shape=shapes[(shapes.indexOf(layer.shape)+1)%shapes.length];
+      event.preventDefault();edit(p,()=>{layer.shape=shape;layer.presetId=null;},false);refreshPresetMenus();return;
+    }
     if(key==='c'||key==='u'){event.preventDefault();alignLayerText(p,layer,key==='c'?'center':'top');return;}
     const presets=preferences.presets.filter(preset=>preset.kind===layer.kind);if(!presets.length)return;
     const index=presets.findIndex(preset=>preset.id===layer.presetId),step=key==='f'?1:-1;
@@ -1703,7 +1708,7 @@ function alignLayerText(p,layer,alignment) {
   const changes=layer.kind==='caption'?{alignY:alignment}: {lineAlign:alignment};
   if(layer.kind==='balloon'||layer.kind==='caption'){
     changes.textOffsetY=0;
-    if(alignment==='center'){changes.textOffsetX=0;if(layer.kind==='caption')changes.alignX='center';}
+    if(alignment==='center'){changes.textOffsetX=0;changes.padding=0;if(layer.kind==='caption')changes.alignX='center';}
   }
   if(Object.entries(changes).every(([field,value])=>layer[field]===value))return;
   edit(p,()=>Object.assign(layer,changes,{presetId:null}),false);refreshPresetMenus();
