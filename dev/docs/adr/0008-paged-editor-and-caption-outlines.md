@@ -52,8 +52,8 @@ Canvasにフォーカスがあり、選択レイヤーがある場合にDelete�
 
 ## 関連コードと検証
 
-- [app.js](../../../app.js)：`createPage`、`syncVisiblePages`、`unmountPage`、`activate`、`refreshThumbnails`、Delete、`imageBlob`
-- [captions.js](../../../captions.js) / [model.js](../../../model.js)：輪郭・配置・自動追従・検証・旧データ補完・拡縮
+- [app.js](../../../src/app.js)：`createPage`、`syncVisiblePages`、`unmountPage`、`activate`、`refreshThumbnails`、Delete、`imageBlob`
+- [captions.js](../../../src/captions.js) / [model.js](../../../src/model.js)：輪郭・配置・自動追従・検証・旧データ補完・拡縮
 - [index.html](../../../index.html) / [style.css](../../../style.css)：表示範囲、サムネイル、倍率、狭い画面の配置
 - [captions.test.mjs](../../../test/captions.test.mjs)：輪郭の旧データ・値検証・コピー・履歴・自動追従
 - [paged-smoke.mjs](../../../scripts/paged-smoke.mjs)：500件の表示・範囲境界、サムネイル寸法・倍率・状態、DeleteとUndo、輪郭のPNG一致、全件保存・本文出力・復元

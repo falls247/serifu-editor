@@ -41,9 +41,9 @@
 
 ## 関連コード・確認状況
 
-- [presets.js](../../../presets.js)：種類別フィールド、比率、既定、保存データ検証
-- [model.js](../../../model.js)：吹き出し・キャプションのプリセットID復元
-- [app.js](../../../app.js) / [index.html](../../../index.html) / [style.css](../../../style.css)：保存・選択・削除・既定のUI
+- [presets.js](../../../src/presets.js)：種類別フィールド、比率、既定、保存データ検証
+- [model.js](../../../src/model.js)：吹き出し・キャプションのプリセットID復元
+- [app.js](../../../src/app.js) / [index.html](../../../index.html) / [style.css](../../../style.css)：保存・選択・削除・既定のUI
 - [ADR-0004](0004-edit-data-and-drafts.md)：保存と移行の共通経路
 
 今回の実装では構文・差分を確認。単体テスト・ブラウザでの動作検証は未実施。

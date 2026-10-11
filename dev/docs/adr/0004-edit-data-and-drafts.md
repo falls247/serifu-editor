@@ -57,10 +57,10 @@ JSONは画像をBase64で含み、元画像よりファイルサイズ・メモ�
 
 ## 関連コードと検証
 
-- [model.js](../../../model.js)：`PROJECT_VERSION`、`normalizeLayer`
-- [storage.js](../../../storage.js)：ストア、トランザクション、`saveDraft`、`getDraftImages`
-- [presets.js](../../../presets.js)：プリセット形式、`styleKeys`／`ratioKeys`、既定と補完
-- [app.js](../../../app.js)：`projectData`、JSON読込、`temporarySave`、自動保存タイマー、復元
+- [model.js](../../../src/model.js)：`PROJECT_VERSION`、`normalizeLayer`
+- [storage.js](../../../src/storage.js)：ストア、トランザクション、`saveDraft`、`getDraftImages`
+- [presets.js](../../../src/presets.js)：プリセット形式、`styleKeys`／`ratioKeys`、既定と補完
+- [app.js](../../../src/app.js)：`projectData`、JSON読込、`temporarySave`、自動保存タイマー、復元
 - [presets.test.mjs](../../../test/presets.test.mjs) / [captions.test.mjs](../../../test/captions.test.mjs)
 - [browser-smoke.mjs](../../../scripts/browser-smoke.mjs) / [caption-smoke.mjs](../../../scripts/caption-smoke.mjs) / [typography-smoke.mjs](../../../scripts/typography-smoke.mjs)：保存・復元と旧形式互換
 - [ADR一覧](README.md)

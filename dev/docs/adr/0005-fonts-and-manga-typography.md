@@ -56,9 +56,9 @@
 
 ## 関連コードと検証
 
-- [fonts.js](../../../fonts.js) / [fetch-font.mjs](../../../scripts/fetch-font.mjs)：カタログ、書体準備、規約・ハッシュ
-- [ink.js](../../../ink.js) / [renderer.js](../../../renderer.js)：字形加工、キャッシュ、`glyphFontSize`、`textGlyphs`
-- [typography.js](../../../typography.js) / [captions.js](../../../captions.js)：書記素、句読点、文字配置
+- [fonts.js](../../../src/fonts.js) / [fetch-font.mjs](../../../scripts/fetch-font.mjs)：カタログ、書体準備、規約・ハッシュ
+- [ink.js](../../../src/ink.js) / [renderer.js](../../../src/renderer.js)：字形加工、キャッシュ、`glyphFontSize`、`textGlyphs`
+- [typography.js](../../../src/typography.js) / [captions.js](../../../src/captions.js)：書記素、句読点、文字配置
 - [fonts.test.mjs](../../../test/fonts.test.mjs) / [ink.test.mjs](../../../test/ink.test.mjs) / [typography.test.mjs](../../../test/typography.test.mjs)
 - [typography-smoke.mjs](../../../scripts/typography-smoke.mjs)：添付TTF一致、句読点、先細りの実描画
 - [balloon-smoke.mjs](../../../scripts/balloon-smoke.mjs)：フォント読込待ち・失敗、GEKIFUDE、PNG一致

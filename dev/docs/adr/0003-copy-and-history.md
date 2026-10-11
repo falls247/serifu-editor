@@ -53,8 +53,8 @@
 
 ## 関連コードと検証
 
-- [model.js](../../../model.js)：`scaledCopy`、`copySelection`、`pasteSelection`、`copyLayers`、`cutLayers`、`pasteLayers`、`checkpoint`、`restore`
-- [app.js](../../../app.js)：ショートカット、ボタン、フォーカス、ドラッグ、編集済み判定
+- [model.js](../../../src/model.js)：`scaledCopy`、`copySelection`、`pasteSelection`、`copyLayers`、`cutLayers`、`pasteLayers`、`checkpoint`、`restore`
+- [app.js](../../../src/app.js)：ショートカット、ボタン、フォーカス、ドラッグ、編集済み判定
 - [renderer.test.mjs](../../../test/renderer.test.mjs) / [balloons.test.mjs](../../../test/balloons.test.mjs) / [captions.test.mjs](../../../test/captions.test.mjs)
 - [browser-smoke.mjs](../../../scripts/browser-smoke.mjs)：一括カット、繰り返し貼り付け、横長から縦長へのコピー、Undo
 - [ADR一覧](README.md)

@@ -52,9 +52,9 @@
 
 ## 関連コードと検証
 
-- [balloons.js](../../../balloons.js)：`newBalloon`、`balloonGeometry`、`balloonHit`、`paintOrder`
-- [captions.js](../../../captions.js)：`newCaption`、`captionContentBox`、`captionLayout`、`paintCaption`
-- [renderer.js](../../../renderer.js) / [model.js](../../../model.js)：共通描画・座標と種類別検証
+- [balloons.js](../../../src/balloons.js)：`newBalloon`、`balloonGeometry`、`balloonHit`、`paintOrder`
+- [captions.js](../../../src/captions.js)：`newCaption`、`captionContentBox`、`captionLayout`、`paintCaption`
+- [renderer.js](../../../src/renderer.js) / [model.js](../../../src/model.js)：共通描画・座標と種類別検証
 - [balloons.test.mjs](../../../test/balloons.test.mjs) / [captions.test.mjs](../../../test/captions.test.mjs)
 - [balloon-smoke.mjs](../../../scripts/balloon-smoke.mjs) / [caption-smoke.mjs](../../../scripts/caption-smoke.mjs)
 - [ADR一覧](README.md)

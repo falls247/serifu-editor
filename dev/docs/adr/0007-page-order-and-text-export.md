@@ -58,8 +58,8 @@
 
 ## 関連コードと検証
 
-- [app.js](../../../app.js)：`movePage`、`saveImages`、`textSave`、読込フォルダの保持
-- [export.js](../../../export.js)：本文抽出とPNG命名
+- [app.js](../../../src/app.js)：`movePage`、`saveImages`、`textSave`、読込フォルダの保持
+- [export.js](../../../src/export.js)：本文抽出とPNG命名
 - [index.html](../../../index.html) / [style.css](../../../style.css)：対象選択、ページ移動、狭い画面の操作配置
 - [export.test.mjs](../../../test/export.test.mjs)：対象・括弧・順序・改行・空本文・桁数境界・欠番
 - [export-smoke.mjs](../../../scripts/export-smoke.mjs)：画面移動、出力順、フォルダ初期位置・変更・取消・失敗、JSON・一時保存の順序保持、モバイル表示

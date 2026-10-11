@@ -44,8 +44,8 @@ HTML・CSS・JavaScriptのES ModulesとCanvas 2Dで構成し、画像の読込�
 
 ## 関連コードと検証
 
-- [app.js](../../../app.js)：`drawPage`、`prepareExportFonts`、`saveImage`、`saveImages`、`projectData`、元画像削除
-- [renderer.js](../../../renderer.js)：`draw` と字形描画
+- [app.js](../../../src/app.js)：`drawPage`、`prepareExportFonts`、`saveImage`、`saveImages`、`projectData`、元画像削除
+- [renderer.js](../../../src/renderer.js)：`draw` と字形描画
 - [server.mjs](../../../server.mjs) / [scripts/build.mjs](../../../scripts/build.mjs)：静的配信と配布ファイル
 - [balloon-smoke.mjs](../../../scripts/balloon-smoke.mjs)：単体保存、編集済みだけ保存、書体失敗、プレビューとPNGの一致
 - [browser-smoke.mjs](../../../scripts/browser-smoke.mjs)：一括保存・削除の模擬フォルダAPI
