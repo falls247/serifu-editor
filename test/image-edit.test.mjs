@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeImageEdit, imageSize, imagePoint, rotateImage, cropImage, cropRectangle, cropModeAt, dragCropRectangle } from '../src/image-edit.js';
+import { normalizeImageEdit, imageSize, imagePoint, rotateImage, cropImage, cropRectangle, cropModeAt, dragCropRectangle, uncroppedImageEdit, cropInFullView } from '../src/image-edit.js';
 import { newLayer } from '../src/renderer.js';
 import { checkpoint, restore, hasEdits, cutLayers, setSelection, selectedLayers, copyLayers, pasteSelectedLayers } from '../src/model.js';
 import { projectBlob, readProject } from '../src/project-io.js';
@@ -30,6 +30,22 @@ test('cropping a rotated view composes in source coordinates without discarding 
   let edit = null;
   for (let i = 0; i < 4; i++) edit = rotateImage(400, 300, edit, 90);
   assert.equal(edit, null); assert.equal(normalizeImageEdit({}, 400, 300), null);
+});
+
+test('reopening any rotated crop restores its frame on the full original and can recover discarded areas', () => {
+  const crop = { x: 50, y: 30, width: 200, height: 100 };
+  const expected = [[50,30,200,100], [170,50,100,200], [150,170,200,100], [30,150,100,200]];
+  for (const [index, rotation] of [0,90,180,270].entries()) {
+    const edit = normalizeImageEdit({ crop, rotation }, 400, 300), saved = structuredClone(edit);
+    const fullEdit = uncroppedImageEdit(400, 300, edit), rect = cropInFullView(400, 300, edit);
+    const [x,y,width,height] = expected[index]; assert.deepEqual(rect, { x,y,width,height });
+    assert.deepEqual(cropImage(400, 300, fullEdit, rect), edit, 'unchanged frame preserves the committed crop');
+    const size = imageSize(400, 300, fullEdit);
+    assert.deepEqual(size, rotation % 180 ? { width:300, height:400 } : { width:400, height:300 });
+    assert.deepEqual(cropImage(400, 300, fullEdit, { x:0, y:0, ...size }), fullEdit, 'all original pixels can be restored without removing rotation');
+    assert.deepEqual(edit, saved, 'opening the crop view does not mutate committed edits');
+  }
+  assert.deepEqual(cropInFullView(400, 300, null), { x:0, y:0, width:400, height:300 });
 });
 
 test('invalid image edits cannot request out-of-source or empty output; reverse drags stay in bounds', () => {

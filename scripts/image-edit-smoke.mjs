@@ -114,6 +114,19 @@ try {
   assert.deepEqual(await cropValues(), { x: 20, y: 15, width: 180, height: 135 });
   assert.equal(await row().locator('.edited-badge').isVisible(), false);
   await page.keyboard.press('Escape'); assert.equal(await row().locator('.crop-controls').isVisible(), false); assert.equal(await row().locator('.edited-badge').isVisible(), false);
+  // Re-crop from the entire original, including areas outside the first crop.
+  await row().locator('[data-action=crop-image]').click();
+  for(const [field,value] of Object.entries({x:40,y:30,width:100,height:80}))await row().locator(`[data-crop-field=${field}]`).fill(String(value));
+  await row().locator('[data-action=apply-crop]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[100,80]);
+  await row().locator('[data-action=crop-image]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[400,300]);
+  assert.deepEqual(await cropValues(),{x:40,y:30,width:100,height:80});
+  await dragCrop({x:220,y:160},{x:350,y:260});await row().locator('[data-action=apply-crop]').click();
+  assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[130,100]);
+  assert.deepEqual(await canvas().evaluate(c=>[...c.getContext('2d').getImageData(10,10,1,1).data]),[0,0,255,255]);
+  await row().locator('[data-action=crop-image]').click();
+  for(const [field,value] of Object.entries({x:0,y:0,width:400,height:300}))await row().locator(`[data-crop-field=${field}]`).fill(String(value));
+  await row().locator('[data-action=apply-crop]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[400,300]);
+  assert.equal(await row().locator('.edited-badge').isVisible(),false,'selecting the whole original removes the crop edit');
   await row().locator('[data-action=add-caption]').click();
   const caption = row().locator('[data-kind=caption]'); await caption.locator('textarea').fill('');
   for (const [field, value] of Object.entries({ x: 80, y: 80, w: 60, h: 60, color: '#00ff00', borderWidth: 0 })) {
@@ -131,6 +144,26 @@ try {
   saved = await saveDraft(); assert.deepEqual(saved[0].imageEdit, { rotation: 90, crop: { x: 20, y: 20, width: 180, height: 120 } });
   await canvas().focus(); await page.keyboard.press('Control+z'); assert.deepEqual(await canvas().evaluate(c => [c.width, c.height]), [300, 400]);
   await page.keyboard.press('Control+Shift+z'); assert.deepEqual(await canvas().evaluate(c => [c.width, c.height]), [120, 180]);
+  const committedCrop=structuredClone(saved[0]);
+  await row().locator('[data-action=crop-image]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[300,400]);
+  assert.deepEqual(await cropValues(),{x:160,y:20,width:120,height:180});
+  await row().locator('[data-action=apply-crop]').click();
+  // Reapplying the unchanged frame must not create another Undo entry.
+  await canvas().focus();await page.keyboard.press('Control+z');assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[300,400]);
+  await page.keyboard.press('Control+Shift+z');
+  await row().locator('[data-action=crop-image]').click();
+  await dragCrop({x:30,y:240},{x:130,y:360},300,400);
+  await row().locator('[data-action=cancel-crop]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[120,180]);
+  saved=await saveDraft();assert.deepEqual(saved[0].imageEdit,committedCrop.imageEdit);assert.deepEqual(saved[0].layers,committedCrop.layers);
+  await row().locator('[data-action=crop-image]').click();
+  await dragCrop({x:160,y:110},{x:120,y:110},300,400);await dragCrop({x:200,y:200},{x:200,y:240},300,400);
+  assert.deepEqual(await cropValues(),{x:120,y:20,width:160,height:220});
+  await row().locator('[data-action=apply-crop]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[160,220]);
+  assert.deepEqual(await canvas().evaluate(c=>[...c.getContext('2d').getImageData(10,210,1,1).data]),[0,0,255,255],'expanding a rotated crop recovers original pixels');
+  saved=await saveDraft();assert.deepEqual(saved[0].imageEdit,{rotation:90,crop:{x:20,y:20,width:220,height:160}});assert.deepEqual(saved[0].layers,committedCrop.layers);
+  await canvas().focus();await page.keyboard.press('Control+z');assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[120,180]);
+  await page.keyboard.press('Control+Shift+z');assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[160,220]);
+  await page.keyboard.press('Control+z');await saveDraft();
   // Hit testing and movement follow the transformed image; source coordinates remain intact.
   await clickPoint(60, 60, 120, 180); assert.equal(await row().locator('.layer-card.selected').getAttribute('data-kind'), 'caption');
   await page.keyboard.press('ArrowRight'); assert.equal(await row().locator('.position-controls [data-field=y]').inputValue(), '79');
@@ -171,15 +204,24 @@ try {
     await restored.locator('#projectInput').setInputFiles({ name: `test.${format}`, mimeType: format === 'json' ? 'application/json' : 'application/octet-stream', buffer: await readFile(await download.path()) });
     await restored.waitForFunction(() => document.querySelectorAll('.thumbnail').length === 4 && !document.querySelector('#projectLoad').disabled);
     assert.deepEqual(await restored.locator('.image-row.active canvas').evaluate(c => [c.width, c.height]), [120, 180]);
-    assert.deepEqual(await restored.locator('.image-row.active .original').evaluate(img => [img.naturalWidth, img.naturalHeight]), [400, 300]); await restored.close();
+    assert.deepEqual(await restored.locator('.image-row.active .original').evaluate(img => [img.naturalWidth, img.naturalHeight]), [400, 300]);
+    await restored.locator('.image-row.active [data-action=crop-image]').click();
+    assert.deepEqual(await restored.locator('.image-row.active canvas').evaluate(c=>[c.width,c.height]),[300,400]);
+    assert.deepEqual(await restored.locator('.image-row.active [data-crop-field]').evaluateAll(inputs=>Object.fromEntries(inputs.map(i=>[i.dataset.cropField,Number(i.value)]))),{x:160,y:20,width:120,height:180});
+    for(const [field,value] of Object.entries({x:0,y:0,width:300,height:400}))await restored.locator(`.image-row.active [data-crop-field=${field}]`).fill(String(value));
+    await restored.locator('.image-row.active [data-action=apply-crop]').click();assert.deepEqual(await restored.locator('.image-row.active canvas').evaluate(c=>[c.width,c.height]),[300,400]);
+    assert.equal(await restored.locator('.image-row.active .layer-card').count(),1);await restored.close();
   }
   await saveDraft(); page.on('dialog', dialog => dialog.accept()); await page.reload(); await page.locator('#restoreDraft').click();
   await page.waitForFunction(() => document.querySelectorAll('.thumbnail').length === 4 && !document.querySelector('#projectLoad').disabled);
   assert.deepEqual(await canvas().evaluate(c => [c.width, c.height]), [120, 180]);
+  await row().locator('[data-action=crop-image]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[300,400]);
+  assert.deepEqual(await cropValues(),{x:160,y:20,width:120,height:180});
+  await row().locator('[data-action=crop-image]').click();assert.deepEqual(await canvas().evaluate(c=>[c.width,c.height]),[120,180]);
   await row().locator('[data-action=cut-all]').click(); await page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);
   assert.equal(await row().locator('.edited-badge').isVisible(), true); await row().locator('[data-action=reset-image]').click();
   assert.equal(await row().locator('.edited-badge').isVisible(), false); await row().locator('[data-action=rotate-left]').click();
   for (let i = 0; i < 3; i++) await row().locator('[data-action=rotate-left]').click(); assert.equal(await row().locator('.edited-badge').isVisible(), false);
   assert.deepEqual(errors, []);
-  console.log('Shift group copy/paste, original duplication, reversible crop/rotation, transformed hit testing, PNG pixels and Worker parity, thumbnails and project/draft restore passed');
+  console.log('Shift group copy/paste, original duplication, re-cropping the full original, crop expansion/reselection/cancellation, rotation, transformed hit testing, PNG pixels and Worker parity, thumbnails and project/draft restore passed');
 } finally { await browser?.close(); server.kill(); }

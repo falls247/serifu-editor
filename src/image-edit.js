@@ -35,6 +35,20 @@ export function rotateImage(width, height, edit, degrees) {
   return normalizeImageEdit({ crop: edit?.crop, rotation: ((edit?.rotation ?? 0) + degrees + 360) % 360 }, width, height);
 }
 
+export function uncroppedImageEdit(width, height, edit) {
+  return normalizeImageEdit({ rotation: edit?.rotation ?? 0 }, width, height);
+}
+
+// Reopen the saved source rectangle on the full original, retaining its rotation.
+export function cropInFullView(width, height, edit) {
+  const crop = edit?.crop ?? { x: 0, y: 0, width, height };
+  const fullEdit = uncroppedImageEdit(width, height, edit);
+  const corners = [{ x: crop.x, y: crop.y }, { x: crop.x + crop.width, y: crop.y + crop.height }]
+    .map(point => imagePoint(point, width, height, fullEdit));
+  return { x: Math.min(...corners.map(p => p.x)), y: Math.min(...corners.map(p => p.y)),
+    width: Math.abs(corners[1].x - corners[0].x), height: Math.abs(corners[1].y - corners[0].y) };
+}
+
 export function cropImage(width, height, edit, rect) {
   const size = imageSize(width, height, edit);
   normalizeImageEdit({ crop: rect }, size.width, size.height);

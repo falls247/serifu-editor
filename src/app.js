@@ -4,7 +4,7 @@ import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
 import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
-import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropHandles, cropModeAt, dragCropRectangle } from './image-edit.js';
+import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropHandles, cropModeAt, dragCropRectangle, uncroppedImageEdit, cropInFullView } from './image-edit.js';
 import { openFullPreview, previewIsOpen } from './preview-modal.js';
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
@@ -231,14 +231,18 @@ function updateGlobal() {
   });
 }
 
+function previewImageEdit(p) {
+  return p.cropDraft ? uncroppedImageEdit(p.img.width,p.img.height,p.imageEdit) : p.imageEdit;
+}
+
 function drawPage(p) {
   if (!p?.canvas) return;
   requestPageFonts(p);
   if (!p.img.complete || !p.img.naturalWidth) return;
-  const size=imageSize(p.img.width,p.img.height,p.imageEdit),scale = p.canvas.width / size.width;
+  const imageEdit=previewImageEdit(p),size=imageSize(p.img.width,p.img.height,imageEdit),scale = p.canvas.width / size.width;
   const displayScale = p.canvas.getBoundingClientRect().width / size.width || scale;
   const ctx=p.canvas.getContext('2d');
-  draw(ctx, p.img, p.layers, !p.cropDraft && p.id === activeId ? [p.selectedId,...(p.selectedIds??[]).filter(id=>id!==p.selectedId)] : null, scale, displayScale,p.imageEdit);
+  draw(ctx, p.img, p.layers, !p.cropDraft && p.id === activeId ? [p.selectedId,...(p.selectedIds??[]).filter(id=>id!==p.selectedId)] : null, scale, displayScale,imageEdit);
   if(p.cropDraft){
     const r=p.cropDraft;ctx.save();ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0009';
     ctx.beginPath();ctx.rect(0,0,size.width,size.height);ctx.rect(r.x,r.y,r.width,r.height);ctx.fill('evenodd');
@@ -302,7 +306,7 @@ function persistPageControl(p) {
 function sizePreview(p) {
   if (!p.row) return;
   const frame=p.row.querySelector('.preview-frame'),originalFrame=p.row.querySelector('.original-frame');
-  const size=imageSize(p.img.width,p.img.height,p.imageEdit),maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
+  const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
   for(const image of [p.canvas,p.row.querySelector('.original')]){
     const aspect=image===p.canvas?size.width/size.height:p.img.width/p.img.height;
     const imageFrame=image===p.canvas?frame:originalFrame;
@@ -315,10 +319,11 @@ function sizePreview(p) {
 
 function updateImageView(p) {
   if(!p?.row)return;
-  const size=imageSize(p.img.width,p.img.height,p.imageEdit),scale=Math.min(1,1400/Math.max(size.width,size.height));
+  const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),scale=Math.min(1,1400/Math.max(size.width,size.height));
   const width=Math.max(1,Math.round(size.width*scale)),height=Math.max(1,Math.round(size.height*scale));
   if(p.canvas.width!==width)p.canvas.width=width;if(p.canvas.height!==height)p.canvas.height=height;
-  p.row.querySelector('.image-edit-summary').textContent=`保存サイズ ${size.width} × ${size.height} · 回転 ${p.imageEdit?.rotation??0}°`;
+  const savedSize=imageSize(p.img.width,p.img.height,p.imageEdit);
+  p.row.querySelector('.image-edit-summary').textContent=`保存サイズ ${savedSize.width} × ${savedSize.height} · 回転 ${p.imageEdit?.rotation??0}°`;
   p.row.querySelector('.crop-controls').hidden=!p.cropDraft;p.canvas.classList.toggle('cropping',!!p.cropDraft);
   if(!p.cropDraft)p.canvas.style.removeProperty('cursor');
   p.row.querySelector('[data-action=crop-image]').setAttribute('aria-expanded',String(!!p.cropDraft));
@@ -800,7 +805,7 @@ $('deck').addEventListener('input', event => {
   if(event.target.matches('[data-crop-field]')){
     const p=pageFrom(event.target);if(!p?.cropDraft)return;
     const input=event.target;if(input.value===''||!Number.isFinite(input.valueAsNumber))return;
-    const size=imageSize(p.img.width,p.img.height,p.imageEdit),field=input.dataset.cropField;
+    const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),field=input.dataset.cropField;
     p.cropDraft[field]=clamp(Math.round(input.valueAsNumber),field==='x'||field==='y'?0:1,Number(input.max));
     p.cropDraft.width=Math.min(p.cropDraft.width,size.width-p.cropDraft.x);p.cropDraft.height=Math.min(p.cropDraft.height,size.height-p.cropDraft.y);
     input.value=String(p.cropDraft[field]);updateImageView(p);return;
@@ -878,12 +883,12 @@ $('deck').addEventListener('click', event => {
     persistPageControl(p);openFullPreview(p,event.target.closest('button'));
   } else if(action==='crop-image'){
     if(p.cropDraft)cancelCrop(p);
-    else{const size=imageSize(p.img.width,p.img.height,p.imageEdit);p.cropDraft={x:0,y:0,...size};updateImageView(p);updateGlobal();}
+    else{p.cropDraft=cropInFullView(p.img.width,p.img.height,p.imageEdit);updateImageView(p);updateGlobal();}
   } else if(action==='cancel-crop'){
     cancelCrop(p);
   } else if(action==='apply-crop'&&p.cropDraft){
     if(![...p.row.querySelectorAll('[data-crop-field]')].every(input=>input.reportValidity()))return;
-    const next=cropImage(p.img.width,p.img.height,p.imageEdit,p.cropDraft);cancelCrop(p);
+    const next=cropImage(p.img.width,p.img.height,previewImageEdit(p),p.cropDraft);cancelCrop(p);
     if(JSON.stringify(next)!==JSON.stringify(p.imageEdit))edit(p,()=>{p.imageEdit=next;});
   } else if(action==='rotate-left'||action==='rotate-right'){
     if(p.cropDraft)return;
@@ -928,14 +933,14 @@ async function bulkLayers(action,p,task){
 
 function previewCoords(event, p) {
   const rect = p.canvas.getBoundingClientRect();
-  const size=imageSize(p.img.width,p.img.height,p.imageEdit);
+  const size=imageSize(p.img.width,p.img.height,previewImageEdit(p));
   return { x: (event.clientX - rect.left) * size.width / rect.width, y: (event.clientY - rect.top) * size.height / rect.height };
 }
 function coords(event,p){return imagePoint(previewCoords(event,p),p.img.width,p.img.height,p.imageEdit,true);}
 
 const CROP_CURSORS={create:'crosshair',move:'move',n:'ns-resize',s:'ns-resize',e:'ew-resize',w:'ew-resize',nw:'nwse-resize',se:'nwse-resize',ne:'nesw-resize',sw:'nesw-resize'};
 function cropPointerMode(p,pos){
-  const size=imageSize(p.img.width,p.img.height,p.imageEdit);
+  const size=imageSize(p.img.width,p.img.height,previewImageEdit(p));
   return cropModeAt(p.cropDraft,pos,size.width,size.height,p.canvas.getBoundingClientRect().width/size.width);
 }
 
@@ -964,7 +969,7 @@ function connectCanvas(p) {
       if(editLocked())return;
       const pointer=p.cropPointer,pos=previewCoords(event,p);
       if(pointer?.id===event.pointerId){
-        const size=imageSize(p.img.width,p.img.height,p.imageEdit);
+        const size=imageSize(p.img.width,p.img.height,previewImageEdit(p));
         p.cropDraft=dragCropRectangle(pointer.before,pointer.mode,pointer.start,pos,size.width,size.height);updateImageView(p);
       }else if(!pointer)p.canvas.style.cursor=CROP_CURSORS[cropPointerMode(p,pos)];
       return;
