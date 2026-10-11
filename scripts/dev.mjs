@@ -25,10 +25,9 @@ process.once('SIGINT',()=>stop());process.once('SIGTERM',()=>stop());
 start(process.execPath,['server.mjs'],root);
 start(uv,['run','--locked',...(process.env.SAM3_MOCK==='1'?[]:['--extra','gpu']),'python','-m','uvicorn','app.main:app','--host','127.0.0.1','--port',String(apiPort)],backend,{...process.env,UI_ORIGINS:process.env.UI_ORIGINS||`http://localhost:${uiPort},http://127.0.0.1:${uiPort}`});
 console.log(`UI: http://localhost:${uiPort} / SAM3: http://127.0.0.1:${apiPort}`);
-console.log(`モデル: ${process.env.SAM3_MODEL_PATH||`${homedir()}/dev/models/vision/sam3.pt`}`);
 async function waitReady(){
   for(let i=0;i<120&&!stopping;i++){
-    try{const response=await fetch(`http://127.0.0.1:${uiPort}/api/sam3/health`,{signal:AbortSignal.timeout(1500)});if(response.ok){const health=await response.json();console.log(`SAM3: ${health.status} / GPU: ${health.gpuAvailable?'利用可能':'未利用'}${health.error?` / ${health.error.message||health.error.code}`:''}`);return;}}
+    try{const response=await fetch(`http://127.0.0.1:${uiPort}/api/sam3/health`,{signal:AbortSignal.timeout(1500)});if(response.ok){const health=await response.json();console.log(`SAM3: ${health.status} / GPU: ${health.gpuAvailable?'利用可能':'未利用'}${health.error?` / ${health.error.message||health.error.code}`:''}`);if(health.modelPath)console.log(`モデル: ${health.modelPath}`);return;}}
     catch{}await delay(500);
   }
   if(!stopping){console.error('SAM3ヘルスチェックが応答しなかった');stop(1);}

@@ -19,6 +19,8 @@ function roundedScore(score) { return `${(Number(score) * 100).toFixed(1)}%`; }
 function createPanel(panel) {
   panel.innerHTML = `
     <header class="sam3-panel-header"><div><span class="sam3-kicker">LOCAL SEGMENTATION</span><strong>SAM3 マスク</strong></div><button type="button" data-sam3-action="health">接続確認</button></header>
+    <div class="sam3-model-path-row"><label>SAM3モデルのパス<input data-sam3-model-path type="text" maxlength="4096" placeholder="/home/user/dev/models/vision/sam3.pt" autocomplete="off" spellcheck="false"></label><button type="button" data-sam3-action="save-model-path" disabled>保存</button></div>
+    <p class="sam3-model-path-status" data-sam3-model-path-status role="status">モデルパスを取得中…</p>
     <p class="sam3-connection" data-sam3-connection role="status">ローカル推論APIに接続中…</p>
     <div class="sam3-prompt-row"><label>テキストで対象を検出<input data-sam3-prompt maxlength="500" placeholder="例：赤い傘を持つ人物" autocomplete="off"></label><button type="button" class="primary" data-sam3-action="detect">検出</button></div>
     <div class="sam3-input-tools"><label>信頼度 <output data-sam3-threshold-value>0.50</output><input data-sam3-threshold type="range" min="0" max="1" step="0.05" value="0.5"></label><span data-sam3-request-status role="status">待機中</span></div>
@@ -29,7 +31,6 @@ function createPanel(panel) {
     <div class="sam3-candidates" data-sam3-candidates><p class="sam3-empty">検出結果はまだない。</p></div>
     <div class="sam3-effect-settings"><label>選択候補の効果<select data-sam3-effect></select></label><label data-sam3-block-wrap>ブロック幅（px）<input data-sam3-block type="number" min="1" max="200" step="1" value="20"></label><label data-sam3-blur-wrap hidden>ぼかし半径（px）<input data-sam3-blur type="number" min="0" max="100" step="1" value="12"></label></div>
     <p class="sam3-warning sam3-response-warning" data-sam3-warning role="status" hidden></p>
-    <p class="sam3-warning">ピクセレートとぼかしは匿名化を保証しない。SAM3へは127.0.0.1のローカルAPI経由で画像を送る。</p>
     <p class="sam3-warning">文字の一括コピー／ペーストは文字専用。SAM3マスクは対象外。</p>
     <p class="sam3-error" data-sam3-error role="alert" hidden></p>
     <div class="sam3-actions"><button type="button" data-sam3-action="cancel">キャンセル</button><button type="button" class="primary" data-sam3-action="commit" disabled>選択候補を加工に追加</button></div>`;
@@ -114,6 +115,41 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   const candidateCanvas = element('canvas', 'sam3-mask-raster');
   const thresholdInput = query('[data-sam3-threshold]'), promptInput = query('[data-sam3-prompt]');
   let hoverId = null, thresholdTimer = null, disposed = false;
+  const modelPathInput = query('[data-sam3-model-path]'), modelPathStatus = query('[data-sam3-model-path-status]');
+  let savedModelPath = null, modelPathDirty = false, savingModelPath = false, healthSequence = 0;
+
+  function updateModelPathControls() {
+    query('[data-sam3-action=save-model-path]').disabled = savingModelPath || requestRunning() || savedModelPath === null || !modelPathInput.value.trim() || modelPathInput.value.trim() === savedModelPath;
+    modelPathInput.disabled = savingModelPath;
+  }
+
+  function receiveModelPath(value) {
+    if (typeof value !== 'string') return;
+    savedModelPath = value;
+    if (!modelPathDirty) modelPathInput.value = value;
+    updateModelPathControls();
+  }
+
+  client.addEventListener('model-path-saved', event => {
+    receiveModelPath(event.detail);
+    void checkHealth(true);
+  }, { signal });
+
+  async function saveModelPath() {
+    if (query('[data-sam3-action=save-model-path]').disabled) return;
+    savingModelPath = true; updateModelPathControls();
+    modelPathStatus.textContent = '保存中…';
+    try {
+      const result = await client.saveModelPath(modelPathInput.value.trim());
+      if (disposed) return;
+      modelPathDirty = false; receiveModelPath(result.modelPath);
+      modelPathStatus.textContent = '保存済み · 次の推論から使用';
+    } catch (error) {
+      if (!disposed) modelPathStatus.textContent = `保存に失敗: ${error.message}`;
+    } finally {
+      if (!disposed) { savingModelPath = false; updateModelPathControls(); }
+    }
+  }
 
   promptInput.value = draft.prompt || '';
   thresholdInput.value = String(draft.threshold ?? 0.5);
@@ -147,6 +183,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function updateControls() {
+    updateModelPathControls();
     const selected = selectedCandidates(draft), canCommit = selected.length > 0 && inputMatchesLastGood() && !requestRunning();
     query('[data-sam3-action=commit]').disabled = !canCommit;
     query('[data-sam3-action=detect]').disabled = !['ready', 'error'].includes(draft.connection) || requestRunning() || !String(draft.prompt || '').trim() || !image.naturalWidth;
@@ -160,6 +197,8 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function setConnection(health) {
+    receiveModelPath(health.modelPath);
+    if (!modelPathDirty && !savingModelPath) modelPathStatus.textContent = savedModelPath === null ? 'モデルパスを取得できない' : '保存済み';
     draft.connection = 'ready';
     let message = 'ローカルAPI接続済み';
     if (health.status === 'ready') message += health.modelLoaded ? ' · SAM3準備完了' : ' · 次の推論でモデルをロード';
@@ -176,15 +215,17 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
 
   async function checkHealth(force = false) {
     if (disposed) return;
+    const sequence = ++healthSequence;
     const node = query('[data-sam3-connection]'); node.textContent = 'ローカル推論APIに接続中…';
     try {
       const health = await client.health({ force });
-      if (disposed) return;
+      if (disposed || sequence !== healthSequence) return;
       setConnection(health);
     }
     catch (error) {
-      if (disposed) return;
+      if (disposed || sequence !== healthSequence) return;
       draft.connection = 'unavailable';
+      if (savedModelPath === null) modelPathStatus.textContent = 'モデルパスを取得できない。ローカルAPIへの接続を確認。';
       node.textContent = `ローカル推論APIを利用できない: ${error.message}。GitHub Pagesでは新規検出を使えない。保存済みマスクの編集・保存は続けられる。`;
       updateControls();
     }
@@ -427,6 +468,10 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }, { signal });
 
   root.addEventListener('input', event => {
+    if (event.target === modelPathInput) {
+      modelPathDirty = modelPathInput.value.trim() !== savedModelPath;
+      modelPathStatus.textContent = modelPathDirty ? '未保存' : '保存済み'; updateModelPathControls(); return;
+    }
     if (event.target === promptInput) {
       draft.prompt = promptInput.value; updateControls(); return;
     }
@@ -454,6 +499,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     const action = event.target.closest('[data-sam3-action]')?.dataset.sam3Action;
     if (!action) return;
     if (action === 'health') { void checkHealth(true); return; }
+    if (action === 'save-model-path') { void saveModelPath(); return; }
     if (action === 'detect') { inferText(); return; }
     if (action === 'clear-points') { draft.points = []; renderPoints(); drawOverlay(); updateControls(); return; }
     if (action === 'all' || action === 'none') {

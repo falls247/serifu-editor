@@ -5,7 +5,8 @@ import logging
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any
 
 from .engine import EngineCandidate, EngineError, EngineResult
@@ -75,6 +76,39 @@ class JobManager:
         self._active: Job | None = None
         self._stopping = False
         self._last_inference_finished: float | None = None
+        self._updating_model_path = False
+
+    async def set_model_path(self, value: str) -> Path:
+        if self._gpu_lock.locked() or self._active is not None or not self._pending.empty():
+            raise ApiException(
+                "MODEL_BUSY", "モデル読込・推論が終わってから保存を再試行。",
+                status=409, retryable=True,
+            )
+        try:
+            model_path = Path(value).expanduser().resolve()
+        except (OSError, RuntimeError, ValueError):
+            raise ApiException("INVALID_MODEL_PATH", "モデルパスが不正。", status=422) from None
+        async with self._gpu_lock:
+            self._updating_model_path = True
+            try:
+                try:
+                    await asyncio.to_thread(self.settings.save_model_path, model_path)
+                except OSError:
+                    raise ApiException(
+                        "SETTINGS_SAVE_FAILED", "モデルパスを保存できない。保存先の権限を確認。",
+                        status=500, retryable=True,
+                    ) from None
+                if model_path != self.settings.model_path:
+                    await asyncio.to_thread(self.engine.unload)
+                    self.settings = replace(self.settings, model_path=model_path)
+                    self.engine.settings = self.settings
+                    self.engine.status = "unloaded"
+                    self.engine.load_error = None
+                    self.engine.load_error_message = None
+                    self.candidates.clear()
+            finally:
+                self._updating_model_path = False
+        return model_path
 
     async def start(self) -> None:
         self._stopping = False
@@ -135,6 +169,11 @@ class JobManager:
         self._startup_load_task = None
 
     def submit(self, request: InferRequest) -> Job:
+        if self._updating_model_path:
+            raise ApiException(
+                "MODEL_BUSY", "モデルパスの保存が終わってから検出を再試行。",
+                status=409, retryable=True, request_id=request.requestId,
+            )
         request.validate_mode()
         try:
             image = self.image_cache.get(request.imageId)

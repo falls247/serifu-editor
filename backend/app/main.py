@@ -18,7 +18,7 @@ from .engine import EngineError, MockSam3Engine, Sam3Engine
 from .image_cache import ImageCache, ImageCacheFullError
 from .image_io import InvalidImage, decode_image
 from .jobs import ApiException, JobManager
-from .schemas import HealthError, HealthResponse, InferRequest
+from .schemas import HealthError, HealthResponse, InferRequest, ModelSettingsRequest
 from .settings import Settings
 
 logger = logging.getLogger("serifu.sam3")
@@ -324,8 +324,14 @@ def create_app(
             modelLoaded=bool(engine.model_loaded),
             gpuAvailable=bool(engine.gpu_available),
             version=f"{__version__};sam3={engine.version}",
+            modelPath=str(engine.settings.model_path),
             error=error,
         )
+
+    @app.post("/api/sam3/settings")
+    async def save_model_settings(request: ModelSettingsRequest) -> dict[str, str]:
+        model_path = await manager.set_model_path(request.modelPath)
+        return {"modelPath": str(model_path)}
 
     @app.post("/api/sam3/images", status_code=201)
     async def upload_image(request: Request) -> dict[str, Any]:

@@ -11,6 +11,8 @@ let browser;
 const inferRequests = [], deletedJobs = [], jobs = new Map(), latestByRequestScope = new Map();
 const imageWidth = 400, imageHeight = 300;
 let healthErrorMode = false;
+let modelPath = '/models/sam3.pt', settingsFailure = false;
+const modelPathSaves = [];
 
 function solidMask(x, y, width = 50, height = 50) {
   const pixels = new Uint8Array(imageWidth * imageHeight);
@@ -63,8 +65,14 @@ async function makeImage(page) {
 async function fulfillApi(route) {
   const request = route.request(), url = new URL(request.url()), pathname = url.pathname;
   if (pathname === '/api/sam3/health') return route.fulfill({ json: healthErrorMode
-    ? { status: 'error', modelLoaded: false, gpuAvailable: true, error: { code: 'MODEL_NOT_FOUND', message: 'SAM3モデルが見つからない' } }
-    : { status: 'ready', modelLoaded: true, gpuAvailable: true } });
+    ? { status: 'error', modelLoaded: false, gpuAvailable: true, modelPath, error: { code: 'MODEL_NOT_FOUND', message: 'SAM3モデルが見つからない' } }
+    : { status: 'ready', modelLoaded: true, gpuAvailable: true, modelPath } });
+  if (pathname === '/api/sam3/settings' && request.method() === 'POST') {
+    if (settingsFailure) return route.fulfill({ status: 500, json: { error: { code: 'SETTINGS_SAVE_FAILED', message: '保存先の権限を確認' } } });
+    modelPath = request.postDataJSON().modelPath;
+    modelPathSaves.push(modelPath);
+    return route.fulfill({ json: { modelPath } });
+  }
   if (pathname === '/api/sam3/images' && request.method() === 'POST') return route.fulfill({ json: { imageId: 'mock-image', width: imageWidth, height: imageHeight, expiresAt: '2099-01-01T00:00:00Z' } });
   if (pathname === '/api/sam3/infer' && request.method() === 'POST') {
     const payload = request.postDataJSON(), split = payload.requestId?.lastIndexOf(':') ?? -1;
@@ -110,6 +118,35 @@ try {
   await makeImage(page);
   const row = page.locator('.image-row.active'), panel = row.locator('.sam3-panel'), overlay = row.locator('.sam3-overlay');
   await page.waitForFunction(() => document.querySelector('.sam3-connection')?.textContent.includes('接続済み'));
+
+  const pathInput = panel.locator('[data-sam3-model-path]'), savePath = panel.locator('[data-sam3-action=save-model-path]');
+  assert.equal(await pathInput.inputValue(), '/models/sam3.pt');
+  assert.equal(await savePath.isDisabled(), true);
+  assert.equal(await panel.locator('text=ピクセレートとぼかしは').count(), 0);
+  assert.equal(await pathInput.evaluate(input => !!input.closest('.original-pane')?.querySelector('.preview-label')), true);
+  await pathInput.fill('/models/new sam3.pt');
+  assert.deepEqual(modelPathSaves, [], 'editing path alone does not save');
+  assert.equal(modelPath, '/models/sam3.pt');
+  assert.match(await panel.locator('[data-sam3-model-path-status]').innerText(), /未保存/);
+  await panel.locator('[data-sam3-action=health]').click();
+  await page.waitForFunction(() => document.querySelector('.sam3-connection')?.textContent.includes('接続済み'));
+  assert.equal(await pathInput.inputValue(), '/models/new sam3.pt', 'health refresh preserves unsaved edits');
+  await savePath.click();
+  await page.waitForFunction(() => document.querySelector('[data-sam3-model-path-status]')?.textContent.startsWith('保存済み'));
+  assert.deepEqual(modelPathSaves, ['/models/new sam3.pt']);
+  assert.equal(await savePath.isDisabled(), true);
+  settingsFailure = true;
+  await pathInput.fill('/models/failed.pt');
+  await savePath.click();
+  await page.waitForFunction(() => document.querySelector('[data-sam3-model-path-status]')?.textContent.includes('保存に失敗'));
+  assert.equal(await pathInput.inputValue(), '/models/failed.pt', 'failed save preserves edited path');
+  assert.equal(modelPath, '/models/new sam3.pt');
+  assert.equal(await savePath.isEnabled(), true);
+  settingsFailure = false;
+  await pathInput.fill(modelPath);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await makeImage(page);
+  await page.waitForFunction(() => document.querySelector('[data-sam3-model-path]')?.value === '/models/new sam3.pt');
 
   const promptInput=panel.locator('[data-sam3-prompt]');
   await page.evaluate(()=>{window.__sam3DetectClicks=0;document.querySelector('[data-sam3-action=detect]').addEventListener('click',()=>window.__sam3DetectClicks++);});

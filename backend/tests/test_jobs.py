@@ -11,7 +11,7 @@ import pytest
 
 from app.engine import EngineCandidate, EngineResult, MockSam3Engine, Sam3Engine
 from app.image_cache import ImageCache
-from app.jobs import CandidateRecord, Job, JobManager
+from app.jobs import ApiException, CandidateRecord, Job, JobManager
 from app.mask_codec import encode_mask
 from app.schemas import InferRequest
 from app.settings import Settings
@@ -37,6 +37,54 @@ def _points_request() -> InferRequest:
 
 def _candidate(mask: np.ndarray) -> EngineCandidate:
     return EngineCandidate(score=0.9, mask=encode_mask(mask))
+
+
+def test_model_path_change_rejected_during_model_operation(tmp_path: Path) -> None:
+    config = _settings(model_settings_file=tmp_path / "settings.json")
+    engine = MockSam3Engine(config)
+    manager = JobManager(config, engine, ImageCache(ttl_seconds=600, max_bytes=1024))
+
+    async def run() -> None:
+        async with manager._gpu_lock:
+            with pytest.raises(ApiException) as error:
+                await manager.set_model_path("/models/new.pt")
+            assert error.value.code == "MODEL_BUSY"
+            assert error.value.status == 409
+        assert engine.settings.model_path == config.model_path
+        assert not config.model_settings_file.exists()
+
+    asyncio.run(run())
+
+
+def test_inference_rejected_while_model_path_is_saving(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = _settings(model_settings_file=tmp_path / "settings.json")
+    engine = MockSam3Engine(config)
+    manager = JobManager(config, engine, ImageCache(ttl_seconds=600, max_bytes=1024))
+    saving = threading.Event()
+    release = threading.Event()
+    original_save = Settings.save_model_path
+
+    def slow_save(settings: Settings, path: Path) -> None:
+        saving.set()
+        assert release.wait(3)
+        original_save(settings, path)
+
+    monkeypatch.setattr(Settings, "save_model_path", slow_save)
+
+    async def run() -> None:
+        task = asyncio.create_task(manager.set_model_path("/models/new.pt"))
+        try:
+            assert await asyncio.to_thread(saving.wait, 3)
+            with pytest.raises(ApiException) as error:
+                manager.submit(_points_request())
+            assert error.value.code == "MODEL_BUSY"
+        finally:
+            release.set()
+            await task
+        assert not manager._updating_model_path
+        assert engine.settings.model_path == Path("/models/new.pt")
+
+    asyncio.run(run())
 
 
 def test_serialization_enforces_decoded_memory_and_response_caps() -> None:

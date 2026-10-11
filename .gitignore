@@ -5,6 +5,7 @@ assets/fonts/
 
 backend/.venv/
 backend/.pytest_cache/
+backend/.local/
 __pycache__/
 .env
 .env.*

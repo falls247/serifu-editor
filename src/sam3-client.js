@@ -79,8 +79,9 @@ export function createSam3RequestNamespace(pageId, sessionId = globalThis.crypto
   return `${page}-${session}`;
 }
 
-export class Sam3Client {
+export class Sam3Client extends EventTarget {
   constructor({ fetchImpl = globalThis.fetch?.bind(globalThis), baseUrl = API_ROOT, pollInterval = 500, maxWait = 10 * 60_000 } = {}) {
+    super();
     if (typeof fetchImpl !== 'function') throw new TypeError('fetch implementation is required');
     this.fetch = fetchImpl;
     this.baseUrl = baseUrl.replace(/\/$/, '');
@@ -89,6 +90,21 @@ export class Sam3Client {
     this.images = new Map();
     this.healthRequest = null;
     this.healthCheckedAt = 0;
+  }
+
+  async saveModelPath(modelPath) {
+    const response = await this.fetch(`${this.baseUrl}/settings`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ modelPath }),
+    });
+    if (!response.ok) throw await responseError(response);
+    const data = await response.json();
+    if (typeof data.modelPath !== 'string' || !data.modelPath.trim()) {
+      throw new Sam3ApiError('モデルパスの保存応答が不正', { code: 'INVALID_RESPONSE' });
+    }
+    this.healthRequest = null;
+    this.dispatchEvent(new CustomEvent('model-path-saved', { detail: data.modelPath }));
+    return data;
   }
 
   async health({ force = false, signal } = {}) {
