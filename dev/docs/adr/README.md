@@ -30,3 +30,4 @@
 - [ADR-0017: JSのsrc配下への移動と静的配信URL](0017-src-layout-and-static-assets.md)
 - [ADR-0018: 画像間のオブジェクトコピー、現在の編集情報による状態判定、話者付きプリセット](0018-object-clipboard-and-edit-state.md)
 - [ADR-0019: 複数選択のコピーと元画像を保持する画像編集](0019-multi-selection-and-image-edits.md)
+- [ADR-0020: 原寸プレビューモーダルと数値UIの小数1桁表示](0020-full-size-preview-and-numeric-ui.md)

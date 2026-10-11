@@ -21,11 +21,11 @@ try {
     for(const name of ['textOffsetX','textOffsetY']){assert.equal(await cardField(name).inputValue(),'0');assert.equal(await field(name).inputValue(),'0');assert.ok(await slider(name).isVisible());}
     await field('textOffsetX').fill('-25.5');assert.equal(await cardField('textOffsetX').inputValue(),'-25.5');assert.equal(await slider('textOffsetX').inputValue(),'-25.5');
     await cardField('textOffsetY').fill('33.5');assert.equal(await field('textOffsetY').inputValue(),'33.5');
-    await slider('textOffsetY').press('ArrowLeft');assert.equal(await field('textOffsetY').inputValue(),'33');
+    await slider('textOffsetY').press('ArrowLeft');assert.equal(await field('textOffsetY').inputValue(),'33.4');
     await source.locator('[data-action=undo]').click();assert.equal(await field('textOffsetY').inputValue(),'33.5');
-    await source.locator('[data-action=redo]').click();assert.equal(await field('textOffsetY').inputValue(),'33');
+    await source.locator('[data-action=redo]').click();assert.equal(await field('textOffsetY').inputValue(),'33.4');
     await field('textOffsetX').fill('12.25');await cardField('textOffsetY').fill('-17.75');
-    assert.equal(await slider('textOffsetX').inputValue(),'12.25');assert.equal(await slider('textOffsetY').inputValue(),'-17.75');
+    assert.equal(await slider('textOffsetX').inputValue(),'12.3');assert.equal(await slider('textOffsetY').inputValue(),'-17.8');
     const padding=kind==='caption'?'60.5':'18.5';await field('padding').fill(padding);assert.equal(await cardField('padding').inputValue(),padding);assert.equal(await slider('padding').inputValue(),padding);
     await field('textOffsetX').fill('-25.5');await field('textOffsetY').fill('33.5');
     page.once('dialog',dialog=>dialog.accept(`${kind}の文字位置`));await card.locator('[data-action=save-preset]').click();
@@ -36,7 +36,7 @@ try {
   await source.locator('[data-action=copy-all]').click();await target.locator('[data-action=paste-all]').click();
   for(const kind of ['balloon','caption']){
     const card=target.locator(`[data-kind=${kind}]`).first();
-    assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-12.75');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'50.25');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'30.25':'9.25');
+    assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-12.8');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'50.3');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'30.3':'9.3');
   }
   await source.locator('[data-action=add-male]').click();assert.equal(await field('textOffsetX').isVisible(),false);assert.equal(await field('padding').isVisible(),false);await source.locator('[data-action=undo]').click();
   const pixels=await page.evaluate(async()=>{

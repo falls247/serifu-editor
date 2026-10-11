@@ -4,6 +4,8 @@
 - 状態: 採用
 - 関連: [ADR-0005](0005-fonts-and-manga-typography.md)、[ADR-0014](0014-optical-lettering-and-brush-strokes.md)
 
+数値UIの表示精度と刻みは[ADR-0020](0020-full-size-preview-and-numeric-ui.md)で小数1桁・0.1刻みに変更。内部のコピー・読込値は保持する。
+
 ## 背景
 
 配置seedの再生成やUndoでカードDOMを再構築すると、効果音の詳細設定が閉じた。詳細の数値は直接入力だけで、描画を見ながら連続調整できなかった。効果音の輪郭色は描画側に対応がある一方、カード・モデルの正規化・プリセットでは扱っていなかった。

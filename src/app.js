@@ -5,6 +5,7 @@ import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
 import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
 import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropRectangle } from './image-edit.js';
+import { openFullPreview, previewIsOpen } from './preview-modal.js';
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
@@ -279,9 +280,9 @@ function persistControlValue(p,input) {
   else if(input.type==='checkbox')value=input.checked;
   else if(input.type==='number'||input.type==='range'){
     if(value===''||!Number.isFinite(Number(value)))return;
-    value=Number(value);
-    if(['shapeSeed','spikeCount','brushSeed','glyphSeed'].includes(field))value=Math.round(value);
+    value=numericValue(Number(value),field);
     if(Object.hasOwn(limits,field))value=clamp(value,...limits[field]);
+    if(numericValue(layer[field],field)===value)return;
   }
   if(Object.is(layer[field],value))return;
   checkpoint(p);layer[field]=value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))layer.brushEngine='pressure';if(field!=='text')layer.presetId=null;
@@ -301,7 +302,8 @@ function sizePreview(p) {
   const size=imageSize(p.img.width,p.img.height,p.imageEdit),maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
   for(const image of [p.canvas,p.row.querySelector('.original')]){
     const aspect=image===p.canvas?size.width/size.height:p.img.width/p.img.height;
-    const width=Math.max(1,Math.min(frame.clientWidth-2,originalFrame.clientWidth-2,maxHeight*aspect));
+    const imageFrame=image===p.canvas?frame:originalFrame;
+    const width=Math.max(1,Math.min(imageFrame.clientWidth-2,maxHeight*aspect));
     image.style.width=`${width}px`;image.style.height=`${width/aspect}px`;
   }
   p.row.querySelector('.original-toolbar').style.height=`${p.row.querySelector('.preview-toolbar:not(.original-toolbar)').getBoundingClientRect().height}px`;
@@ -334,7 +336,7 @@ function selectObject(p,id,toggle=false,replace=false) {
 function updateControls(p) {
   if (!p?.row) return;
   const l = selected(p), controls = p.row.querySelector('.position-controls');
-  const count=selectedLayers(p).length;p.row.querySelector('.selection-status').textContent=count>1?`${count}件を選択中 · Ctrl／⌘＋Cでまとめてコピー`:'';
+  const count=selectedLayers(p).length;p.row.querySelector('.selection-status').textContent=count>1?`${count}件を選択中`:'';
   controls.disabled = !l;
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
   controls.querySelector('legend').textContent = balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
@@ -352,7 +354,7 @@ function updateControls(p) {
   const showSeed=balloon&&['distorted-rect','spiky'].includes(l.shape);
   for(const node of controls.querySelectorAll('[data-shape-seed-control]'))node.hidden=!showSeed;
   controls.querySelector('.balloon-spike-count-control').hidden=!balloon||l.shape!=='spiky';
-  controls.querySelector('.balloon-distortion-control output').value=`${l?.distortion??55}%`;
+  controls.querySelector('.balloon-distortion-control output').value=`${numericValue(l?.distortion??55,'distortion')}%`;
   controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
   controls.querySelector('.text-position-controls').hidden=!balloon&&!caption;
@@ -369,7 +371,7 @@ function updateControls(p) {
   }
   for(const input of controls.querySelectorAll('[data-numeric-field=size]'))input.disabled=caption&&l.autoFit;
   const captionStatus=controls.querySelector('.caption-fit-status');captionStatus.hidden=!caption;
-  if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${layout.size}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
+  if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${numericValue(layout.size,'size')}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
   const pendingQueries=l&&document.fonts?fontLoadQueries(l).filter(query=>!document.fonts.check(query)):[],fontStatus=p.row.querySelector('.font-status');
   fontStatus.textContent=pendingQueries.length?pendingQueries.some(query=>fontErrors.has(query))?'書体の読込に失敗。ページを再読込して再試行。':'選択した書体を読込中…':'';
   fontStatus.hidden=!fontStatus.textContent;
@@ -525,6 +527,9 @@ function textPositionControls(layer){
   return grid;
 }
 const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
+const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','brushSeed','glyphSeed']);
+function numericValue(value,field){return !Number.isFinite(value)?value:INTEGER_FIELDS.has(field)?Math.round(value):Number(value.toFixed(1));}
+function numericStep(field){return INTEGER_FIELDS.has(field)?'1':'0.1';}
 function controlField(input){return input.dataset.field??input.dataset.numericField;}
 function syncControlValue(input,value,p){
   const field=controlField(input);
@@ -538,22 +543,22 @@ function syncControlValue(input,value,p){
     input.min=String(['w','h'].includes(field)?30:Math.min(-dimension,value??0));
     input.max=String(['w','h'].includes(field)?Math.min(30000,Math.max(dimension*2,value??0,30)):Math.max(dimension*2,value??0));
   }
-  if(input.type==='range'&&input.dataset.numericStep&&Number.isFinite(value)){
-    const step=Number(input.dataset.numericStep),ticks=(value-(Number(input.min)||0))/step;
-    input.step=Math.abs(ticks-Math.round(ticks))<1e-8?String(step):'any';
+  if(['number','range'].includes(input.type)){
+    input.step=numericStep(field);
+    for(const key of ['min','max'])if(input[key]!==''&&Number.isFinite(Number(input[key])))input[key]=String(numericValue(Number(input[key]),field));
   }
-  input.value=value===undefined?'':Number.isFinite(value)&&['number','range'].includes(input.type)?String(Number(value.toPrecision(15))):String(value);
+  input.value=value===undefined?'':Number.isFinite(value)&&['number','range'].includes(input.type)?String(numericValue(value,field)):String(value);
 }
 function addNumericControls(root,p){
   for(const input of root.querySelectorAll('input[data-field][type=number], input[data-field][type=range]')){
     if(input.closest('.numeric-setting'))continue;
     const field=input.dataset.field,label=input.closest('label'),title=input.getAttribute('aria-label')||label?.textContent.trim()||field;
+    input.step=numericStep(field);
     const wrap=element('div','numeric-setting'),linked=element('input');linked.type=input.type==='number'?'range':'number';linked.dataset.numericField=field;
     const dimension=['y','h'].includes(field)?p.img.height:p.img.width,value=Number(input.value);
     linked.min=input.min||String(Math.min(-dimension,value||0));linked.max=input.max||String(Math.max(dimension*2,value||0));linked.step=input.step||'1';
     if(['w','h'].includes(field))linked.max=String(Math.min(30000,Math.max(dimension*2,value||0,30)));
     linked.value=input.value;linked.disabled=input.disabled;
-    const range=input.type==='range'?input:linked;range.dataset.numericStep=input.step||'1';range.step='any';
     input.setAttribute('aria-label',`${title}${input.type==='range'?' スライダー':''}`);linked.setAttribute('aria-label',`${title}${linked.type==='range'?' スライダー':''}`);
     input.before(wrap);if(input.type==='number')wrap.append(input,linked);else wrap.append(linked,input);
   }
@@ -601,7 +606,7 @@ function renderCards(p) {
   };
   for (const l of p.layers) {
     const card = element('div', 'layer-card'); card.dataset.layerId = l.id; card.dataset.kind=l.kind;if(l.speaker)card.dataset.speaker = l.speaker;
-    const summary=element('button','layer-summary');summary.type='button';summary.title='クリックして編集・Shift＋クリックで複数選択';renderLayerSummary(l,summary);card.append(summary);
+    const summary=element('button','layer-summary');summary.type='button';summary.title='クリックして編集';renderLayerSummary(l,summary);card.append(summary);
     const header = element('div', 'card-header'),heading=element('div','card-heading');
     heading.append(element('span', 'kind-label', l.kind==='caption'?'▭ キャプション':l.kind==='balloon'?'○ 吹き出し':l.kind === 'sfx' ? '✦ 効果音' : l.speaker === 'female' ? '● 女性セリフ' : '● 男性セリフ'));
     if (l.kind === 'dialogue'||l.kind==='balloon') {
@@ -799,8 +804,7 @@ $('deck').addEventListener('input', event => {
   const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [0, 80], shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS, ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;
-    value = Number(value);
-    if(['shapeSeed','spikeCount','brushSeed','glyphSeed'].includes(field))value=Math.round(value);
+    value = numericValue(Number(value),field);
     if (limits[field]) value = clamp(value, ...limits[field]);
   } else if (field === 'vertical') value = value === 'true';
   else if(field==='tail'||field==='autoFit'||field==='shadowEnabled')value=input.checked;
@@ -810,7 +814,7 @@ $('deck').addEventListener('input', event => {
   if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)renderLayerSummary(l,summary);}
   markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
-$('deck').addEventListener('change',event=>editing.delete(event.target));
+$('deck').addEventListener('change',event=>{editing.delete(event.target);if(event.target.matches('input[type=number][data-field],input[type=number][data-numeric-field]')){const p=pageFrom(event.target),l=p?.layers.find(l=>l.id===(event.target.closest('.layer-card')?.dataset.layerId||p.selectedId));if(l)syncControlValue(event.target,l[controlField(event.target)],p);}});
 
 $('deck').addEventListener('click', event => {
   if (editLocked()) return;
@@ -859,6 +863,8 @@ $('deck').addEventListener('click', event => {
     cancelCrop(p);if (restore(p, action)) { dirty(); scheduleThumbnailRefresh(p);renderCards(p); drawPage(p); updateGlobal(); }
   } else if(action==='duplicate-image'){
     guard(task=>duplicateImage(p,task),'画像複製',2);
+  } else if(action==='preview-full'){
+    persistPageControl(p);openFullPreview(p,event.target.closest('button'));
   } else if(action==='crop-image'){
     if(p.cropDraft)cancelCrop(p);
     else{const size=imageSize(p.img.width,p.img.height,p.imageEdit);p.cropDraft={x:0,y:0,...size};updateImageView(p);updateGlobal();}
@@ -990,6 +996,7 @@ function connectCanvas(p) {
 }
 
 window.addEventListener('keydown', event => {
+  if(previewIsOpen())return;
   if(event.key==='Escape'&&active()?.cropDraft&&!event.isComposing&&!editLocked()){event.preventDefault();cancelCrop(active());return;}
   if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable || event.isComposing || editLocked()) return;
   const p = active(); if (!p) return;
@@ -999,18 +1006,18 @@ window.addEventListener('keydown', event => {
     if (!selected(p) || event.repeat) return;
     event.preventDefault();
     edit(p, () => {const ids=new Set(selectedLayers(p).map(l=>l.id));p.layers = p.layers.filter(l=>!ids.has(l.id));setSelection(p,[]);});
-    p.canvas.focus({ preventScroll: true }); status('選択オブジェクトを削除した。Ctrl／⌘＋Zで戻せる。');
+    p.canvas.focus({ preventScroll: true }); status('選択オブジェクトを削除した。');
     return;
   }
   if (command && !event.altKey && !event.shiftKey && ['c','v'].includes(key)) {
     if (event.repeat) return;
     if (key==='c' && selected(p)) {
       event.preventDefault();layerClipboard=copyLayers(selectedLayers(p),p.img.width,p.img.height);clipboardPastes.clear();
-      status(`選択オブジェクト${layerClipboard.layers.length}件をコピーした。貼付け先の画像を選んで Ctrl／⌘＋V。`);
+      status(`選択オブジェクト${layerClipboard.layers.length}件をコピーした。`);
     } else if (key==='v' && layerClipboard) {
       event.preventDefault();const count=(clipboardPastes.get(p.id)||0)+1;clipboardPastes.set(p.id,count);
       edit(p,()=>{const copies=pasteSelectedLayers(layerClipboard,p.img.width,p.img.height,count*20);p.layers.push(...copies);setSelection(p,copies.map(l=>l.id));});
-      p.canvas.focus({preventScroll:true});status(`${layerClipboard.layers.length}件を貼り付けた。ドラッグで位置調整、Ctrl／⌘＋Zで戻す。`);
+      p.canvas.focus({preventScroll:true});status(`${layerClipboard.layers.length}件を貼り付けた。`);
     }
     return;
   }
