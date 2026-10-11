@@ -1,5 +1,6 @@
 import {draw,clearGlyphCache} from './renderer.js';
 import {FONT_CATALOG,fontKeys} from './fonts.js';
+import {imageSize,normalizeImageEdit} from './image-edit.js';
 const loadedFonts=new Map();
 async function loadFonts(layers){
   for(const key of new Set(layers.flatMap(fontKeys))){const font=FONT_CATALOG[key];if(!font?.file)continue;
@@ -24,7 +25,8 @@ self.onmessage=async({data})=>{
         value={width:hint?.width||image.width,height:hint?.height||image.height,thumbnail:await canvas.convertToBlob({type:'image/webp',quality:.75})};
       }else if(kind==='render-png'){
         if(image.width!==payload.width||image.height!==payload.height)throw new Error('画像寸法が既存デコードと一致しない');
-        canvas=new OffscreenCanvas(image.width,image.height);const drawn=performance.now();draw(canvas.getContext('2d'),image,payload.layers);timings.drawMs=performance.now()-drawn;
+        const edit=normalizeImageEdit(payload.imageEdit,image.width,image.height),size=imageSize(image.width,image.height,edit);
+        canvas=new OffscreenCanvas(size.width,size.height);const drawn=performance.now();draw(canvas.getContext('2d'),image,payload.layers,null,1,1,edit);timings.drawMs=performance.now()-drawn;
         const encoded=performance.now();value=await canvas.convertToBlob({type:'image/png'});timings.pngMs=performance.now()-encoded;
       }else throw new Error('未知の画像ジョブ');
     }

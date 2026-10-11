@@ -41,6 +41,18 @@
 .balloon-seed-controls>button,.speech-style-controls>button{grid-column:1/-1;justify-self:start;font-size:10px;padding:5px 8px}
 .speech-style-controls input[type=color],[data-text-color-control] input[type=color]{height:32px;padding:3px}
 .layer-summary{display:none}
+.layer-card.multi-selected:not(.selected){border-color:var(--lime);box-shadow:inset 3px 0 var(--lime)}
+.selection-status{font-size:11px;color:var(--lime);margin:9px 0 0}
+.selection-status:empty{display:none}
+.crop-controls{border:1px solid #697c54;border-radius:7px;margin:0 0 10px;padding:10px}
+.crop-controls[hidden]{display:none}
+.crop-controls legend{font-size:11px;color:var(--lime)}
+.crop-controls .effect-note{margin:0 0 8px}
+.image-edit-status{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:5px;margin-top:8px;font-size:10px;color:var(--muted)}
+.image-edit-status button{font-size:10px;padding:5px 8px}
+.image-edit-status:has(button:disabled){display:none}
+canvas.preview.cropping{cursor:crosshair}
+.preview-label{flex-shrink:0}
 .layer-card[data-speaker=female] .layer-summary-speaker{color:#ff85b9}
 .layer-card:not(.selected){padding:6px 10px}
 .layer-card:not(.selected)>:not(.layer-summary){display:none}

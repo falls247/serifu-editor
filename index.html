@@ -90,7 +90,7 @@
         <section class="original-pane" aria-label="元画像">
           <div class="preview-toolbar original-toolbar"><span class="preview-label">ORIGINAL</span></div>
           <div class="original-frame"><img class="original" alt=""></div>
-          <div class="original-actions"><button data-action="remove">一覧から外す</button><button data-action="delete" class="danger">元画像を削除</button></div>
+          <div class="original-actions"><button data-action="remove">一覧から外す</button><button data-action="delete" class="danger">元画像を削除</button><button data-action="duplicate-image" title="編集内容を含めず、元画像を一覧内に複製">画像複製</button></div>
           <p class="source-note"></p>
         </section>
         <section class="dialogue-pane" aria-label="セリフと効果音の編集">
@@ -105,9 +105,12 @@
           <p class="no-layers">セリフ・効果音・吹き出しを追加して、<br>この画像の物語を書こう。</p>
         </section>
         <section class="preview-pane" aria-label="編集結果と位置調整">
-          <div class="preview-toolbar"><span class="preview-label">LIVE PREVIEW</span><div class="preview-actions"><button data-action="save-image" title="この画像だけ元解像度のPNGで保存">画像を保存</button><button data-action="undo" title="この画像の編集を戻す">↶ 戻す</button><button data-action="redo" title="この画像の編集をやり直す">↷</button></div></div>
+          <div class="preview-toolbar"><span class="preview-label">LIVE PREVIEW</span><div class="preview-actions"><button data-action="crop-image" aria-expanded="false">クロップ</button><button data-action="rotate-left" title="画像全体を左に90度回転">左回転</button><button data-action="rotate-right" title="画像全体を右に90度回転">右回転</button><button data-action="save-image" title="この画像だけ編集後の解像度のPNGで保存">画像を保存</button><button data-action="undo" title="この画像の編集を戻す">↶ 戻す</button><button data-action="redo" title="この画像の編集をやり直す">↷</button></div></div>
+          <fieldset class="crop-controls" hidden><legend>クロップ範囲</legend><p class="effect-note">プレビューをドラッグして範囲を選択。数値は現在の画像のピクセル。元画像とオブジェクトは保持。</p><div class="control-grid"><label>X<input required data-crop-field="x" type="number" min="0" step="1"></label><label>Y<input required data-crop-field="y" type="number" min="0" step="1"></label><label>幅<input required data-crop-field="width" type="number" min="1" step="1"></label><label>高さ<input required data-crop-field="height" type="number" min="1" step="1"></label></div><div class="layer-actions"><button data-action="apply-crop">適用</button><button data-action="cancel-crop">キャンセル</button></div></fieldset>
           <div class="preview-frame"><canvas class="preview" aria-label="文字をドラッグして位置調整"></canvas></div>
-          <p class="preview-hint">文字をドラッグで移動。Ctrl／⌘＋ドラッグで複製、Ctrl／⌘＋Shift＋ドラッグで縦横方向へガイド付き複製。右下の角でサイズ調整、上の丸で回転。Delete：選択オブジェクトを削除、Ctrl／⌘＋C／V：コピー・貼付け。</p>
+          <div class="image-edit-status"><span class="image-edit-summary"></span><button data-action="reset-image" disabled>クロップ・回転をリセット</button></div>
+          <p class="selection-status" role="status"></p>
+          <p class="preview-hint">Shift＋クリック：複数選択・解除。文字をドラッグで移動。Ctrl／⌘＋ドラッグで複製、Ctrl／⌘＋Shift＋ドラッグで縦横方向へガイド付き複製。右下の角でサイズ調整、上の丸で回転。Delete：選択オブジェクトを削除、Ctrl／⌘＋C／V：選択一式をコピー・貼付け。</p>
           <fieldset class="position-controls"><legend class="selected-name">文字を選択して位置調整</legend><div class="control-grid">
             <label>X<input data-field="x" type="number" step="1"></label><label>Y<input data-field="y" type="number" step="1"></label>
             <label data-text-control>文字サイズ<input data-field="size" type="number" min="8" max="500"></label><label>回転 °<input data-field="rotation" type="number" min="-180" max="180"></label>
