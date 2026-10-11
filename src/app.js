@@ -46,6 +46,26 @@ function requestPageFonts(p){
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
+const previewDeferredDraws = new Set(), previewDeferredThumbnails = new Set();
+let previewResumeScheduled = false;
+function resumePreviewBackground() {
+  if (previewResumeScheduled || previewIsOpen()) return;
+  previewResumeScheduled = true;
+  const resume = () => {
+    previewResumeScheduled = false;
+    if (previewIsOpen()) return;
+    const page = previewDeferredDraws.values().next().value;
+    if (page) { previewDeferredDraws.delete(page); if (page.canvas) drawPage(page); }
+    else {
+      const thumbnailPage = previewDeferredThumbnails.values().next().value;
+      if (thumbnailPage) { previewDeferredThumbnails.delete(thumbnailPage); scheduleThumbnailRefresh(thumbnailPage); }
+    }
+    if (previewDeferredDraws.size || previewDeferredThumbnails.size) resumePreviewBackground();
+  };
+  if (window.requestIdleCallback) requestIdleCallback(resume, { timeout: 1000 });
+  else setTimeout(resume, 16);
+}
+$('fullPreview').addEventListener('close', resumePreviewBackground);
 let sourceDirectory = null, sourceFolderName = null, currentTask=null, fontVersion=0;
 const imagePool=new ImagePool(),pngCache=new ExportCache(),sam3Client=new Sam3Client();
 const editLocked=()=>busy&&currentTask?.data.kind!=='画像追加';
@@ -63,7 +83,7 @@ function displayTask(data){
   $('bulkCancel').disabled=data.state!=='running';
 }
 $('bulkCancel').onclick=()=>currentTask?.cancel();
-function releasePage(p){disposeSam3UI(p);unmountPage(p);void sam3Client.forgetPage(p.id);p.thumbnailReleased=true;clearTimeout(p.thumbnailTimer);p.thumbnailGeneration++;p.thumbnail?.remove();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);for(const url of new Set([p.thumbnailBaseSrc,p.thumbnailSrc]))if(url?.startsWith('blob:'))URL.revokeObjectURL(url);pngCache.invalidate(p.id);}
+function releasePage(p){previewDeferredThumbnails.delete(p);disposeSam3UI(p);unmountPage(p);void sam3Client.forgetPage(p.id);p.thumbnailReleased=true;clearTimeout(p.thumbnailTimer);p.thumbnailGeneration++;p.thumbnail?.remove();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);for(const url of new Set([p.thumbnailBaseSrc,p.thumbnailSrc]))if(url?.startsWith('blob:'))URL.revokeObjectURL(url);pngCache.invalidate(p.id);}
 
 const VIEW_KEY = 'serifu.view.v1';
 const PAGE_FILTERS = ['all', 'unedited', 'edited', 'pending', 'done'];
@@ -119,6 +139,7 @@ async function renderPageThumbnail(p,signal,force=false){
   let base,canvas;
   try{
     base=await decode(p.maskEffects?.length?p.src:p.thumbnailBaseSrc);checkAbort(signal);
+    if (!signal && previewIsOpen()) { previewDeferredThumbnails.add(p);p.thumbnailForce ||= force;return; }
     const size=imageSize(p.img.width,p.img.height,p.imageEdit),ratio=Math.min(1,320/Math.max(size.width,size.height));
     canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(size.width*ratio));canvas.height=Math.max(1,Math.round(size.height*ratio));
     draw(canvas.getContext('2d'),base,p.layers,null,ratio,ratio,p.imageEdit,p.img,{maskEffects:p.maskEffects,maskAssets:p.maskAssets});
@@ -138,8 +159,12 @@ function scheduleThumbnailRefresh(p,force=false){
   if(!p?.thumbnailBaseSrc||p.thumbnailReleased)return;
   p.thumbnailWantedSignature=thumbnailSignature(p);p.thumbnailForce=!!p.thumbnailForce||force;
   clearTimeout(p.thumbnailTimer);
+  if(previewIsOpen()){p.thumbnailTimer=null;previewDeferredThumbnails.add(p);return;}
+  previewDeferredThumbnails.delete(p);
   p.thumbnailTimer=setTimeout(()=>{
-    p.thumbnailTimer=null;if(p.thumbnailRendering)return;
+    p.thumbnailTimer=null;
+    if(previewIsOpen()){previewDeferredThumbnails.add(p);return;}
+    if(p.thumbnailRendering)return;
     const targetSignature=p.thumbnailWantedSignature,rebuild=p.thumbnailForce;p.thumbnailForce=false;
     const rendering=renderPageThumbnail(p,null,rebuild).catch(error=>{
       if(!p.thumbnailReleased&&error.name!=='AbortError'){p.thumbnailFailedSignature=targetSignature;status(`「${p.name}」のサムネイルを更新できなかった: ${error.message}`);}
@@ -262,6 +287,8 @@ function previewImageEdit(p) {
 
 function drawPage(p) {
   if (!p?.canvas) return;
+  if (previewIsOpen()) { previewDeferredDraws.add(p); return; }
+  previewDeferredDraws.delete(p);
   requestPageFonts(p);
   if (!p.img.complete || !p.img.naturalWidth) return;
   const imageEdit=previewImageEdit(p),size=imageSize(p.img.width,p.img.height,imageEdit),scale = p.canvas.width / size.width;
@@ -515,6 +542,7 @@ function activate(p, id = p.selectedId, scroll = false) {
 }
 
 function unmountPage(p) {
+  previewDeferredDraws.delete(p);
   closeMagnifier(p);
   if (!p.row) { disposeSam3UI(p); return; }
   disposeSam3UI(p);
@@ -1150,6 +1178,12 @@ $('deck').addEventListener('change',event=>{
 $('deck').addEventListener('click', event => {
   if (editLocked()) return;
   const p = pageFrom(event.target); if (!p) return;
+  const action = event.target.closest('[data-action]')?.dataset.action;
+  if(action==='preview-full'){
+    persistPageControl(p);closeMagnifier();void openFullPreview(p,event.target.closest('button'));
+    if(p.id!==activeId)activate(p);
+    return;
+  }
   const maskCard=event.target.closest('.mask-effect-card');
   if(maskCard){const maskId=maskCard.dataset.maskId;selectMask(p,maskId);const maskAction=event.target.closest('[data-mask-action]')?.dataset.maskAction;if(maskAction==='delete'){removeMaskEffect(p,maskId);status('選択中のマスク加工を削除した。');}else if(['forward','backward','frontmost','backmost'].includes(maskAction))moveObjects(p,maskAction);return;}
   const card = event.target.closest('.layer-card'), cardId = card?.dataset.layerId;
@@ -1157,7 +1191,6 @@ $('deck').addEventListener('click', event => {
   if(cardId)selectObject(p,cardId,toggle,!toggle);
   activate(p, toggle?p.selectedId:cardId || p.selectedId);
   if(toggle){p.canvas.focus({preventScroll:true});return;}
-  const action = event.target.closest('[data-action]')?.dataset.action;
   if (!action || (busy&&['move-up','move-down','move-after','remove','delete','duplicate-image','complete','copy-next','copy-all','cut-all','paste-all','save-image','crop-image','apply-crop','cancel-crop','rotate-left','rotate-right','reset-image'].includes(action))) return;
   const l = selected(p);
   if (action.startsWith('add-')) {
@@ -1204,8 +1237,6 @@ $('deck').addEventListener('click', event => {
     cancelCrop(p);if (restore(p, action)) { dirty(); scheduleThumbnailRefresh(p);renderCards(p); drawPage(p); updateGlobal(); }
   } else if(action==='duplicate-image'){
     guard(task=>duplicateImage(p,task),'画像複製',2);
-  } else if(action==='preview-full'){
-    persistPageControl(p);closeMagnifier();openFullPreview(p,event.target.closest('button'));
   } else if(action==='preview-magnifier'){
     persistPageControl(p);toggleMagnifier(p,event.target.closest('button'));
   } else if(action==='crop-image'){

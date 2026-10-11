@@ -11,10 +11,15 @@ try {
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.addInitScript(() => {
     window.previewWork = { decodes: 0, draws: 0 };
+    window.previewBackgroundWork = { live: 0, thumbnails: 0 };
     const decode = HTMLImageElement.prototype.decode, clear = CanvasRenderingContext2D.prototype.clearRect;
     HTMLImageElement.prototype.decode = function (...args) { window.previewWork.decodes++; return decode.apply(this, args); };
     CanvasRenderingContext2D.prototype.clearRect = function (...args) {
       if (this.canvas.id === 'fullPreviewCanvas') window.previewWork.draws++;
+      if (document.querySelector('#fullPreview')?.open) {
+        if (this.canvas.classList.contains('preview')) window.previewBackgroundWork.live++;
+        else if (!this.canvas.id && !this.canvas.className && this.canvas.width <= 320 && this.canvas.height <= 320) window.previewBackgroundWork.thumbnails++;
+      }
       return clear.apply(this, args);
     };
   });
@@ -134,6 +139,14 @@ try {
   await viewport.evaluate((v, anchor) => v.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, ctrlKey: true, deltaY: -100, clientX: anchor.x, clientY: anchor.y })), anchor);
   const after = await image.boundingBox(); assert.ok(Math.abs((anchor.x - after.x) / 1.1 - source.x) < 2); assert.ok(Math.abs((anchor.y - after.y) / 1.1 - source.y) < 2);
   const nativeWheel = await viewport.evaluate(v => { const event = new WheelEvent('wheel', { bubbles: true, cancelable: true, deltaY: 100 }); v.dispatchEvent(event); return event.defaultPrevented; }); assert.equal(nativeWheel, false);
+  await viewport.evaluate(v => { v.scrollTop = 0; }); await viewport.hover(); await page.mouse.wheel(0, 250);
+  await page.waitForFunction(() => document.querySelector('#fullPreviewViewport').scrollTop > 0);
+  // ResizeObserver and font completion must not repaint the covered editor.
+  const thumbnailBefore = await page.locator('.thumbnail img').first().getAttribute('src');
+  await page.setViewportSize({ width: 1410, height: 1000 });
+  await page.evaluate(() => document.fonts.dispatchEvent(new FontFaceSetLoadEvent('loadingdone', { fontfaces: [] })));
+  await page.evaluate(() => new Promise(resolve => setTimeout(resolve, 100)));
+  assert.deepEqual(await page.evaluate(() => window.previewBackgroundWork), { live: 0, thumbnails: 0 }, 'scrolling stays free of background live/thumbnail drawing');
   await page.locator('#fullPreviewZoom').fill('10'); assert.equal(await page.locator('#fullPreviewZoomOut').isDisabled(), true); await wheel(100); assert.equal(await page.locator('#fullPreviewZoom').inputValue(), '10');
   await viewport.focus(); await page.keyboard.press('Control+z'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Delete');
   await page.keyboard.press('Escape'); assert.equal(await modal.isVisible(), false); assert.equal(await opener.evaluate(b => b === document.activeElement), true);
@@ -146,6 +159,9 @@ try {
   assert.deepEqual(await page.evaluate(() => window.previewWork), { decodes: 0, draws: 0 }, 'unchanged reopen skips decode and rendering');
   console.log(`Cached 100% preview: ${reopenMs.toFixed(1)} ms`);
   await page.locator('#fullPreviewClose').click();
+  await page.waitForFunction(previous => {
+    const img = document.querySelector('.thumbnail img'); return img.src !== previous && img.complete;
+  }, thumbnailBefore);
   assert.equal(await row.locator('.layer-card').count(), 4);
   let pending = page.waitForEvent('download'); await row.locator('[data-action=save-image]').click(); let download = await pending;
   await page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);

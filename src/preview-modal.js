@@ -8,7 +8,7 @@ const viewport = document.getElementById('fullPreviewViewport');
 const slider = document.getElementById('fullPreviewZoom');
 const output = document.getElementById('fullPreviewZoomValue');
 const message = document.getElementById('fullPreviewStatus');
-let preview = null, generation = 0, previousOverflow = '', opener = null;
+let preview = null, generation = 0, previousOverflow = '', previousGutter = '', opener = null;
 
 export const previewIsOpen = () => dialog.open;
 
@@ -34,7 +34,12 @@ export async function openFullPreview(page, trigger) {
   document.getElementById('fullPreviewTitle').textContent = page.name;
   document.getElementById('fullPreviewSize').textContent = `${size.width} × ${size.height} px`;
   message.textContent = 'プレビューを準備中…'; canvas.hidden = true;
-  previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden';
+  if (!dialog.open) {
+    previousOverflow = document.body.style.overflow;
+    previousGutter = document.documentElement.style.scrollbarGutter;
+    if (window.innerWidth > document.documentElement.clientWidth) document.documentElement.style.scrollbarGutter = 'stable';
+    document.body.style.overflow = 'hidden';
+  }
   dialog.showModal();
   zoomTo(100); viewport.scrollLeft = 0; viewport.scrollTop = 0;
   try {
@@ -63,5 +68,6 @@ dialog.addEventListener('wheel', event => {
 }, { passive: false });
 dialog.addEventListener('close', () => {
   generation++; preview = null; canvas.hidden = true; releasePreviewCanvas();
-  document.body.style.overflow = previousOverflow; opener?.isConnected && opener.focus({ preventScroll: true }); opener = null;
+  document.body.style.overflow = previousOverflow; document.documentElement.style.scrollbarGutter = previousGutter;
+  opener?.isConnected && opener.focus({ preventScroll: true }); opener = null;
 });
