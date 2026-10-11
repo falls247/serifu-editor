@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {PROJECT_VERSION} from '../src/model.js';
 import { spawn } from 'node:child_process';
 import { mkdir,readFile,writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
@@ -84,7 +85,7 @@ try {
   await field('font').selectOption('gekifude');await page.evaluate(()=>document.fonts.load('400 64px MangaGekifude'));
   assert.equal(await page.evaluate(()=>document.fonts.check('400 64px MangaGekifude')),true);
   assert.match(await source.locator('.font-note').innerText(),/漢字と英小文字/);
-  await balloon.locator('.layer-summary').click();await balloon.locator('[data-field=sfxOrder]').selectOption('above');
+  await source.locator('[data-action=backmost]').click();await balloon.locator('.layer-summary').click();
   await page.evaluate(()=>document.fonts.ready);
   await canvas.scrollIntoViewIfNeeded();rect=await canvas.boundingBox();
   await page.mouse.click(rect.x+rect.width*.3,rect.y+rect.height*180/750);
@@ -100,7 +101,7 @@ try {
     const d={...newLayer('dialogue',100,100),text:'M',x:50,y:50,w:80,h:80,size:36,outline:1,vertical:false};
     const s={...newLayer('sfx',100,100),text:'H',x:50,y:50,w:80,h:80,size:60,outline:1,color:'#ff0000',font:'sans',rotation:0,vertical:false,effect:'tension',distortion:0,roughness:0,dryInk:0,brushTails:0,skew:0,sizeVariation:0,horizontalJitter:0};
     const count=color=>{const bytes=context.getImageData(0,0,100,100).data;let n=0;for(let i=0;i<bytes.length;i+=4)if(color.every((value,j)=>bytes[i+j]===value))n++;return n;};
-    draw(context,image,[b,s]);const redBehind=count([255,0,0]);b.sfxOrder='above';draw(context,image,[d,b,s]);const redAbove=count([255,0,0]),dialogue=count([17,17,17]);
+    draw(context,image,[b,s]);const redBehind=count([255,0,0]);draw(context,image,[s,b,d]);const redAbove=count([255,0,0]),dialogue=count([17,17,17]);
     draw(context,image,[d,b]);const first=canvas.toDataURL();draw(context,image,[b,d]);const second=canvas.toDataURL();
     const t={...b,w:50,h:50,tail:true,tailX:0,tailY:50,tailWidth:20,tailAngle:90,transparency:25};
     draw(context,image,[t]);const body=[...context.getImageData(50,50,1,1).data],tail=[...context.getImageData(50,80,1,1).data];
@@ -108,7 +109,7 @@ try {
   });
   assert.ok(Math.abs(pixels.alpha[0]-191)<=1&&Math.abs(pixels.alpha[2]-241)<=1,'25% transparency means 75% white opacity');
   assert.equal(pixels.original,pixels.invisible);assert.ok(pixels.redBehind>100);assert.equal(pixels.redAbove,0);assert.ok(pixels.dialogue>30);
-  assert.equal(pixels.first,pixels.second,'dialogue remains above balloons in every stored order');assert.deepEqual(pixels.body,pixels.tail,'tail and ellipse must share one fill without an overlap seam');
+  assert.notEqual(pixels.first,pixels.second,'dialogue and balloons follow stored order');assert.deepEqual(pixels.body,pixels.tail,'tail and ellipse must share one fill without an overlap seam');
   await page.evaluate(()=>{
     window.outputs=[];const root={getDirectoryHandle:async name=>{const output={name,files:{}};window.outputs.push(output);return {getFileHandle:async filename=>({createWritable:async()=>{const parts=[];return ({write:async value=>{
       if(value instanceof Blob){const bitmap=await createImageBitmap(value),src=await new Promise(resolve=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.readAsDataURL(value);});output.files[filename]={width:bitmap.width,height:bitmap.height,src};bitmap.close();}
@@ -132,9 +133,9 @@ try {
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===1&&window.outputs[0].files['serifu-project.json']&&!document.querySelector('#projectLoad').disabled);
   const editedOutput=await page.evaluate(()=>window.outputs[0]);const editedProject=editedOutput.files['serifu-project.json'];
   assert.ok(editedOutput.name.startsWith('serifu_'));assert.equal(Object.keys(editedOutput.files).length,2);
-  assert.equal(editedProject.pages.length,1);assert.equal(editedProject.pages[0].name,'01-source.png');assert.equal(editedProject.version,9);
+  assert.equal(editedProject.pages.length,1);assert.equal(editedProject.pages[0].name,'01-source.png');assert.equal(editedProject.version,PROJECT_VERSION);
   const exportedBalloon=editedProject.pages[0].layers.find(layer=>layer.kind==='balloon');
-  assert.equal(exportedBalloon.tail,true);assert.equal(exportedBalloon.transparency,45);assert.equal(exportedBalloon.sfxOrder,'above');
+  assert.equal(exportedBalloon.tail,true);assert.equal(exportedBalloon.transparency,45);assert.equal(Object.hasOwn(exportedBalloon,'sfxOrder'),false);
   assert.equal(exportedBalloon.borderColor,'#e25822');assert.equal(exportedBalloon.text,'待って！');assert.equal(exportedBalloon.speaker,'female');assert.equal(exportedBalloon.font,'round');assert.equal(exportedBalloon.vertical,true);assert.equal(editedProject.pages[0].layers.find(layer=>layer.kind==='sfx').font,'gekifude');
   const exportedPng=Object.values(editedOutput.files).find(file=>file.src);
   assert.equal(exportedPng.width,1000);assert.equal(exportedPng.height,750);
@@ -148,15 +149,16 @@ try {
   assert.notEqual(allOutput.name,editedOutput.name);
   await source.locator('[data-action=copy-all]').click();await portrait.locator('[data-action=paste-all]').click();
   const copiedBalloon=portrait.locator('[data-kind=balloon]').first();
-  assert.equal(await copiedBalloon.locator('[data-field=transparency]').inputValue(),'45');assert.equal(await copiedBalloon.locator('[data-field=tail]').isChecked(),true);assert.equal(await copiedBalloon.locator('[data-field=sfxOrder]').inputValue(),'above');
+  await copiedBalloon.locator('.layer-summary').click();
+  assert.equal(await copiedBalloon.locator('[data-field=transparency]').inputValue(),'45');assert.equal(await copiedBalloon.locator('[data-field=tail]').isChecked(),true);assert.equal(await copiedBalloon.locator('[data-field=sfxOrder]').count(),0);
   assert.equal(await copiedBalloon.locator('[data-field=borderColor]').inputValue(),'#e25822');
-  assert.ok(Math.abs(Number(await portrait.locator('.position-controls [data-field=tailX]').inputValue())-exportedBalloon.tailX*.5)<1e-8);
+  assert.equal(Number(await portrait.locator('.position-controls [data-field=tailX]').inputValue()),Math.round(exportedBalloon.tailX*.5),'copied tail position is shown at the current integer UI precision');
   await portrait.locator('canvas').focus();await page.keyboard.press('Control+c');await page.keyboard.press('Control+v');
   assert.equal(await portrait.locator('[data-kind=balloon]').count(),2);await page.keyboard.press('Control+z');assert.equal(await portrait.locator('[data-kind=balloon]').count(),1);
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===3&&window.outputs[2].files['serifu-project.json']&&!document.querySelector('#projectLoad').disabled);
   const filtered=await page.evaluate(()=>window.outputs[2].files['serifu-project.json']);assert.deepEqual(filtered.pages.map(page=>page.name),['01-source.png','03-portrait.png']);
   await source.locator('[data-action=cut-all]').click();assert.equal(await source.locator('.layer-card').count(),0);
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');const meta=await getDraftMeta();return meta?.version===9&&meta.pages[0].edited===false&&meta.pages[0].layers.length===0;});
+  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].edited===false&&meta.pages[0].layers.length===0;});
   await source.locator('[data-action=undo]').click();assert.equal(await source.locator('[data-kind=balloon]').count(),1);
   await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.some(layer=>layer.kind==='balloon');});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');
@@ -169,13 +171,14 @@ try {
   await writeFile('artifacts/balloon-project.json',JSON.stringify(allProject));
   await page.reload();await page.locator('#projectInput').setInputFiles('artifacts/balloon-project.json');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);
-  assert.equal(await source.locator('[data-kind=balloon] [data-field=sfxOrder]').inputValue(),'above');assert.equal(await source.locator('[data-kind=balloon] [data-field=tail]').isChecked(),true);
+  assert.equal(await source.locator('[data-kind=balloon] [data-field=sfxOrder]').count(),0);assert.equal(await source.locator('[data-kind=balloon] [data-field=tail]').isChecked(),true);
+  await source.locator('[data-kind=balloon] .layer-summary').click();
   assert.equal(await source.locator('[data-kind=balloon] [data-field=text]').inputValue(),'待って！');assert.equal(await source.locator('[data-kind=balloon]').getAttribute('data-speaker'),'female');
   assert.equal(await source.locator('.position-controls [data-field=font]').inputValue(),'round');assert.equal(await source.locator('.position-controls [data-field=vertical]').inputValue(),'true');
   assert.equal(await untouched.locator('.edited-badge').isVisible(),false);assert.equal(await portrait.locator('.edited-badge').isVisible(),false);
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>window.scrollTo(0,0));
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,'new save and balloon controls must fit mobile widths');
   await page.screenshot({path:'artifacts/balloon-mobile.png'});assert.deepEqual(errors,[]);
-  console.log('Balloon browser smoke passed: single-image PNG download without directory API, font wait/error recovery, supplied GEKIFUDE font, synchronized frame colors, untouched/confirmed images excluded, edited-state undo and recovery, default off-image ellipse, 75% white opacity, seamless tail drag/resize, enforced dialogue layering, configurable SFX order, copy/paste across aspect ratios, preview/export parity, project/draft round-trips and mobile layout.');
+  console.log('Balloon browser smoke passed: single-image PNG download without directory API, font wait/error recovery, supplied GEKIFUDE font, synchronized frame colors, untouched/confirmed images excluded, edited-state undo and recovery, default off-image ellipse, 75% white opacity, seamless tail drag/resize, shared object layering, copy/paste across aspect ratios, preview/export parity, project/draft round-trips and mobile layout.');
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/balloon-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}

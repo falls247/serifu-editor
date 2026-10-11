@@ -32,3 +32,4 @@
 - [ADR-0019: 複数選択のコピーと元画像を保持する画像編集](0019-multi-selection-and-image-edits.md)
 - [ADR-0020: 原寸プレビューモーダルと数値UIの表示精度](0020-full-size-preview-and-numeric-ui.md)
 - [ADR-0021: 文字サイズの記憶と位置を保持するプリセット](0021-size-memory-and-fixed-position-presets.md)
+- [ADR-0022: 全オブジェクトの重なり順を配列順に統一する](0022-unified-object-layer-order.md)

@@ -83,10 +83,10 @@ test('caption copying across aspect ratios preserves colors, fitting mode and in
   assert.equal(copyLayers([original],1000,500).layers[0].text,'遠い街');
 });
 
-test('a front balloon never drops or covers a caption when the layer order changes',()=>{
+test('captions participate in the shared object order',()=>{
   const caption={id:'c',kind:'caption'},dialogue={id:'d',kind:'dialogue'},sfx={id:'s',kind:'sfx'},balloon={id:'b',kind:'balloon',sfxOrder:'above'};
   const permutations=items=>items.length?items.flatMap((item,i)=>permutations(items.filter((_,j)=>i!==j)).map(rest=>[item,...rest])):[[]];
   for(const layers of permutations([caption,dialogue,sfx,balloon])){
-    const ordered=paintOrder(layers);assert.equal(ordered.length,4);assert.ok(ordered.indexOf(sfx)<ordered.indexOf(balloon));assert.ok(ordered.indexOf(balloon)<ordered.indexOf(caption));assert.ok(ordered.indexOf(balloon)<ordered.indexOf(dialogue));
+    assert.deepEqual(paintOrder(layers),layers);
   }
 });

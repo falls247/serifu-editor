@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {PROJECT_VERSION} from '../src/model.js';
 import {spawn} from 'node:child_process';
 import {mkdir,readFile,writeFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
@@ -44,10 +45,10 @@ try {
   await field('vertical').selectOption('false');assert.match(await source.locator('.caption-fit-status').innerText(),/自動追従/);await field('vertical').selectOption('true');
   await source.locator('[data-action=add-male]').click();await source.locator('[data-kind=dialogue] textarea').fill('台詞');await field('x').fill('900');await field('y').fill('680');
   await source.locator('[data-action=add-sfx]').click();await source.locator('[data-kind=sfx] textarea').fill('ドン！');
-  await source.locator('[data-action=add-balloon]').click();await source.locator('[data-kind=balloon] [data-field=sfxOrder]').selectOption('above');
-  await caption.locator('.layer-summary').click();
+  await source.locator('[data-action=add-balloon]').click();await source.locator('[data-action=backmost]').click();
+  await caption.locator('.layer-summary').click();await source.locator('[data-action=frontmost]').click();
   await canvas.scrollIntoViewIfNeeded();rect=await canvas.boundingBox();await page.mouse.click(rect.x+rect.width*.5,rect.y+rect.height*350/750);
-  assert.equal(await source.locator('.layer-card.selected').getAttribute('data-kind'),'caption','caption must stay visible and selectable above a front balloon');
+  assert.equal(await source.locator('.layer-card.selected').getAttribute('data-kind'),'caption','caption moved to front must stay visible and selectable');
   const pixels=await page.evaluate(async()=>{
     const {newLayer,draw}=await import('./src/renderer.js'),{captionLayout}=await import('./src/captions.js');
     const image=document.createElement('canvas');image.width=100;image.height=100;const base=image.getContext('2d');base.fillStyle='#0000c8';base.fillRect(0,0,100,100);
@@ -69,10 +70,10 @@ try {
   const exported=await page.evaluate(async base64=>{const image=new Image();image.src=`data:image/png;base64,${base64}`;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return {width:image.width,height:image.height,src:canvas.toDataURL()};},(await readFile(await png.path())).toString('base64'));
   assert.equal(exported.width,1000);assert.equal(exported.height,750);assert.equal(exported.src,preview,'auto-fit text, background and frame must match the unselected preview');
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);
-  saving=page.waitForEvent('download');await page.click('#projectSave');const jsonDownload=await saving,project=JSON.parse(await readFile(await jsonDownload.path(),'utf8'));assert.equal(project.version,9);
+  saving=page.waitForEvent('download');await page.click('#projectSave');const jsonDownload=await saving,project=JSON.parse(await readFile(await jsonDownload.path(),'utf8'));assert.equal(project.version,PROJECT_VERSION);
   const saved=project.pages[0].layers.find(layer=>layer.kind==='caption');assert.equal(saved.autoFit,true);assert.equal(saved.font,'hand');assert.equal(saved.textColor,'#8c1950');assert.equal(saved.borderColor,'#3366cc');assert.equal(saved.text,body);assert.equal(saved.size,32);assert.equal(saved.alignX,'left');assert.equal(saved.alignY,'bottom');
   const fitted=await page.evaluate(async layer=>{const {captionLayout}=await import('./src/captions.js');const canvas=document.createElement('canvas');return captionLayout(canvas.getContext('2d'),layer);},saved);assert.equal(fitted.fits,true);
-  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');const meta=await getDraftMeta();return meta?.version===9&&meta.pages[0].layers.some(layer=>layer.kind==='caption'&&layer.autoFit);});
+  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].layers.some(layer=>layer.kind==='caption'&&layer.autoFit);});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await source.locator('[data-kind=caption] textarea').inputValue(),body);assert.equal(await source.locator('[data-kind=caption] [data-field=autoFit]').isChecked(),true);assert.equal(await source.locator('[data-kind=caption] [data-field=borderColor]').inputValue(),'#3366cc');
   await untouched.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await canvas.evaluate(canvas=>canvas.toDataURL()),preview,'draft restoration must recover exact caption geometry, font and fitting');

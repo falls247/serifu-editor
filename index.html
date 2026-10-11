@@ -113,6 +113,7 @@
             <button data-action="paste-all" title="コピー・カットした台詞・効果音・吹き出し・キャプションをこの画像に追加。位置は画像サイズに合わせる。" disabled>文字を一括ペースト</button>
           </div>
           <p class="batch-copy-hint">台詞・効果音・吹き出し・キャプションをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。</p>
+          <p class="effect-note">一覧は上から背面 → 前面。種類を問わず重なり順を変更できる。</p>
           <div class="layer-cards"></div>
           <p class="no-layers">セリフ・効果音・吹き出しを追加して、<br>この画像の物語を書こう。</p>
         </section>
@@ -149,7 +150,7 @@
           </div><div class="balloon-tail-controls control-grid" hidden>
             <label>テール先端X（中心からpx）<input data-field="tailX" type="number" min="-30000" max="30000" step="1"></label><label>テール先端Y（中心からpx）<input data-field="tailY" type="number" min="-30000" max="30000" step="1"></label>
             <label>テール付根の角度 °<input data-field="tailAngle" type="number" min="-180" max="180" step="1"></label><label>テール付根の幅（px）<input data-field="tailWidth" type="number" min="1" max="1000" step="1"></label>
-          </div><p class="balloon-position-note effect-note" hidden>形状は楕円または歪み長方形。歪み度は0〜100%で調整。テールありなら水色の点で先端を移動。</p><p class="effect-note" data-text-control data-ink-control>太さ：負の値で細く／0で書体の標準／正の値で太く。</p><p class="font-note effect-note" hidden></p><p class="font-status" role="status" hidden></p><div class="layer-actions"><button data-action="backward">背面へ</button><button data-action="forward">前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
+          </div><p class="balloon-position-note effect-note" hidden>形状は楕円または歪み長方形。歪み度は0〜100%で調整。テールありなら水色の点で先端を移動。</p><p class="effect-note" data-text-control data-ink-control>太さ：負の値で細く／0で書体の標準／正の値で太く。</p><p class="font-note effect-note" hidden></p><p class="font-status" role="status" hidden></p><div class="layer-actions"><button data-action="backmost" title="選択オブジェクトを最背面へ移動">最背面へ</button><button data-action="backward" title="選択オブジェクトを1段背面へ移動">背面へ</button><button data-action="forward" title="選択オブジェクトを1段前面へ移動">前面へ</button><button data-action="frontmost">最前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
         </section>
       </div>
     </article>
