@@ -19,7 +19,7 @@ try {
   await dialogue.locator('textarea').fill('指定色のセリフ');await field('vertical').selectOption('false');await field('x').fill('400');await field('y').fill('130');await field('w').fill('650');await field('h').fill('150');
   await dialogue.locator('[data-field=textColor]').fill('#2468aa');assert.equal(await field('textColor').inputValue(),'#2468aa');
   await field('textOutlineColor').fill('#cc3300');assert.equal(await dialogue.locator('[data-field=textOutlineColor]').inputValue(),'#cc3300');
-  await dialogue.locator('[data-field=outline]').fill('0');assert.equal(await field('outline').inputValue(),'0');await field('outline').fill('5.5');assert.equal(await dialogue.locator('[data-field=outline]').inputValue(),'5.5');
+  await dialogue.locator('[data-field=outline]').fill('0');assert.equal(await field('outline').inputValue(),'0');await field('outline').fill('5.5');assert.equal(await dialogue.locator('[data-field=outline]').inputValue(),'6');
   await dialogue.locator('[data-action=speaker-male]').click();assert.equal(await field('textColor').inputValue(),'#2468aa','explicit color must survive a speaker change');
   await dialogue.locator('[data-action=reset-text-color]').click();assert.equal(await field('textColor').inputValue(),'#111111');
   await dialogue.locator('[data-action=speaker-female]').click();assert.equal(await field('textColor').inputValue(),'#ef4b91');await field('textColor').fill('#2468aa');
@@ -35,13 +35,13 @@ try {
   await balloon.locator('textarea').fill('吹き出しの文字');await field('vertical').selectOption('false');await field('x').fill('400');await field('y').fill('415');await field('w').fill('570');await field('h').fill('330');await field('size').fill('48');await field('thickness').fill('2.5');
   await field('lineAlign').selectOption('center');
   await balloon.locator('[data-field=textColor]').fill('#007755');await field('textOutlineColor').fill('#cc3300');await field('outline').fill('6.5');
-  assert.equal(await field('textColor').inputValue(),'#007755');assert.equal(await balloon.locator('[data-field=textOutlineColor]').inputValue(),'#cc3300');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'6.5');
-  assert.equal(await balloonSlider('outline').inputValue(),'6.5');
-  await balloonSlider('outline').press('ArrowRight');assert.equal(await field('outline').inputValue(),'6.6');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'6.6');
-  await source.locator('[data-action=undo]').click();assert.equal(await balloonSlider('outline').inputValue(),'6.5');
-  await source.locator('[data-action=redo]').click();assert.equal(await balloonSlider('outline').inputValue(),'6.6');await source.locator('[data-action=undo]').click();
-  await balloon.locator('[data-field=borderWidth]').fill('3.25');assert.equal(await balloonSlider('borderWidth').inputValue(),'3.3');assert.equal(await field('borderWidth').inputValue(),'3.3');
-  await field('borderWidth').fill('4.5');assert.equal(await balloonSlider('borderWidth').inputValue(),'4.5');
+  assert.equal(await field('textColor').inputValue(),'#007755');assert.equal(await balloon.locator('[data-field=textOutlineColor]').inputValue(),'#cc3300');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'7');
+  assert.equal(await balloonSlider('outline').inputValue(),'7');
+  await balloonSlider('outline').press('ArrowRight');assert.equal(await field('outline').inputValue(),'8');assert.equal(await balloon.locator('[data-field=outline]').inputValue(),'8');
+  await source.locator('[data-action=undo]').click();assert.equal(await balloonSlider('outline').inputValue(),'7');
+  await source.locator('[data-action=redo]').click();assert.equal(await balloonSlider('outline').inputValue(),'8');await source.locator('[data-action=undo]').click();
+  await balloon.locator('[data-field=borderWidth]').fill('3.25');assert.equal(await balloonSlider('borderWidth').inputValue(),'3');assert.equal(await field('borderWidth').inputValue(),'3');
+  await field('borderWidth').fill('4.5');assert.equal(await balloonSlider('borderWidth').inputValue(),'5');
   await balloon.locator('[data-field=shadowOffsetX]').fill('-12');assert.equal(await balloonSlider('shadowOffsetX').inputValue(),'-12');
   const oldTransparency=await balloon.locator('[data-field=transparency]').inputValue();await balloonSlider('transparency').scrollIntoViewIfNeeded();const track=await balloonSlider('transparency').boundingBox();
   await page.mouse.move(track.x+track.width*.4,track.y+track.height/2);await page.mouse.down();await page.mouse.move(track.x+track.width*.7,track.y+track.height/2,{steps:8});await page.mouse.up();
@@ -52,7 +52,7 @@ try {
   const oldBrushSeed=await balloon.locator('[data-field=brushSeed]').inputValue();await balloon.locator('[data-action=regenerate-brush]').click();assert.equal(await brush.getAttribute('open'),'');assert.notEqual(await balloonSlider('brushSeed').inputValue(),oldBrushSeed);
   await source.locator('[data-action=undo]').click();assert.equal(await balloonSlider('brushSeed').inputValue(),oldBrushSeed);assert.equal(await brush.getAttribute('open'),'');
   await source.locator('[data-action=add-caption]').click();const caption=source.locator('[data-kind=caption]').first(),captionPairs=await assertNumericPairs(caption);
-  await caption.locator('[data-field=padding]').fill('37');assert.equal(await caption.locator('[data-numeric-field=padding]').inputValue(),'37');await caption.locator('[data-numeric-field=padding]').press('ArrowRight');assert.equal(await caption.locator('[data-field=padding]').inputValue(),'37.1');assert.equal(await field('padding').inputValue(),'37.1');
+  await caption.locator('[data-field=padding]').fill('37');assert.equal(await caption.locator('[data-numeric-field=padding]').inputValue(),'37');await caption.locator('[data-numeric-field=padding]').press('ArrowRight');assert.equal(await caption.locator('[data-field=padding]').inputValue(),'38');assert.equal(await field('padding').inputValue(),'38');
   await caption.locator('[data-action=drop-layer]').click();await balloon.locator('.layer-summary').click();
   assert.equal(await balloon.locator('[data-field=shapeSeed]').isVisible(),true);assert.equal(await balloon.locator('[data-field=spikeCount]').isVisible(),false);
   await field('shapeSeed').fill('0');assert.equal(await balloon.locator('[data-field=shapeSeed]').inputValue(),'0');
@@ -87,12 +87,12 @@ try {
   for(const sample of pixels.samples){assert.ok(sample.body>20);assert.ok(sample.outline>20);assert.ok(sample.recolored>20);assert.equal(sample.oldOutline,0);assert.equal(sample.bareOutline,0);}
   assert.ok(pixels.rectSeed>100);assert.ok(pixels.spikeSeed>100);assert.ok(pixels.spikeCount>100);assert.equal(pixels.repeat,0);assert.equal(pixels.offscreenDiff,0);
   await source.locator('[data-action=copy-all]').click();await portrait.locator('[data-action=paste-all]').click();
-  const copied=portrait.locator('[data-kind=balloon]').first();assert.equal(await copied.locator('[data-field=shapeSeed]').inputValue(),'4321');assert.equal(await copied.locator('[data-field=spikeCount]').inputValue(),'24');assert.equal(await copied.locator('[data-field=textColor]').inputValue(),'#007755');assert.equal(await copied.locator('[data-field=outline]').inputValue(),'3.3');
+  const copied=portrait.locator('[data-kind=balloon]').first();assert.equal(await copied.locator('[data-field=shapeSeed]').inputValue(),'4321');assert.equal(await copied.locator('[data-field=spikeCount]').inputValue(),'24');assert.equal(await copied.locator('[data-field=textColor]').inputValue(),'#007755');assert.equal(await copied.locator('[data-field=outline]').inputValue(),'4');
   await portrait.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);const preview=await source.locator('canvas').evaluate(canvas=>canvas.toDataURL());
   let saving=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();const png=await saving;
   const pngPixels=await page.evaluate(async base64=>{const img=new Image();img.src='data:image/png;base64,'+base64;await img.decode();const canvas=document.createElement('canvas');canvas.width=img.width;canvas.height=img.height;canvas.getContext('2d').drawImage(img,0,0);return canvas.toDataURL();},(await readFile(await png.path())).toString('base64'));assert.ok(pngPixels===preview,'saved PNG must match the unselected color/outline preview');
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);saving=page.waitForEvent('download');await page.click('#projectSave');const download=await saving,projectBytes=await readFile(await download.path()),project=JSON.parse(projectBytes.toString());
-  assert.equal(project.version,10);assert.equal(project.pages[0].layers[0].textColor,'#2468aa');assert.equal(project.pages[0].layers[0].textOutlineColor,'#cc3300');assert.equal(project.pages[0].layers[0].outline,5.5);assert.equal(project.pages[0].layers[1].shapeSeed,4321);assert.equal(project.pages[0].layers[1].spikeCount,24);
+  assert.equal(project.version,10);assert.equal(project.pages[0].layers[0].textColor,'#2468aa');assert.equal(project.pages[0].layers[0].textOutlineColor,'#cc3300');assert.equal(project.pages[0].layers[0].outline,6);assert.equal(project.pages[0].layers[1].shapeSeed,4321);assert.equal(project.pages[0].layers[1].spikeCount,24);
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');const meta=await getDraftMeta();return meta?.version===10&&meta.pages[0].layers[1].spikeCount===24;});
   await page.reload();await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await dialogue.locator('[data-field=textColor]').inputValue(),'#2468aa');assert.equal(await balloon.locator('[data-field=shapeSeed]').inputValue(),'4321');assert.equal(await balloon.locator('[data-field=spikeCount]').inputValue(),'24');

@@ -4,7 +4,7 @@ import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
 import { PROJECT_VERSION, normalizeLayer, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT } from './model.js';
-import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropRectangle } from './image-edit.js';
+import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropHandles, cropModeAt, dragCropRectangle } from './image-edit.js';
 import { openFullPreview, previewIsOpen } from './preview-modal.js';
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
@@ -238,11 +238,14 @@ function drawPage(p) {
   const size=imageSize(p.img.width,p.img.height,p.imageEdit),scale = p.canvas.width / size.width;
   const displayScale = p.canvas.getBoundingClientRect().width / size.width || scale;
   const ctx=p.canvas.getContext('2d');
-  draw(ctx, p.img, p.layers, p.id === activeId ? [p.selectedId,...(p.selectedIds??[]).filter(id=>id!==p.selectedId)] : null, scale, displayScale,p.imageEdit);
+  draw(ctx, p.img, p.layers, !p.cropDraft && p.id === activeId ? [p.selectedId,...(p.selectedIds??[]).filter(id=>id!==p.selectedId)] : null, scale, displayScale,p.imageEdit);
   if(p.cropDraft){
     const r=p.cropDraft;ctx.save();ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0009';
     ctx.beginPath();ctx.rect(0,0,size.width,size.height);ctx.rect(r.x,r.y,r.width,r.height);ctx.fill('evenodd');
-    ctx.strokeStyle='#c8ee91';ctx.lineWidth=2/displayScale;ctx.setLineDash([6/displayScale,4/displayScale]);ctx.strokeRect(r.x,r.y,r.width,r.height);ctx.restore();
+    ctx.strokeStyle='#c8ee91';ctx.lineWidth=2/displayScale;ctx.setLineDash([6/displayScale,4/displayScale]);ctx.strokeRect(r.x,r.y,r.width,r.height);
+    ctx.setLineDash([]);const handleSize=8/displayScale;ctx.fillStyle='#c8ee91';ctx.strokeStyle='#172010';ctx.lineWidth=1/displayScale;
+    for(const [,x,y] of cropHandles(r)){ctx.fillRect(x-handleSize/2,y-handleSize/2,handleSize,handleSize);ctx.strokeRect(x-handleSize/2,y-handleSize/2,handleSize,handleSize);}
+    ctx.restore();
   }
   // A temporary alignment guide is preview-only, never part of the exported image.
   if(drag?.page===p && drag.duplicated && drag.axis) {
@@ -317,6 +320,7 @@ function updateImageView(p) {
   if(p.canvas.width!==width)p.canvas.width=width;if(p.canvas.height!==height)p.canvas.height=height;
   p.row.querySelector('.image-edit-summary').textContent=`保存サイズ ${size.width} × ${size.height} · 回転 ${p.imageEdit?.rotation??0}°`;
   p.row.querySelector('.crop-controls').hidden=!p.cropDraft;p.canvas.classList.toggle('cropping',!!p.cropDraft);
+  if(!p.cropDraft)p.canvas.style.removeProperty('cursor');
   p.row.querySelector('[data-action=crop-image]').setAttribute('aria-expanded',String(!!p.cropDraft));
   if(p.cropDraft)for(const input of p.row.querySelectorAll('[data-crop-field]')){
     const field=input.dataset.cropField;if(input!==document.activeElement)input.value=String(p.cropDraft[field]);
@@ -325,7 +329,11 @@ function updateImageView(p) {
   sizePreview(p);
 }
 
-function cancelCrop(p) { p.cropDraft=null;p.cropPointer=null;updateImageView(p);updateGlobal(); }
+function cancelCrop(p) {
+  const pointer=p.cropPointer;p.cropDraft=null;p.cropPointer=null;
+  if(pointer&&p.canvas.hasPointerCapture(pointer.id))p.canvas.releasePointerCapture(pointer.id);
+  updateImageView(p);updateGlobal();
+}
 
 function selectObject(p,id,toggle=false,replace=false) {
   if(toggle){const ids=p.selectedIds??[p.selectedId];setSelection(p,ids.includes(id)?ids.filter(item=>item!==id):[...ids,id],id);}
@@ -527,7 +535,10 @@ function textPositionControls(layer){
   return grid;
 }
 const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
-const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','brushSeed','glyphSeed']);
+const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','brushSeed','glyphSeed',
+  'x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth',
+  'textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth',
+  'shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY']);
 function numericValue(value,field){return !Number.isFinite(value)?value:INTEGER_FIELDS.has(field)?Math.round(value):Number(value.toFixed(1));}
 function numericStep(field){return INTEGER_FIELDS.has(field)?'1':'0.1';}
 function controlField(input){return input.dataset.field??input.dataset.numericField;}
@@ -922,11 +933,19 @@ function previewCoords(event, p) {
 }
 function coords(event,p){return imagePoint(previewCoords(event,p),p.img.width,p.img.height,p.imageEdit,true);}
 
+const CROP_CURSORS={create:'crosshair',move:'move',n:'ns-resize',s:'ns-resize',e:'ew-resize',w:'ew-resize',nw:'nwse-resize',se:'nwse-resize',ne:'nesw-resize',sw:'nesw-resize'};
+function cropPointerMode(p,pos){
+  const size=imageSize(p.img.width,p.img.height,p.imageEdit);
+  return cropModeAt(p.cropDraft,pos,size.width,size.height,p.canvas.getBoundingClientRect().width/size.width);
+}
+
 function connectCanvas(p) {
   p.canvas.addEventListener('pointerdown', event => {
     if (editLocked() || !event.isPrimary || event.button !== 0 || drag) return;
     if(p.cropDraft){
-      activate(p);p.canvas.focus({preventScroll:true});p.cropPointer={id:event.pointerId,start:previewCoords(event,p),before:{...p.cropDraft}};p.canvas.setPointerCapture(event.pointerId);return;
+      event.preventDefault();activate(p);p.canvas.focus({preventScroll:true});
+      const start=previewCoords(event,p),mode=cropPointerMode(p,start);
+      p.cropPointer={id:event.pointerId,start,mode,before:{...p.cropDraft}};p.canvas.style.cursor=CROP_CURSORS[mode];p.canvas.setPointerCapture(event.pointerId);return;
     }
     const size=imageSize(p.img.width,p.img.height,p.imageEdit),pos = coords(event, p), scale = p.canvas.getBoundingClientRect().width / size.width;
     const current = selected(p), handle = current && handleAt(current, pos.x, pos.y, scale);
@@ -941,8 +960,14 @@ function connectCanvas(p) {
     p.canvas.setPointerCapture(event.pointerId);
   });
   p.canvas.addEventListener('pointermove', event => {
-    if(!editLocked()&&p.cropPointer?.id===event.pointerId){
-      const size=imageSize(p.img.width,p.img.height,p.imageEdit);p.cropDraft=cropRectangle(p.cropPointer.start,previewCoords(event,p),size.width,size.height);updateImageView(p);return;
+    if(p.cropDraft){
+      if(editLocked())return;
+      const pointer=p.cropPointer,pos=previewCoords(event,p);
+      if(pointer?.id===event.pointerId){
+        const size=imageSize(p.img.width,p.img.height,p.imageEdit);
+        p.cropDraft=dragCropRectangle(pointer.before,pointer.mode,pointer.start,pos,size.width,size.height);updateImageView(p);
+      }else if(!pointer)p.canvas.style.cursor=CROP_CURSORS[cropPointerMode(p,pos)];
+      return;
     }
     if (editLocked() || !drag || drag.page !== p || drag.id !== event.pointerId) return;
     const l = selected(p), pos = coords(event, p); if (!l) return;
@@ -980,7 +1005,11 @@ function connectCanvas(p) {
     drawPage(p); updateControls(p); updateGlobal();
   });
   const end = event => {
-    if(p.cropPointer?.id===event.pointerId){if(event.type==='pointercancel')p.cropDraft=p.cropPointer.before;p.cropPointer=null;updateImageView(p);return;}
+    if(p.cropPointer?.id===event.pointerId){
+      if(event.type!=='pointerup')p.cropDraft=p.cropPointer.before;
+      p.cropPointer=null;if(p.canvas.hasPointerCapture(event.pointerId))p.canvas.releasePointerCapture(event.pointerId);
+      p.canvas.style.cursor=CROP_CURSORS[cropPointerMode(p,previewCoords(event,p))];updateImageView(p);return;
+    }
     if (!drag || drag.page !== p || drag.id !== event.pointerId) return;
     const finished=drag;drag=null;
     if(event.type==='pointercancel' && finished.duplicated) {
@@ -993,6 +1022,8 @@ function connectCanvas(p) {
     updateControls(p);refreshPresetMenus();
   };
   p.canvas.addEventListener('pointerup', end); p.canvas.addEventListener('pointercancel', end);
+  p.canvas.addEventListener('lostpointercapture', event=>{if(p.cropPointer?.id===event.pointerId)end(event);});
+  p.canvas.addEventListener('pointerleave',()=>{if(!p.cropPointer)p.canvas.style.removeProperty('cursor');});
 }
 
 window.addEventListener('keydown', event => {

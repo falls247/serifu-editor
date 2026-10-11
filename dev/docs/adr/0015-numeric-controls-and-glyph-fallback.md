@@ -4,7 +4,7 @@
 - 状態: 採用
 - 関連: [ADR-0005](0005-fonts-and-manga-typography.md)、[ADR-0014](0014-optical-lettering-and-brush-strokes.md)
 
-数値UIの表示精度と刻みは[ADR-0020](0020-full-size-preview-and-numeric-ui.md)で小数1桁・0.1刻みに変更。内部のコピー・読込値は保持する。
+数値UIの表示精度と刻みは[ADR-0020](0020-full-size-preview-and-numeric-ui.md)でピクセル値は整数・1px刻み、角度・割合は小数1桁・0.1刻みに変更。内部のコピー・読込値は保持する。
 
 ## 背景
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeImageEdit, imageSize, imagePoint, rotateImage, cropImage, cropRectangle } from '../src/image-edit.js';
+import { normalizeImageEdit, imageSize, imagePoint, rotateImage, cropImage, cropRectangle, cropModeAt, dragCropRectangle } from '../src/image-edit.js';
 import { newLayer } from '../src/renderer.js';
 import { checkpoint, restore, hasEdits, cutLayers, setSelection, selectedLayers, copyLayers, pasteSelectedLayers } from '../src/model.js';
 import { projectBlob, readProject } from '../src/project-io.js';
@@ -39,6 +39,33 @@ test('invalid image edits cannot request out-of-source or empty output; reverse 
   assert.throws(() => normalizeImageEdit({ rotation: 45 }, 400, 300), /不正/);
   assert.throws(() => cropImage(400, 300, rotateImage(400, 300, null, 90), { x: 0, y: 0, width: 301, height: 100 }), /不正/);
   assert.deepEqual(cropRectangle({ x: 410, y: 200 }, { x: -20, y: 50 }, 400, 300), { x: 0, y: 50, width: 400, height: 150 });
+});
+
+test('crop selection distinguishes scaled handles, edges, interior and new selection', () => {
+  const rect = { x: 40, y: 30, width: 280, height: 210 };
+  for (const [mode, point] of [['nw', { x: 40, y: 30 }], ['n', { x: 180, y: 30 }],
+    ['ne', { x: 320, y: 30 }], ['e', { x: 320, y: 135 }], ['se', { x: 320, y: 240 }],
+    ['s', { x: 180, y: 240 }], ['sw', { x: 40, y: 240 }], ['w', { x: 40, y: 135 }],
+    ['n', { x: 90, y: 30 }], ['e', { x: 320, y: 80 }], ['s', { x: 90, y: 240 }], ['w', { x: 40, y: 80 }],
+    ['move', { x: 120, y: 100 }], ['create', { x: 10, y: 10 }]])
+    assert.equal(cropModeAt(rect, point, 400, 300, 1), mode);
+  assert.equal(cropModeAt(rect, { x: 55, y: 30 }, 400, 300, .5), 'nw');
+  assert.equal(cropModeAt(rect, { x: 55, y: 30 }, 400, 300, 2), 'n');
+  assert.equal(cropModeAt({ x: 0, y: 0, width: 400, height: 300 }, { x: 120, y: 100 }, 400, 300, 1), 'create');
+});
+
+test('crop drags preserve the opposite edges, dimensions on movement, integer bounds and a one-pixel minimum', () => {
+  const rect = { x: 40, y: 30, width: 280, height: 210 }, start = { x: 100, y: 100 }, end = { x: 120.4, y: 110.2 };
+  const expected = { nw: [60,40,260,200], n: [40,40,280,200], ne: [40,40,300,200], e: [40,30,300,210],
+    se: [40,30,300,220], s: [40,30,280,220], sw: [60,30,260,220], w: [60,30,260,210], move: [60,40,280,210] };
+  for (const [mode, [x,y,width,height]] of Object.entries(expected))
+    assert.deepEqual(dragCropRectangle(rect, mode, start, end, 400, 300), { x,y,width,height });
+  assert.deepEqual(dragCropRectangle(rect, 'move', start, { x: 900, y: 900 }, 400, 300), { ...rect, x: 120, y: 90 });
+  assert.deepEqual(dragCropRectangle(rect, 'move', start, { x: -900, y: -900 }, 400, 300), { ...rect, x: 0, y: 0 });
+  assert.deepEqual(dragCropRectangle(rect, 'nw', start, { x: 900, y: 900 }, 400, 300), { x: 319, y: 239, width: 1, height: 1 });
+  assert.deepEqual(dragCropRectangle(rect, 'se', start, { x: -900, y: -900 }, 400, 300), { x: 40, y: 30, width: 1, height: 1 });
+  assert.deepEqual(dragCropRectangle(rect, 'nw', start, { x: -900, y: -900 }, 400, 300), { x: 0, y: 0, width: 320, height: 240 });
+  assert.deepEqual(dragCropRectangle(rect, 'se', start, { x: 900, y: 900 }, 400, 300), { x: 40, y: 30, width: 360, height: 270 });
 });
 
 test('image edits survive deleting all objects and history restores edits and group selections together', () => {

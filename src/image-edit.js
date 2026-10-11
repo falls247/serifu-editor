@@ -51,3 +51,42 @@ export function cropRectangle(start, end, width, height) {
   const left = bound(Math.min(start.x, end.x), width - 1), top = bound(Math.min(start.y, end.y), height - 1);
   return { x: left, y: top, width: Math.max(1, bound(Math.max(start.x, end.x), width) - left), height: Math.max(1, bound(Math.max(start.y, end.y), height) - top) };
 }
+
+// Handles and hit areas are fixed in displayed pixels, independent of preview zoom.
+export function cropHandles(rect) {
+  const { x, y, width, height } = rect;
+  return [['nw', x, y], ['n', x + width / 2, y], ['ne', x + width, y],
+    ['e', x + width, y + height / 2], ['se', x + width, y + height],
+    ['s', x + width / 2, y + height], ['sw', x, y + height], ['w', x, y + height / 2]];
+}
+
+export function cropModeAt(rect, point, width, height, displayScale) {
+  const radius = 8 / displayScale, edge = 5 / displayScale;
+  const handle = cropHandles(rect).find(([, x, y]) => Math.abs(point.x - x) <= radius && Math.abs(point.y - y) <= radius);
+  if (handle) return handle[0];
+  const { x, y, width: w, height: h } = rect;
+  if (point.x >= x && point.x <= x + w) {
+    if (Math.abs(point.y - y) <= edge) return 'n';
+    if (Math.abs(point.y - y - h) <= edge) return 's';
+  }
+  if (point.y >= y && point.y <= y + h) {
+    if (Math.abs(point.x - x) <= edge) return 'w';
+    if (Math.abs(point.x - x - w) <= edge) return 'e';
+  }
+  // Start with a full-image frame, whose interior can be dragged to select a new crop.
+  if (!x && !y && w === width && h === height) return 'create';
+  return point.x > x && point.x < x + w && point.y > y && point.y < y + h ? 'move' : 'create';
+}
+
+export function dragCropRectangle(rect, mode, start, end, width, height) {
+  if (mode === 'create') return cropRectangle(start, end, width, height);
+  const bound = (value, min, max) => Math.max(min, Math.min(max, value));
+  const dx = Math.round(end.x - start.x), dy = Math.round(end.y - start.y);
+  if (mode === 'move') return { ...rect, x: bound(rect.x + dx, 0, width - rect.width), y: bound(rect.y + dy, 0, height - rect.height) };
+  let left = rect.x, top = rect.y, right = left + rect.width, bottom = top + rect.height;
+  if (mode.includes('w')) left = bound(left + dx, 0, right - 1);
+  if (mode.includes('e')) right = bound(right + dx, left + 1, width);
+  if (mode.includes('n')) top = bound(top + dy, 0, bottom - 1);
+  if (mode.includes('s')) bottom = bound(bottom + dy, top + 1, height);
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}

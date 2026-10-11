@@ -26,7 +26,7 @@ try {
   const dimensions = await row.evaluate(r => ({ original: r.querySelector('.original').getBoundingClientRect().width,
     preview: r.querySelector('canvas').getBoundingClientRect().width, frame: r.querySelector('.preview-frame').clientWidth }));
   assert.ok(dimensions.preview > dimensions.original * 1.2); assert.ok(Math.abs(dimensions.preview - (dimensions.frame - 2)) < 1);
-  const integerFields = ['shapeSeed', 'spikeCount', 'brushSeed', 'glyphSeed'];
+  const integerFields = ['shapeSeed','spikeCount','brushSeed','glyphSeed','x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth','textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth','shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY'];
   const values = await row.locator('input[data-field][type=number],input[data-numeric-field][type=number]').evaluateAll(inputs => inputs.map(i => ({ field: i.dataset.field ?? i.dataset.numericField, value: i.value, step: i.step })));
   for (const input of values) {
     if (!input.value) continue;
@@ -80,9 +80,9 @@ try {
   assert.equal(project.pages[0].layers[0].y, fixture.pages[0].layers[0].y);
   await page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);
   const sizeInput = row.locator('.position-controls [data-field=size]'); await sizeInput.fill('41.23456');
-  assert.equal(await row.locator('.position-controls [data-numeric-field=size]').inputValue(), '41.2'); await sizeInput.blur(); assert.equal(await sizeInput.inputValue(), '41.2');
-  await sizeInput.press('ArrowUp'); assert.equal(await sizeInput.inputValue(), '41.3'); await sizeInput.blur();
-  await row.locator('[data-action=undo]').click(); assert.equal(await sizeInput.inputValue(), '41.2'); await row.locator('[data-action=undo]').click(); assert.equal(await sizeInput.inputValue(), '40.1');
+  assert.equal(await row.locator('.position-controls [data-numeric-field=size]').inputValue(), '41'); await sizeInput.blur(); assert.equal(await sizeInput.inputValue(), '41');
+  await sizeInput.press('ArrowUp'); assert.equal(await sizeInput.inputValue(), '42'); await sizeInput.blur();
+  await row.locator('[data-action=undo]').click(); assert.equal(await sizeInput.inputValue(), '41'); await row.locator('[data-action=undo]').click(); assert.equal(await sizeInput.inputValue(), '40');
   await row.locator('[data-action=rotate-right]').click(); await opener.click(); await image.waitFor({ state: 'visible' }); assert.deepEqual(await image.evaluate(c => [c.width, c.height]), [1000, 1600]);
   await page.locator('#fullPreviewClose').click(); await row.locator('[data-action=crop-image]').click();
   for (const [field, value] of Object.entries({ x: 100, y: 100, width: 700, height: 1000 })) await row.locator(`[data-crop-field=${field}]`).fill(String(value));
@@ -96,6 +96,6 @@ try {
   const bounds = await modal.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 421);
   await page.screenshot({ path: 'artifacts/full-preview-mobile.png' }); await page.locator('#fullPreviewClose').click();
   assert.deepEqual(errors, []);
-  console.log('Full-resolution edited modal, 10–200% zoom controls/Ctrl-wheel/anchor, scroll/focus/Escape, crop/rotation, PNG parity, one-decimal controls and precision preservation passed');
+  console.log('Full-resolution edited modal, 10–200% zoom controls/Ctrl-wheel/anchor, scroll/focus/Escape, crop/rotation, PNG parity, integer pixel controls, one-decimal angles/percentages and precision preservation passed');
 } catch (error) { if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/full-preview-failure.png' }).catch(() => {}); } throw error; }
 finally { await browser?.close(); server.kill(); }

@@ -35,6 +35,12 @@ try {
     await page.mouse.click(box.x + x * box.width / width, box.y + y * box.height / height);
     if (shift) await page.keyboard.up('Shift');
   };
+  const cropValues = () => row().locator('[data-crop-field]').evaluateAll(inputs => Object.fromEntries(inputs.map(input => [input.dataset.cropField, Number(input.value)])));
+  const dragCrop = async (start, end, width = 400, height = 300) => {
+    await canvas().scrollIntoViewIfNeeded(); const box = await canvas().boundingBox();
+    await page.mouse.move(box.x + start.x * box.width / width, box.y + start.y * box.height / height); await page.mouse.down();
+    await page.mouse.move(box.x + end.x * box.width / width, box.y + end.y * box.height / height, { steps: 4 }); await page.mouse.up();
+  };
   const state = () => page.evaluate(async () => {
     const { getDraftMeta } = await import('./src/storage.js'); return (await getDraftMeta()).pages;
   });
@@ -88,6 +94,25 @@ try {
   let box = await canvas().boundingBox(); await page.mouse.move(box.x + box.width * .8, box.y + box.height * .8); await page.mouse.down();
   await page.mouse.move(box.x + box.width * .1, box.y + box.height * .1, { steps: 3 }); await page.mouse.up();
   assert.equal(await row().locator('[data-crop-field=width]').inputValue(), '280');
+  await dragCrop({ x: 180, y: 135 }, { x: 220, y: 155 });
+  assert.deepEqual(await cropValues(), { x: 80, y: 50, width: 280, height: 210 });
+  await dragCrop({ x: 360, y: 260 }, { x: 380, y: 280 });
+  assert.deepEqual(await cropValues(), { x: 80, y: 50, width: 300, height: 230 });
+  await dragCrop({ x: 80, y: 165 }, { x: 60, y: 165 });
+  assert.deepEqual(await cropValues(), { x: 60, y: 50, width: 320, height: 230 });
+  // Captured movement beyond the canvas clamps at the image edges without changing size.
+  await dragCrop({ x: 220, y: 165 }, { x: 500, y: 350 });
+  assert.deepEqual(await cropValues(), { x: 80, y: 70, width: 320, height: 230 });
+  // Outside the frame selects a fresh rectangle.
+  await dragCrop({ x: 20, y: 15 }, { x: 200, y: 150 });
+  assert.deepEqual(await cropValues(), { x: 20, y: 15, width: 180, height: 135 });
+  // Interrupted captured drags restore the draft without changing persisted image edits.
+  box=await canvas().boundingBox();await page.mouse.move(box.x+100*box.width/400,box.y+80*box.height/300);await page.mouse.down();
+  await page.mouse.move(box.x+120*box.width/400,box.y+100*box.height/300);
+  assert.deepEqual(await cropValues(), { x: 40, y: 35, width: 180, height: 135 });
+  await canvas().dispatchEvent('pointercancel',{pointerId:1});await page.mouse.up();
+  assert.deepEqual(await cropValues(), { x: 20, y: 15, width: 180, height: 135 });
+  assert.equal(await row().locator('.edited-badge').isVisible(), false);
   await page.keyboard.press('Escape'); assert.equal(await row().locator('.crop-controls').isVisible(), false); assert.equal(await row().locator('.edited-badge').isVisible(), false);
   await row().locator('[data-action=add-caption]').click();
   const caption = row().locator('[data-kind=caption]'); await caption.locator('textarea').fill('');
@@ -98,7 +123,10 @@ try {
   await row().locator('[data-action=rotate-right]').click(); assert.deepEqual(await canvas().evaluate(c => [c.width, c.height]), [300, 400]);
   const originalSize = await row().locator('.original').evaluate(img => [img.naturalWidth, img.naturalHeight]); assert.deepEqual(originalSize, [400, 300]);
   await row().locator('[data-action=crop-image]').click();
-  for (const [field, value] of Object.entries({ x: 160, y: 20, width: 120, height: 180 })) await row().locator(`[data-crop-field=${field}]`).fill(String(value));
+  await dragCrop({ x: 140, y: 20 }, { x: 260, y: 180 }, 300, 400);
+  await dragCrop({ x: 200, y: 100 }, { x: 220, y: 120 }, 300, 400);
+  await dragCrop({ x: 220, y: 40 }, { x: 220, y: 20 }, 300, 400);
+  assert.deepEqual(await cropValues(), { x: 160, y: 20, width: 120, height: 180 });
   await row().locator('[data-action=apply-crop]').click(); assert.deepEqual(await canvas().evaluate(c => [c.width, c.height]), [120, 180]);
   saved = await saveDraft(); assert.deepEqual(saved[0].imageEdit, { rotation: 90, crop: { x: 20, y: 20, width: 180, height: 120 } });
   await canvas().focus(); await page.keyboard.press('Control+z'); assert.deepEqual(await canvas().evaluate(c => [c.width, c.height]), [300, 400]);
