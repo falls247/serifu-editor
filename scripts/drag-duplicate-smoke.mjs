@@ -43,7 +43,7 @@ try {
   };
   // Empty the demo layers so exact hit testing and overlap order are deterministic.
   await row.locator('[data-action=cut-all]').click();
-  await page.waitForFunction(()=>document.querySelector('.image-row .layer-card')===null);
+  await page.waitForFunction(()=>document.querySelector('.image-row .layer-cards')?.children.length===0);
   for(const kind of ['dialogue','sfx','balloon','caption']){
     await row.locator(`[data-action=add-${kind==='dialogue'?'male':kind}]`).click();
     assert.equal(await count(),1);
@@ -106,7 +106,7 @@ try {
     }
     // One original layer remains after all duplicate/undo cycles.
     await row.locator('[data-action=cut-all]').click();
-    await page.waitForFunction(()=>document.querySelector('.image-row .layer-card')===null);
+    await page.waitForFunction(()=>document.querySelector('.image-row .layer-cards')?.children.length===0);
   }
   assert.deepEqual(errors,[],'no browser script errors');
   console.log('Ctrl-drag browser smoke passed: four layer kinds, normal drag, Ctrl-click no-op, Ctrl-copy, Ctrl-Shift four axes with guide, Undo/Redo');
