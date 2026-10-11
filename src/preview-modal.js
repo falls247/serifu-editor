@@ -9,11 +9,20 @@ const slider = document.getElementById('fullPreviewZoom');
 const output = document.getElementById('fullPreviewZoomValue');
 const message = document.getElementById('fullPreviewStatus');
 let preview = null, generation = 0, previousOverflow = '', previousGutter = '', opener = null;
+let pan = null;
 
 export const previewIsOpen = () => dialog.open;
 
+function endPan(event) {
+  if (!pan || (event && event.pointerId !== pan.pointerId)) return;
+  const { pointerId } = pan; pan = null;
+  viewport.classList.remove('is-panning');
+  if (canvas.hasPointerCapture(pointerId)) canvas.releasePointerCapture(pointerId);
+}
+
 function zoomTo(value, anchor = null) {
   if (!preview) return;
+  endPan();
   const next = clamp(Math.round(value / 10) * 10, 10, 200), before = canvas.getBoundingClientRect();
   const bounds = viewport.getBoundingClientRect();
   const point = anchor ?? { x: bounds.left + viewport.clientWidth / 2, y: bounds.top + viewport.clientHeight / 2 };
@@ -29,6 +38,7 @@ function zoomTo(value, anchor = null) {
 }
 
 export async function openFullPreview(page, trigger) {
+  endPan();
   const token = ++generation, size = imageSize(page.img.width, page.img.height, page.imageEdit);
   preview = { ...size, zoom: 100 }; opener = trigger;
   document.getElementById('fullPreviewTitle').textContent = page.name;
@@ -51,6 +61,23 @@ export async function openFullPreview(page, trigger) {
   }
 }
 
+canvas.addEventListener('pointerdown', event => {
+  if (!preview || !dialog.open || canvas.hidden || pan || !event.isPrimary || event.button !== 0) return;
+  event.preventDefault();
+  pan = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  canvas.setPointerCapture(event.pointerId);
+  viewport.classList.add('is-panning');
+});
+canvas.addEventListener('pointermove', event => {
+  if (!pan || event.pointerId !== pan.pointerId) return;
+  event.preventDefault();
+  viewport.scrollLeft += pan.x - event.clientX;
+  viewport.scrollTop += pan.y - event.clientY;
+  pan.x = event.clientX; pan.y = event.clientY;
+});
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) canvas.addEventListener(type, endPan);
+canvas.addEventListener('dragstart', event => event.preventDefault());
+
 slider.addEventListener('input', () => zoomTo(Number(slider.value)));
 document.getElementById('fullPreviewZoomOut').onclick = () => zoomTo(preview.zoom - 10);
 document.getElementById('fullPreviewZoomIn').onclick = () => zoomTo(preview.zoom + 10);
@@ -67,6 +94,7 @@ dialog.addEventListener('wheel', event => {
   if (event.deltaY) zoomTo(preview.zoom + (event.deltaY < 0 ? 10 : -10), viewport.contains(event.target) ? { x: event.clientX, y: event.clientY } : null);
 }, { passive: false });
 dialog.addEventListener('close', () => {
+  endPan();
   generation++; preview = null; canvas.hidden = true; releasePreviewCanvas();
   document.body.style.overflow = previousOverflow; document.documentElement.style.scrollbarGutter = previousGutter;
   opener?.isConnected && opener.focus({ preventScroll: true }); opener = null;
