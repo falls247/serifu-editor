@@ -111,10 +111,21 @@ try {
   const row = page.locator('.image-row.active'), panel = row.locator('.sam3-panel'), overlay = row.locator('.sam3-overlay');
   await page.waitForFunction(() => document.querySelector('.sam3-connection')?.textContent.includes('接続済み'));
 
-  await panel.locator('[data-sam3-prompt]').fill('標識');
-  await panel.locator('[data-sam3-action=detect]').click();
+  const promptInput=panel.locator('[data-sam3-prompt]');
+  await page.evaluate(()=>{window.__sam3DetectClicks=0;document.querySelector('[data-sam3-action=detect]').addEventListener('click',()=>window.__sam3DetectClicks++);});
+  await promptInput.fill('   ');await promptInput.press('Enter');
+  assert.equal(await page.evaluate(()=>window.__sam3DetectClicks),0,'Enter ignores a disabled empty-prompt detect button');
+  await promptInput.fill('標識');
+  const ignoredEnterClicks=await promptInput.evaluate(input=>{
+    for(const options of [{isComposing:true},{keyCode:229},{repeat:true}])input.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,...options}));
+    return window.__sam3DetectClicks;
+  });
+  assert.equal(ignoredEnterClicks,0,'IME confirmation and repeated Enter must not trigger detection');
+  await promptInput.press('Enter');
   try { await page.waitForFunction(() => document.querySelectorAll('.sam3-candidate').length === 4, { timeout: 12000 }); }
   catch (error) { console.error('SAM3 UI state:', await panel.innerText(), 'infer requests:', inferRequests); throw error; }
+  assert.equal(await page.evaluate(()=>window.__sam3DetectClicks),1,'Enter activates exactly the same detect button');
+  assert.equal(inferRequests[0].mode,'text');assert.equal(inferRequests[0].prompt,'標識');
   assert.match(await panel.locator('[data-sam3-warning]').innerText(), /一部候補は応答上限により省略/);
   const newest = inferRequests[0].requestId, split = newest.lastIndexOf(':'), staleRequestId = `${newest.slice(0, split)}:${newest.slice(split + 1)}`;
   const staleResponse = await page.evaluate(async requestId => {
@@ -175,24 +186,37 @@ try {
   await panel.locator('[data-sam3-action=detect]').click();
   await waitForInferCount(page, nextRequest);
   await page.waitForFunction(() => document.querySelector('[data-sam3-request-status]')?.textContent === 'SAM3推論中');
+  const clicksWhileRunning=await page.evaluate(()=>window.__sam3DetectClicks);
+  await promptInput.press('Enter');assert.equal(await page.evaluate(()=>window.__sam3DetectClicks),clicksWhileRunning,'Enter ignores detection while the button is disabled for inference');
   await panel.locator('[data-sam3-action=cancel]').click();
   for (let attempt = 0; attempt < 100 && deletedJobs.length === previousDeletes; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
   assert.ok(deletedJobs.length > previousDeletes, 'cancelling a running draft must delete its pending backend job');
   const effectTypes = ['pixelate', 'blur', 'fill-black', 'fill-white'];
   for (const [index, effect] of effectTypes.entries()) {
-    await row.locator('.mask-effect-card').nth(index).locator('[data-mask-field=effect]').selectOption(effect);
+    const card=row.locator('.mask-effect-card').nth(index);
+    if(!await card.locator('[data-mask-field=effect]').isVisible())await card.locator('.mask-effect-summary').click();
+    await card.locator('[data-mask-field=effect]').selectOption(effect);
   }
+  await row.locator('.mask-effect-card').nth(0).locator('.mask-effect-summary').click();
   await row.locator('.mask-effect-card').nth(0).locator('[data-mask-field=blockSize]').fill('16');
   await row.locator('.mask-effect-card').nth(0).locator('[data-mask-field=blockSize]').dispatchEvent('change');
+  await row.locator('.mask-effect-card').nth(1).locator('.mask-effect-summary').click();
   await row.locator('.mask-effect-card').nth(1).locator('[data-mask-field=blurRadius]').fill('14');
   await row.locator('.mask-effect-card').nth(1).locator('[data-mask-field=blurRadius]').dispatchEvent('change');
   assert.deepEqual(await row.locator('.mask-effect-card').evaluateAll(cards => cards.map(card => card.querySelector('[data-mask-field=effect]').value)), effectTypes);
   assert.deepEqual(await row.locator('.mask-effect-card').first().locator('[data-mask-field]').evaluateAll(inputs => inputs.slice(-4).map(input => Number(input.value))), [30, 30, 50, 50]);
 
   const cards = row.locator('.mask-effect-card'), canvas = row.locator('canvas.preview');
-  await cards.first().locator('[data-mask-action=select]').click();
+  assert.equal(await row.locator('.mask-effect-card.selected').count(),1);
+  assert.equal(await cards.first().locator('[data-mask-field=effect]').isVisible(),false,'unselected masks hide editing controls');
+  assert.match(await cards.first().locator('.mask-effect-summary').innerText(),/マスク加工 1：ピクセレート/);
+  await cards.first().locator('.mask-effect-summary').click();
+  assert.equal(await cards.first().locator('[data-mask-field=effect]').isVisible(),true,'selecting a compact mask expands its settings');
+  assert.equal(await cards.nth(1).locator('[data-mask-field=effect]').isVisible(),false,'previous mask collapses when selection changes');
   await canvas.scrollIntoViewIfNeeded();
   let box = await canvas.boundingBox();
+  await canvas.hover({position:{x:box.width*55/imageWidth,y:box.height*55/imageHeight}});
+  box=await canvas.boundingBox();
   const center = { x: box.x + box.width * 55 / imageWidth, y: box.y + box.height * 55 / imageHeight };
   await page.mouse.move(center.x, center.y); await page.mouse.down();
   await page.mouse.move(center.x + box.width * 20 / imageWidth, center.y + box.height * 10 / imageHeight, { steps: 4 }); await page.mouse.up();

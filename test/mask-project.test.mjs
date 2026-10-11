@@ -30,6 +30,19 @@ test('project JSON round-trips mask effects and checksummed payloads', async () 
   await assert.rejects(readProject(new Blob([JSON.stringify(data)])), /寸法/);
 });
 
+test('shared text-mask ordering survives JSON and container saves, with v12 compatibility',async()=>{
+  const source=page(await encodeMask(pixels,4,3));
+  source.layers=[{id:'text',kind:'dialogue',layoutOrder:0}];source.maskEffects[0].layoutOrder=1;
+  for(const format of ['json','serifu']){
+    const restored=await readProject(await projectBlob([source],{},{format}));
+    assert.equal(restored.pages[0].layers[0].layoutOrder,0);assert.equal(restored.pages[0].maskEffects[0].layoutOrder,1);
+  }
+  const old=JSON.parse(await (await projectBlob([source],{},{format:'json'})).text());old.version=12;
+  await assert.rejects(readProject(new Blob([JSON.stringify(old)])),/未対応の重なり順/);
+  delete old.pages[0].layers[0].layoutOrder;delete old.pages[0].maskEffects[0].layoutOrder;
+  const restored=await readProject(new Blob([JSON.stringify(old)]));assert.equal(restored.version,12);assert.equal(restored.pages[0].maskEffects.length,1);
+});
+
 test('project export rejects asset map keys that disagree with asset IDs', async () => {
   const source = page(await encodeMask(pixels, 4, 3));
   source.maskAssets['mask-1'] = { ...source.maskAssets['mask-1'], id: 'different-id' };

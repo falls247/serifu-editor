@@ -131,6 +131,7 @@ function validatePages(data,container=false){
   for(const p of data.pages){if(!p||typeof p.name!=='string'||!Array.isArray(p.layers))throw new Error('画像データが不正');
     if(!container&&(typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp|gif|avif);base64,[A-Za-z0-9+/\s]*={0,2}$/.test(p.src)))throw new Error('画像データが不正');
     if(version<12&&(Object.hasOwn(p,'maskEffects')||Object.hasOwn(p,'maskAssets')))throw new Error('旧版データに未対応のマスク情報がある');
+    if(version<13&&[...p.layers,...(Array.isArray(p.maskEffects)?p.maskEffects:[])].some(object=>object&&Object.hasOwn(object,'layoutOrder')))throw new Error('旧版データに未対応の重なり順がある');
     if(version>=12){
       if(!container&&![p.imageWidth,p.imageHeight].every(n=>Number.isSafeInteger(n)&&n>0&&n<=30000))throw new Error('JSON画像寸法が不正');
       if(p.maskEffects!==undefined&&!Array.isArray(p.maskEffects))throw new Error('マスク加工一覧が不正');
@@ -141,7 +142,7 @@ export async function readProject(file,{signal}={}){
   checkAbort(signal);const head=new Uint8Array(await file.slice(0,12).arrayBuffer());
   if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);const pages=[];
     if(data.version>=12)validateJSONMaskBudget(data.pages);
-    for(const p of data.pages){const decodedAssets=data.version>=12?await createDecodedAssets(p.maskAssets??{},p.imageWidth,p.imageHeight):{};const maskEffects=data.version>=12?normalizeMaskEffects(p.maskEffects??[],p.imageWidth,p.imageHeight,new Set(Object.keys(decodedAssets))):[];
+    for(const p of data.pages){const decodedAssets=data.version>=12?await createDecodedAssets(p.maskAssets??{},p.imageWidth,p.imageHeight):{};const maskEffects=data.version>=12?normalizeMaskEffects(p.maskEffects??[],p.imageWidth,p.imageHeight,new Set(Object.keys(decodedAssets)),data.version):[];
       pages.push({name:p.name,src:p.src,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,decodedAssets),...(data.version>=12?{expectedSize:{width:p.imageWidth,height:p.imageHeight}}:{})});}
     return {version:data.version,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};}
   if(head.length!==12||!MAGIC.every((b,i)=>head[i]===b))throw new Error('未対応の高速編集データ');
@@ -172,7 +173,7 @@ export async function readProject(file,{signal}={}){
       const bytes=new Uint8Array(await blob.arrayBuffer());
       maskAssets[record.id]=await assetFromEncoded({...record,data:bytes});
     }
-    const maskEffects=data.projectVersion>=12?normalizeMaskEffects(p.maskEffects??[],imageAsset.width,imageAsset.height,new Set(Object.keys(maskAssets))):[];
+    const maskEffects=data.projectVersion>=12?normalizeMaskEffects(p.maskEffects??[],imageAsset.width,imageAsset.height,new Set(Object.keys(maskAssets)),data.projectVersion):[];
     pages.push({name:p.name,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,maskAssets),blob:blobs[p.assetIndex],expectedSize:imageAsset});
   }
   return {version:data.projectVersion,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};

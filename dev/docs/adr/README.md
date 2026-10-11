@@ -35,3 +35,4 @@
 - [ADR-0022: 全オブジェクトの重なり順を配列順に統一する](0022-unified-object-layer-order.md)
 
 - [ADR-0023: SAM3推論と非破壊マスク加工の保存](0023-sam3-mask-effects-and-storage.md)
+- [ADR-0024: マスク加工と文字の重なり順を共通化する](0024-shared-mask-and-text-order.md)

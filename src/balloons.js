@@ -233,7 +233,12 @@ export function paintBalloon(ctx,layer) {
   }
 }
 
-// Array order is the shared back-to-front order for every object kind.
-export function paintOrder(layers) {
-  return [...layers];
+// Explicit ranks share one back-to-front order; legacy masks stay behind text.
+export function paintOrder(layers, maskEffects = []) {
+  const masks=[...maskEffects].sort((a,b)=>a.createdOrder-b.createdOrder||String(a.id).localeCompare(String(b.id)));
+  const objects=[...masks,...layers];
+  if(!objects.some(object=>object.layoutOrder!==undefined))return objects;
+  const next=objects.reduce((max,object)=>Math.max(max,object.layoutOrder??-1),-1)+1;
+  return objects.map((object,index)=>({object,rank:object.layoutOrder??next+index}))
+    .sort((a,b)=>a.rank-b.rank).map(entry=>entry.object);
 }

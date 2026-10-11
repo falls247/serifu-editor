@@ -1,10 +1,10 @@
-import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
+import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp, paintOrder } from './renderer.js';
 import { inkSeed } from './ink.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
-export const PROJECT_VERSION=12;
+export const PROJECT_VERSION=13;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
@@ -15,7 +15,17 @@ function speechColors(input) {
   return {textColor,textOutlineColor};
 }
 
+function normalizedLayoutOrder(input, version = PROJECT_VERSION) {
+  if(input?.layoutOrder===undefined)return {};
+  if(version<13||!Number.isSafeInteger(input.layoutOrder)||input.layoutOrder<0)throw new Error('重なり順が不正');
+  return {layoutOrder:input.layoutOrder};
+}
+
 export function normalizeLayer(input, version = PROJECT_VERSION) {
+  return {...normalizeTextLayer(input,version),...normalizedLayoutOrder(input,version)};
+}
+
+function normalizeTextLayer(input, version) {
   if(input?.kind==='caption'){
     input={textOffsetX:0,textOffsetY:0,...input,...normalizeBrush(input),textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
@@ -98,7 +108,7 @@ export function defaultMaskEffect(asset, { id = crypto.randomUUID(), effect = 'p
   };
 }
 
-export function normalizeMaskEffect(input, imageWidth, imageHeight, assetIds) {
+export function normalizeMaskEffect(input, imageWidth, imageHeight, assetIds, version = PROJECT_VERSION) {
   if (!input || typeof input !== 'object') throw new Error('マスク加工設定が不正');
   const id = input.id, assetId = input.assetId;
   if (typeof id !== 'string' || !id || id.length > 200 || ['__proto__','constructor','prototype'].includes(id)
@@ -116,15 +126,15 @@ export function normalizeMaskEffect(input, imageWidth, imageHeight, assetIds) {
   if (![input.x, input.y, input.w, input.h].every(Number.isSafeInteger) || input.x < 0 || input.y < 0 || input.w < 1 || input.h < 1
       || input.w > imageWidth || input.h > imageHeight || input.x + input.w > imageWidth || input.y + input.h > imageHeight
       || input.w * input.h > 100_000_000) throw new Error('マスク加工の座標・サイズが範囲外');
-  return { id, kind: 'mask-effect', assetId, name: name.trim(), createdOrder: input.createdOrder, visible: input.visible, effect: input.effect,
+  return { id, kind: 'mask-effect', assetId, name: name.trim(), createdOrder: input.createdOrder, visible: input.visible, effect: input.effect, ...normalizedLayoutOrder(input,version),
     blockSize: input.blockSize, blurRadius: input.blurRadius, marginPx: input.marginPx, x: input.x, y: input.y, w: input.w, h: input.h };
 }
 
-export function normalizeMaskEffects(effects = [], imageWidth, imageHeight, assetIds) {
+export function normalizeMaskEffects(effects = [], imageWidth, imageHeight, assetIds, version = PROJECT_VERSION) {
   if (!Array.isArray(effects)) throw new Error('マスク加工一覧が不正');
   const ids = new Set();
   return effects.map(effect => {
-    const normalized = normalizeMaskEffect(effect, imageWidth, imageHeight, assetIds);
+    const normalized = normalizeMaskEffect(effect, imageWidth, imageHeight, assetIds,version);
     if (ids.has(normalized.id)) throw new Error('マスク加工IDが重複している');
     ids.add(normalized.id);
     return normalized;
@@ -176,6 +186,13 @@ export function reorderLayers(layers, ids, action) {
     }
   }
   return ordered;
+}
+
+export function reorderPageObjects(page, ids, action) {
+  const before=paintOrder(page.layers,page.maskEffects??[]),ordered=reorderLayers(before,ids,action);
+  if(ordered.every((object,index)=>object===before[index]))return null;
+  const ranked=ordered.map((object,layoutOrder)=>({...object,layoutOrder}));
+  return {layers:ranked.filter(object=>object.kind!=='mask-effect'),maskEffects:ranked.filter(object=>object.kind==='mask-effect')};
 }
 
 export function selectedLayers(page) {
@@ -241,7 +258,8 @@ export function dragPlacement(start, point, anchor, constrain = false) {
 }
 
 export function duplicateLayer(layer) {
-  return { ...layer, id: crypto.randomUUID(), x: layer.x + 20, y: layer.y + 20 };
+  const {layoutOrder,...copy}=layer;
+  return { ...copy, id: crypto.randomUUID(), x: layer.x + 20, y: layer.y + 20 };
 }
 
 export function copySelection(layer, width, height) {
@@ -249,6 +267,7 @@ export function copySelection(layer, width, height) {
 }
 
 export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
+  const {layoutOrder,...copy}=layer;layer=copy;
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
     textOffsetX:clamp((layer.textOffsetX??0)*sx,...BALLOON_LIMITS.textOffsetX),textOffsetY:clamp((layer.textOffsetY??0)*sy,...BALLOON_LIMITS.textOffsetY),padding:clamp((layer.padding??0)*scale,...BALLOON_LIMITS.padding),

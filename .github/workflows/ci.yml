@@ -16,6 +16,7 @@ jobs:
       - run: npx playwright install chromium --with-deps
       - run: npm run test:bulk
       - run: npm run test:mask-render
+      - run: npm run test:mask-order
       - run: npm run test:browser
       - run: npm run test:mask-storage
       - run: npm run test:sam3-browser

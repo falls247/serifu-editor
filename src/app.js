@@ -3,7 +3,7 @@ import { BALLOON_LIMITS } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
-import { PROJECT_VERSION, normalizeLayers, normalizeMaskEffects, reorderLayers, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT, defaultMaskEffect, normalizeMaskEffect, pruneMaskAssets } from './model.js';
+import { PROJECT_VERSION, normalizeLayers, normalizeMaskEffects, reorderPageObjects, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT, defaultMaskEffect, normalizeMaskEffect, pruneMaskAssets } from './model.js';
 import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropHandles, cropModeAt, dragCropRectangle, uncroppedImageEdit, cropInFullView } from './image-edit.js';
 import { openFullPreview, previewIsOpen } from './preview-modal.js';
 import { exportName } from './renderer.js';
@@ -19,7 +19,7 @@ import { originalBlob, projectParts, projectBlob, readProject, writeParts, MAX_P
 import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
 import { FONT_CATALOG, FONT_STYLES, fontLoadQueries } from './fonts.js';
 import { Sam3Client } from './sam3-client.js';
-import { createSam3UI, renderMaskEffectCards } from './sam3-ui.js';
+import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
 
 const $ = id => document.getElementById(id);
 const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
@@ -405,9 +405,12 @@ function updateControls(p) {
   if (!p?.row) return;
   const l = selected(p), controls = p.row.querySelector('.position-controls');
   const count=selectedLayers(p).length;p.row.querySelector('.selection-status').textContent=count>1?`${count}件を選択中`:'';
-  controls.disabled = !l;
+  const mask=p.maskEffects.find(effect=>effect.id===p.selectedMaskId);
+  controls.disabled = !l&&!mask;
   const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
-  controls.querySelector('legend').textContent = balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
+  controls.querySelector('legend').textContent = mask?`${mask.name}：カードで位置調整`:balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
+  controls.querySelector('.control-grid').hidden=!!mask;
+  controls.querySelector('[data-action=center]').disabled=!l;
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=!l;
   controls.querySelector('.multiline-align-control').hidden=!l||!['dialogue','balloon'].includes(l.kind);
   for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=!l||caption;
@@ -466,7 +469,10 @@ function updateControls(p) {
   }
   for(const card of p.row.querySelectorAll('.mask-effect-card')){
     const selected=p.id===activeId&&card.dataset.maskId===p.selectedMaskId;
-    card.classList.toggle('selected',selected);card.querySelector('[data-mask-action=select]')?.setAttribute('aria-pressed',String(selected));
+    card.classList.toggle('selected',selected);
+    for(const button of card.querySelectorAll('.mask-effect-summary,[data-mask-action=select]'))button.setAttribute('aria-pressed',String(selected));
+    const effect=p.maskEffects.find(effect=>effect.id===card.dataset.maskId);
+    if(effect)renderMaskEffectSummary(effect,card.querySelector('.mask-effect-summary'));
   }
 }
 
@@ -825,7 +831,6 @@ function renderCards(p) {
   rememberCardDetails(p);
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0 || p.maskEffects.length > 0;
-  renderMaskEffectCards(p.row.querySelector('.mask-effect-list'),p);
   const appendCard=(card,layer)=>{
     addNumericControls(card,p);
     for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${layer.id}:${details.querySelector('summary').textContent}`)??false;
@@ -929,6 +934,9 @@ function renderCards(p) {
     }
     appendCard(card,l);
   }
+  const cards=new Map([...container.children].map(card=>[card.dataset.layerId,card]));
+  for(const [index,effect] of p.maskEffects.entries())cards.set(effect.id,createMaskEffectCard(effect,p.maskAssets[effect.assetId],index,p.id===activeId&&p.selectedMaskId===effect.id,p.img.width,p.img.height));
+  for(const object of paintOrder(p.layers,p.maskEffects))container.append(cards.get(object.id));
   refreshPresetMenus(p); updateControls(p);
 }
 
@@ -1081,8 +1089,14 @@ function edit(p, fn, rebuild = true) {
   drawPage(p);
 }
 
+function moveObjects(p,action) {
+  const ids=p.selectedMaskId?[p.selectedMaskId]:selectedLayers(p).map(layer=>layer.id);
+  const ordered=reorderPageObjects(p,ids,action);
+  if(ordered)edit(p,()=>Object.assign(p,ordered));
+}
+
 $('deck').addEventListener('focusin', event => {
-  if (editLocked()||event.target.closest('button[data-action], .layer-summary')) return;
+  if (editLocked()||event.target.closest('button[data-action], .layer-summary, .mask-effect-summary')) return;
   const p = pageFrom(event.target); if (!p) return;
   const maskCard=event.target.closest('.mask-effect-card');if(maskCard){if(p.id!==activeId||p.selectedMaskId!==maskCard.dataset.maskId)selectMask(p,maskCard.dataset.maskId);return;}
   const id = event.target.closest('.layer-card')?.dataset.layerId;
@@ -1134,7 +1148,7 @@ $('deck').addEventListener('click', event => {
   if (editLocked()) return;
   const p = pageFrom(event.target); if (!p) return;
   const maskCard=event.target.closest('.mask-effect-card');
-  if(maskCard){const maskId=maskCard.dataset.maskId;selectMask(p,maskId);const maskAction=event.target.closest('[data-mask-action]')?.dataset.maskAction;if(maskAction==='delete'){removeMaskEffect(p,maskId);status('選択中のマスク加工を削除した。');}return;}
+  if(maskCard){const maskId=maskCard.dataset.maskId;selectMask(p,maskId);const maskAction=event.target.closest('[data-mask-action]')?.dataset.maskAction;if(maskAction==='delete'){removeMaskEffect(p,maskId);status('選択中のマスク加工を削除した。');}else if(['forward','backward','frontmost','backmost'].includes(maskAction))moveObjects(p,maskAction);return;}
   const card = event.target.closest('.layer-card'), cardId = card?.dataset.layerId;
   const toggle=event.shiftKey&&!!event.target.closest('.layer-summary,.kind-label');
   if(cardId)selectObject(p,cardId,toggle,!toggle);
@@ -1179,9 +1193,8 @@ $('deck').addEventListener('click', event => {
     edit(p, () => { const copies = selectedLayers(p).map(duplicateLayer); p.layers.push(...copies);setSelection(p,copies.map(l=>l.id)); });
   } else if (action === 'drop-layer' && l) {
     edit(p, () => { const ids=new Set(selectedLayers(p).map(l=>l.id));p.layers = p.layers.filter(item => !ids.has(item.id));setSelection(p,p.layers.slice(0,1).map(l=>l.id)); });
-  } else if (['forward','backward','frontmost','backmost'].includes(action) && l) {
-    const ordered=reorderLayers(p.layers,selectedLayers(p).map(layer=>layer.id),action);
-    if(ordered.some((layer,index)=>layer!==p.layers[index]))edit(p,()=>{p.layers=ordered;});
+  } else if (['forward','backward','frontmost','backmost'].includes(action) && (l||p.selectedMaskId)) {
+    moveObjects(p,action);
   } else if (action === 'center' && l) {
     edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2;l.presetId=null; }, false);refreshPresetMenus();
   } else if (['undo', 'redo'].includes(action)) {
@@ -1293,10 +1306,11 @@ function connectCanvas(p) {
     }
     const size=imageSize(p.img.width,p.img.height,p.imageEdit),pos = coords(event, p), scale = p.canvas.getBoundingClientRect().width / size.width;
     const current = selected(p), handle = current && handleAt(current, pos.x, pos.y, scale);
-    const l = handle ? current : paintOrder(p.layers).reverse().find(item => hit(item, pos.x, pos.y));
     const currentMask=p.maskEffects.find(effect=>effect.id===p.selectedMaskId),maskMode=currentMask&&maskModeAt(currentMask,pos,scale);
-    const targetMask=maskMode?currentMask:!l?[...p.maskEffects].sort((a,b)=>b.createdOrder-a.createdOrder||b.id.localeCompare(a.id)).find(effect=>effect.visible!==false&&maskModeAt(effect,pos,scale)):null;
-    const targetMode=maskMode||targetMask&&maskModeAt(targetMask,pos,scale);
+    const object=handle?current:maskMode&&maskMode!=='move'?currentMask:paintOrder(p.layers,p.maskEffects).reverse().find(item=>item.kind==='mask-effect'?item.visible!==false&&maskModeAt(item,pos,scale):hit(item,pos.x,pos.y));
+    const l=object?.kind==='mask-effect'?null:object;
+    const targetMask=object?.kind==='mask-effect'?object:null;
+    const targetMode=targetMask&&maskModeAt(targetMask,pos,scale);
     if(targetMask&&targetMode){
       event.preventDefault();selectMask(p,targetMask.id);p.canvas.focus({preventScroll:true});
       drag={page:p,id:event.pointerId,maskId:targetMask.id,mode:targetMode,anchor:pos,start:{x:targetMask.x,y:targetMask.y,w:targetMask.w,h:targetMask.h},checkpointed:false,previousRedo:p.redo.slice(),previousDone:p.done};
@@ -1372,7 +1386,7 @@ function connectCanvas(p) {
         p.undo.pop();p.redo=finished.previousRedo;p.done=finished.previousDone;p.edited=hasEdits(p);dirty();scheduleThumbnailRefresh(p);updateGlobal();
       }
       if(p.canvas.hasPointerCapture(event.pointerId))p.canvas.releasePointerCapture(event.pointerId);
-      p.canvas.style.removeProperty('cursor');renderMaskEffectCards(p.row.querySelector('.mask-effect-list'),p);drawPage(p);updateControls(p);return;
+      p.canvas.style.removeProperty('cursor');renderCards(p);drawPage(p);updateControls(p);return;
     }
     if(event.type==='pointercancel' && finished.duplicated) {
       const snapshot=JSON.parse(p.undo.pop());
@@ -1421,7 +1435,7 @@ window.addEventListener('keydown', event => {
     return;
   }
   const directions = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }, direction = directions[event.key], l = selected(p);
-  if(direction&&p.selectedMaskId){const effect=p.maskEffects.find(item=>item.id===p.selectedMaskId);if(!effect)return;event.preventDefault();const step=event.shiftKey?10:1,[a,b,c,d]=imageMatrix(p.img.width,p.img.height,p.imageEdit),x=clamp(effect.x+(a*direction[0]+b*direction[1])*step,0,p.img.width-effect.w),y=clamp(effect.y+(c*direction[0]+d*direction[1])*step,0,p.img.height-effect.h);if(x!==effect.x||y!==effect.y){checkpoint(p);effect.x=x;effect.y=y;markMaskChanged(p);renderMaskEffectCards(p.row.querySelector('.mask-effect-list'),p);drawPage(p);updateControls(p);}return;}
+  if(direction&&p.selectedMaskId){const effect=p.maskEffects.find(item=>item.id===p.selectedMaskId);if(!effect)return;event.preventDefault();const step=event.shiftKey?10:1,[a,b,c,d]=imageMatrix(p.img.width,p.img.height,p.imageEdit),x=clamp(effect.x+(a*direction[0]+b*direction[1])*step,0,p.img.width-effect.w),y=clamp(effect.y+(c*direction[0]+d*direction[1])*step,0,p.img.height-effect.h);if(x!==effect.x||y!==effect.y){checkpoint(p);effect.x=x;effect.y=y;markMaskChanged(p);renderCards(p);drawPage(p);updateControls(p);}return;}
   if (direction && l) { event.preventDefault(); edit(p, () => { const step = event.shiftKey ? 10 : 1,[a,b,c,d]=imageMatrix(p.img.width,p.img.height,p.imageEdit);for(const layer of selectedLayers(p)){layer.x+=(a*direction[0]+b*direction[1])*step;layer.y+=(c*direction[0]+d*direction[1])*step;layer.presetId=null;} }, false); }
 });
 
@@ -1590,7 +1604,7 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
       if(result.error){task.result(ready[result.index].name,false);throw new Error(`${ready[result.index].name}: ${result.error.message}`);}checkAbort(task.signal);const p=ready[result.index],prepared=result.value;
       if(p.expectedSize&&(p.expectedSize.width!==prepared.width||p.expectedSize.height!==prepared.height))throw new Error(`画像寸法が不正: ${p.name}`);
       const imageEdit=normalizeImageEdit(p.imageEdit,prepared.width,prepared.height),maskAssets=p.maskAssets??{};
-      const maskEffects=version>=12?normalizeMaskEffects(p.maskEffects??[],prepared.width,prepared.height,new Set(Object.keys(maskAssets))):[];
+      const maskEffects=version>=12?normalizeMaskEffects(p.maskEffects??[],prepared.width,prepared.height,new Set(Object.keys(maskAssets)),version):[];
       const page=createPage({id:restoreIds?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,imageEdit,maskEffects,maskAssets,selectedMaskId:p.selectedMaskId,src:URL.createObjectURL(p.blob),file:p.blob,prepared});loaded.push(page);
       if(hasEdits(page)){requestPageFonts(page);await renderPageThumbnail(page,task.signal);}
       task.result(p.name);

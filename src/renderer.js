@@ -5,7 +5,7 @@ import { newCaption, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
 import { imageMatrix } from './image-edit.js';
-import { applyMaskEffectsToImageData } from './mask-effects.js';
+import { applyMaskEffectsToImageData, maskEffectPatch } from './mask-effects.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -237,8 +237,19 @@ function maskCompositeCanvas(img, width, height, options) {
   sourceContext.drawImage(img, 0, 0, width, height);
   const source = sourceContext.getImageData(0, 0, width, height);
   const pixels = applyMaskEffectsToImageData(source, width, height, options.maskEffects ?? [], options.maskAssets ?? {}, { draft: options.draft ?? null });
-  source.data.set(pixels); sourceContext.putImageData(source, 0, 0);
-  return canvas;
+  const rendered=sourceContext.createImageData(width,height);rendered.data.set(pixels);sourceContext.putImageData(rendered,0,0);
+  return {canvas,source};
+}
+
+function paintMaskPatch(ctx,source,width,height,effect,assets) {
+  const patch=maskEffectPatch(source,width,height,effect,assets[effect.assetId]);if(!patch)return;
+  const canvas=createSurface(ctx,patch.width,patch.height),surface=canvas.getContext('2d');
+  const coverage=surface.createImageData(patch.width,patch.height);
+  for(let index=0;index<patch.mask.length;index++)coverage.data[index*4+3]=patch.mask[index]?255:0;
+  surface.putImageData(coverage,0,0);
+  ctx.save();ctx.globalCompositeOperation='destination-out';ctx.drawImage(canvas,patch.x,patch.y);ctx.restore();
+  coverage.data.set(patch.pixels);surface.putImageData(coverage,0,0);
+  ctx.drawImage(canvas,patch.x,patch.y);canvas.width=canvas.height=1;
 }
 
 export function draw(ctx, img, layers, selected = null, scale = 1, selectionScale = scale, imageEdit = null, originalSize = null, options = {}) {
@@ -247,13 +258,21 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
   ctx.scale(scale, scale);
   if (imageEdit) ctx.transform(...imageMatrix(originalSize?.width ?? img.width, originalSize?.height ?? img.height, imageEdit));
   const imageWidth = originalSize?.width ?? img.width, imageHeight = originalSize?.height ?? img.height;
-  if (hasMaskWork(options)) {
-    const composite = maskCompositeCanvas(img, imageWidth, imageHeight, options);
-    ctx.drawImage(composite, 0, 0, imageWidth, imageHeight);
-    composite.width = composite.height = 1;
+  const ordered=paintOrder(layers,options.maskEffects??[]),firstText=ordered.findIndex(object=>object.kind!=='mask-effect');
+  const leading=firstText<0?ordered:ordered.slice(0,firstText),baseOptions={...options,maskEffects:leading};
+  let source;
+  if (hasMaskWork(baseOptions)) {
+    const composite = maskCompositeCanvas(img, imageWidth, imageHeight, baseOptions);
+    ctx.drawImage(composite.canvas, 0, 0, imageWidth, imageHeight);source=composite.source;
+    composite.canvas.width = composite.canvas.height = 1;
   } else if (originalSize) ctx.drawImage(img, 0, 0, originalSize.width, originalSize.height);
   else ctx.drawImage(img, 0, 0);
-  for (const l of paintOrder(layers)) {
+  for (const l of firstText<0?[]:ordered.slice(firstText)) {
+    if(l.kind==='mask-effect'){
+      if(l.visible===false)continue;
+      if(!source){const canvas=createSurface(ctx,imageWidth,imageHeight),surface=canvas.getContext('2d');surface.drawImage(img,0,0,imageWidth,imageHeight);source=surface.getImageData(0,0,imageWidth,imageHeight);canvas.width=canvas.height=1;}
+      paintMaskPatch(ctx,source,imageWidth,imageHeight,l,options.maskAssets??{});continue;
+    }
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon'){
       paintBalloon(ctx,l);

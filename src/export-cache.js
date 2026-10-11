@@ -1,4 +1,4 @@
-export const RENDER_VERSION=10;
+export const RENDER_VERSION=11;
 export function exportKey(page,fontVersion=0){
   const maskEffects=page.maskEffects??[],assetIds=[...new Set(maskEffects.map(effect=>effect.assetId))].sort();
   const masks=assetIds.map(id=>{const asset=page.maskAssets?.[id];return [id,asset?.sha256??null,asset?.byteLength??null];});

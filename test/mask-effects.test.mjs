@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { encodeMask } from '../src/mask-codec.js';
-import { applyMaskEffectsToImageData } from '../src/mask-effects.js';
+import { applyMaskEffectsToImageData, maskEffectPatch } from '../src/mask-effects.js';
 
 function rgba(width, height, colorAt) {
   const data = new Uint8ClampedArray(width * height * 4);
@@ -12,6 +12,17 @@ function effect(id, asset, fields) {
   return { id, kind: 'mask-effect', assetId: asset.id, createdOrder: 0, visible: true, effect: 'fill-black',
     blockSize: 20, blurRadius: 12, marginPx: 0, x: asset.bbox.x, y: asset.bbox.y, w: asset.bbox.width, h: asset.bbox.height, ...fields };
 }
+
+test('explicit layout ranks override creation order and patches preserve holes and original RGBA',async()=>{
+  const source=new Uint8ClampedArray([90,40,20,255, 0,0,0,0, 10,20,30,255]);
+  const asset=await encodeMask(Uint8Array.from([1,0,1]),3,1);
+  const black=effect('black',asset,{createdOrder:0,layoutOrder:2}),white=effect('white',asset,{effect:'fill-white',createdOrder:1,layoutOrder:1});
+  const result=applyMaskEffectsToImageData(source,3,1,[black,white],{[asset.id]:asset});
+  assert.deepEqual([...result],[0,0,0,255,0,0,0,0,0,0,0,255]);
+  const patch=maskEffectPatch(source,3,1,{...black,effect:'blur',blurRadius:0},asset);
+  assert.deepEqual([...patch.mask],[1,0,1]);assert.deepEqual([...patch.pixels], [...source]);
+  assert.deepEqual([...source],[90,40,20,255,0,0,0,0,10,20,30,255]);
+});
 
 test('overlapping effects use original pixels and later effects win only inside their masks', async () => {
   const width = 4, height = 2, source = rgba(width, height, (x, y) => [x * 40, y * 80, 17]);

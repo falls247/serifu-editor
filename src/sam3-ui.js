@@ -43,8 +43,15 @@ function createMaskField(field, title, value, min, max, step = '1') {
   label.append(input); return label;
 }
 
+export function renderMaskEffectSummary(effect, summary) {
+  const label = EFFECTS.find(([value]) => value === effect.effect)?.[1] ?? effect.effect;
+  summary.textContent = `▧ ${effect.name}：${label}${effect.visible === false ? '（非表示）' : ''}`;
+}
+
 export function createMaskEffectCard(effect, asset, index, selected = false, imageWidth = 30000, imageHeight = 30000) {
   const card = element('article', 'mask-effect-card'); card.dataset.maskId = effect.id; card.classList.toggle('selected', selected);
+  const summary = element('button', 'mask-effect-summary'); summary.type = 'button';
+  summary.title = 'クリックして編集'; summary.setAttribute('aria-pressed', String(selected)); renderMaskEffectSummary(effect, summary); card.append(summary);
   const heading = element('div', 'mask-effect-heading'), select = element('button', 'mask-effect-name', effect.name || `マスク加工 ${index + 1}`);
   select.type = 'button'; select.dataset.maskAction = 'select'; select.setAttribute('aria-pressed', String(selected));
   const actions = element('div', 'card-mini-actions');
@@ -67,6 +74,11 @@ export function createMaskEffectCard(effect, asset, index, selected = false, ima
   grid.append(createMaskField('w', '幅（px）', effect.w, 1, imageWidth - effect.x));
   grid.append(createMaskField('h', '高さ（px）', effect.h, 1, imageHeight - effect.y));
   card.append(grid);
+  const order=element('div','layer-actions');
+  for(const [action,label] of [['backmost','最背面へ'],['backward','背面へ'],['forward','前面へ'],['frontmost','最前面へ']]){
+    const button=element('button','',label);button.type='button';button.dataset.maskAction=action;order.append(button);
+  }
+  card.append(order);
   return card;
 }
 
@@ -408,6 +420,11 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     renderPoints(); drawOverlay();
     if (draft.points.some(point => point.positive)) inferPoints();
   }
+
+  promptInput.addEventListener('keydown', event => {
+    if(event.key!=='Enter'||event.isComposing||event.keyCode===229||event.repeat)return;
+    event.preventDefault();query('[data-sam3-action=detect]').click();
+  }, { signal });
 
   root.addEventListener('input', event => {
     if (event.target === promptInput) {

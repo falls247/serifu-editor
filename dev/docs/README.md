@@ -17,4 +17,4 @@
 
 2026-10-11：ブラウザ用JavaScriptを `src/` に集約。経緯は [ADR-0017](adr/0017-src-layout-and-static-assets.md)、現在の参照関係は [引継書](HANDOFF.md) を参照。過去の基準コミットはその記録時点のもの。
 
-2026-10-11 SAM3追加：[実装SOW](sow/SOW_20261011_sam3_segmentation.md)、[ADR-0023](adr/0023-sam3-mask-effects-and-storage.md)、[GPU・総合検証記録](sam3-gpu-validation.md)。文字順で使用済みの版11を維持するため、新しい保存形式は版12。
+2026-10-11 SAM3追加：[実装SOW](sow/SOW_20261011_sam3_segmentation.md)、[ADR-0023](adr/0023-sam3-mask-effects-and-storage.md)、[GPU・総合検証記録](sam3-gpu-validation.md)。マスク初期対応は版12。マスクと文字の共通順序、短縮カード、版13への更新は[ADR-0024](adr/0024-shared-mask-and-text-order.md)。
