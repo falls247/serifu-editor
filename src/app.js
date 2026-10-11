@@ -63,12 +63,13 @@ $('bulkCancel').onclick=()=>currentTask?.cancel();
 function releasePage(p){unmountPage(p);p.thumbnailReleased=true;clearTimeout(p.thumbnailTimer);p.thumbnailGeneration++;p.thumbnail?.remove();if(p.src.startsWith('blob:'))URL.revokeObjectURL(p.src);for(const url of new Set([p.thumbnailBaseSrc,p.thumbnailSrc]))if(url?.startsWith('blob:'))URL.revokeObjectURL(url);pngCache.invalidate(p.id);}
 
 const VIEW_KEY = 'serifu.view.v1';
-let view = { pageSize: 50, thumbnails: true, scale: 100 }, batchStart = 0, syncingView = false;
+let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null }, batchStart = 0, syncingView = false;
 try {
   const saved = JSON.parse(localStorage.getItem(VIEW_KEY));
   if ([50, 100, 'all'].includes(saved?.pageSize)) view.pageSize = saved.pageSize;
   if (typeof saved?.thumbnails === 'boolean') view.thumbnails = saved.thumbnails;
   if (Number.isFinite(saved?.scale)) view.scale = clamp(saved.scale, 50, 200);
+  if (Number.isFinite(saved?.sidebarWidth)) view.sidebarWidth = clamp(saved.sidebarWidth, 220, 720);
 } catch {}
 let layerClipboard=null;
 let pageClipboard=null;
@@ -190,6 +191,7 @@ function updateGlobal() {
   updateDraftUI();
   pages.forEach((p, i) => {
     if (p.thumbnail) {
+      p.thumbnail.draggable = !busy;
       const state = `${i}:${p.edited}:${p.done}:${p.id === activeId}`;
       if (p.thumbnailState !== state) {
         p.thumbnailState = state;
@@ -480,7 +482,9 @@ function refreshThumbnails() {
   for (const p of pages) {
     if (!p.thumbnail) {
       const thumbnail = element('button', 'thumbnail'); thumbnail.dataset.pageId = p.id;
-      const image = element('img'); image.loading = 'lazy'; image.decoding = 'async'; image.src = p.thumbnailSrc; image.alt = '';
+      thumbnail.draggable = !busy;
+      thumbnail.title = 'ドラッグで順序変更 · Alt + ↑↓でも移動';
+      const image = element('img'); image.draggable = false; image.loading = 'lazy'; image.decoding = 'async'; image.src = p.thumbnailSrc; image.alt = '';
       const caption = element('span', 'thumbnail-caption');
       caption.append(element('b', 'thumbnail-number'), element('span', 'thumbnail-state'));
       const name = element('span', 'thumbnail-name', p.name); name.title = p.name;
@@ -499,7 +503,55 @@ function applyViewSettings() {
   $('thumbnailScale').value = String(view.scale);
   $('thumbnailScaleValue').value = `${view.scale}%`;
   $('workspace').style.setProperty('--thumbnail-width', `${160 * view.scale / 100}px`);
+  applySidebarWidth();
 }
+
+const workspace = document.getElementById('workspace');
+const thumbnailSidebar = document.getElementById('thumbnailSidebar');
+const thumbnailList = document.getElementById('thumbnailList');
+const sidebarHandle = document.getElementById('thumbnailResize');
+function sidebarWidthLimit() { return Math.max(220, Math.min(720, workspace.clientWidth - 640)); }
+function applySidebarWidth() {
+  if (view.sidebarWidth === null) workspace.style.removeProperty('--sidebar-width');
+  else workspace.style.setProperty('--sidebar-width', `${clamp(view.sidebarWidth, 220, sidebarWidthLimit())}px`);
+  sidebarHandle.setAttribute('aria-valuemin', '220');
+  sidebarHandle.setAttribute('aria-valuemax', String(sidebarWidthLimit()));
+  sidebarHandle.setAttribute('aria-valuenow', String(Math.round(thumbnailSidebar.getBoundingClientRect().width)));
+}
+
+let sidebarResize = null;
+sidebarHandle.onpointerdown = event => {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  sidebarResize = { id: event.pointerId, x: event.clientX, width: thumbnailSidebar.getBoundingClientRect().width, previous: view.sidebarWidth };
+  sidebarHandle.setPointerCapture(event.pointerId);
+  document.body.classList.add('resizing-sidebar');
+};
+sidebarHandle.onpointermove = event => {
+  if (sidebarResize?.id !== event.pointerId) return;
+  view.sidebarWidth = clamp(sidebarResize.width + event.clientX - sidebarResize.x, 220, sidebarWidthLimit());
+  applySidebarWidth();
+};
+
+function finishSidebarResize(event) {
+  if (sidebarResize?.id !== event.pointerId) return;
+  if (event.type !== 'pointerup') view.sidebarWidth = sidebarResize.previous;
+  sidebarResize = null;
+  document.body.classList.remove('resizing-sidebar');
+  if (sidebarHandle.hasPointerCapture(event.pointerId)) sidebarHandle.releasePointerCapture(event.pointerId);
+  rememberView();
+}
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) sidebarHandle.addEventListener(type, finishSidebarResize);
+sidebarHandle.ondblclick = () => { view.sidebarWidth = null; rememberView(); };
+
+window.addEventListener('resize', applySidebarWidth);
+sidebarHandle.addEventListener('keydown', event => {
+  const direction = { ArrowLeft: -1, ArrowRight: 1 }[event.code];
+  if (!direction) return;
+  event.preventDefault();event.stopPropagation();
+  view.sidebarWidth = clamp(thumbnailSidebar.getBoundingClientRect().width + direction * (event.shiftKey ? 50 : 10), 220, sidebarWidthLimit());
+  rememberView();
+});
 
 function rememberView() {
   applyViewSettings();
@@ -519,6 +571,73 @@ $('thumbnailList').onclick = event => {
   const p = pages.find(p=>p.id===event.target.closest('[data-page-id]')?.dataset.pageId);
   if (p) activate(p, p.selectedId, true);
 };
+let thumbnailDrag = null, thumbnailDrop = null, thumbnailScrollFrame = null, thumbnailDragY = 0;
+function clearThumbnailDrop() {
+  thumbnailDrop?.node.classList.remove('drop-before', 'drop-after', 'drop-horizontal');
+  thumbnailDrop = null;
+}
+function finishThumbnailDrag() {
+  clearThumbnailDrop();
+  thumbnailDrag?.thumbnail.classList.remove('dragging');
+  thumbnailDrag = null;
+  cancelAnimationFrame(thumbnailScrollFrame);thumbnailScrollFrame = null;
+}
+function scrollThumbnailDrag() {
+  const box = thumbnailList.getBoundingClientRect();
+  const distance = thumbnailDragY < box.top + 40 ? -Math.ceil((box.top + 40 - thumbnailDragY) / 4) : thumbnailDragY > box.bottom - 40 ? Math.ceil((thumbnailDragY - box.bottom + 40) / 4) : 0;
+  if (distance) { thumbnailList.scrollTop += clamp(distance, -18, 18); clearThumbnailDrop(); }
+  thumbnailScrollFrame = requestAnimationFrame(scrollThumbnailDrag);
+}
+thumbnailList.ondragstart = event => {
+  const p = pages.find(p => p.id === event.target.closest('.thumbnail')?.dataset.pageId);
+  if (busy || !p || !event.dataTransfer) { event.preventDefault(); return; }
+  finishThumbnailDrag();thumbnailDrag = p;thumbnailDragY = event.clientY;
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('application/x-serifu-page', p.id);
+  p.thumbnail.classList.add('dragging');
+  thumbnailScrollFrame = requestAnimationFrame(scrollThumbnailDrag);
+};
+function updateThumbnailDrop(event) {
+  clearThumbnailDrop();
+  if (busy || !thumbnailDrag || !pages.includes(thumbnailDrag)) return false;
+  thumbnailDragY = event.clientY;
+  const node = event.target.closest('.thumbnail');
+  if (!node || node === thumbnailDrag.thumbnail) return false;
+  const box = node.getBoundingClientRect();
+  const horizontal = getComputedStyle(thumbnailList).gridTemplateColumns.split(' ').length > 1;
+  const after = horizontal ? event.clientX >= box.left + box.width / 2 : event.clientY >= box.top + box.height / 2;
+  const target = pages.findIndex(p => p.id === node.dataset.pageId);
+  if (target < 0) return false;
+  const source = pages.indexOf(thumbnailDrag), insertion = target + Number(after);
+  const destination = insertion - Number(source < insertion);
+  if (destination === source) return false;
+  thumbnailDrop = { node, destination };
+  node.classList.add(after ? 'drop-after' : 'drop-before');
+  node.classList.toggle('drop-horizontal', horizontal);
+  return true;
+}
+thumbnailList.ondragover = event => {
+  if (!updateThumbnailDrop(event)) return;
+  event.preventDefault();event.dataTransfer.dropEffect = 'move';
+};
+thumbnailList.ondrop = event => {
+  if (!updateThumbnailDrop(event)) { finishThumbnailDrag(); return; }
+  event.preventDefault();
+  const p = thumbnailDrag, destination = thumbnailDrop.destination;
+  finishThumbnailDrag();movePageTo(p, destination);
+};
+thumbnailList.ondragleave = event => {
+  if (!thumbnailList.contains(event.relatedTarget)) { clearThumbnailDrop();thumbnailDragY = thumbnailList.getBoundingClientRect().top + thumbnailList.clientHeight / 2; }
+};
+thumbnailList.ondragend = finishThumbnailDrag;
+thumbnailList.addEventListener('keydown', event => {
+  const direction = { ArrowUp: -1, ArrowDown: 1 }[event.code];
+  if (!event.altKey || !direction) return;
+  event.preventDefault();event.stopPropagation();
+  const p = pages.find(p => p.id === event.target.closest('.thumbnail')?.dataset.pageId);
+  if (p) movePageTo(p, pages.indexOf(p) + direction);
+});
+
 for (const [id, offset] of [['previousBatch', -1], ['nextBatch', 1]]) $(id).onclick = () => {
   if (viewLocked() || view.pageSize === 'all') return;
   const p = pages[batchStart + offset * view.pageSize];
@@ -776,9 +895,9 @@ function movePageTo(p,destination,focusAction) {
   if (index < 0 || destination < 0 || destination >= pages.length) return;
   if(destination===index){status(`「${p.name}」は指定位置に配置済み`);return;}
   pages.splice(index,1);pages.splice(destination,0,p);
-  dirty(); refreshJump(); activate(p, p.selectedId, true);
-  const focusTarget = p.row.querySelector(`[data-action=${focusAction}]:enabled`)
-    || p.row.querySelector('.page-actions button:enabled');
+  dirty(); refreshJump(); activate(p, p.selectedId, !!focusAction);
+  const focusTarget = focusAction ? p.row.querySelector(`[data-action=${focusAction}]:enabled`)
+    || p.row.querySelector('.page-actions button:enabled') : p.thumbnail;
   focusTarget?.focus({ preventScroll: true });
   status(`「${p.name}」を ${destination + 1} / ${pages.length} ページへ移動した`);
 }
