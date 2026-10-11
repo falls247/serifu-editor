@@ -85,7 +85,7 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
 }
 
 export function checkpoint(page) {
-  page.undo.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.edited===true }));
+  page.undo.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.layers.length>0 }));
   if (page.undo.length > 100) page.undo.shift();
   page.redo = []; page.done = false;page.edited=true;
 }
@@ -94,9 +94,9 @@ export function restore(page, direction) {
   const from = direction === 'undo' ? page.undo : page.redo;
   const to = direction === 'undo' ? page.redo : page.undo;
   if (!from.length) return false;
-  to.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.edited===true }));
+  to.push(JSON.stringify({ layers: page.layers, done: page.done, edited:page.layers.length>0 }));
   const state = JSON.parse(from.pop());
-  page.layers = state.layers; page.done = state.done;page.edited=state.edited===true;
+  page.layers = state.layers; page.done = state.done;page.edited=page.layers.length>0;
   page.selectedId = page.layers.some(l => l.id === page.selectedId) ? page.selectedId : page.layers[0]?.id || null;
   return true;
 }
@@ -153,7 +153,7 @@ export function cutLayers(source, width, height) {
   if (!source?.layers.length) return null;
   const clipboard=copyLayers(source.layers,width,height);
   checkpoint(source);
-  source.layers=[];source.selectedId=null;
+  source.layers=[];source.selectedId=null;source.edited=false;
   return clipboard;
 }
 

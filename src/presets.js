@@ -12,13 +12,13 @@ const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
-  balloon:['shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
+  balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
   if(kind==='balloon')return {styles:boxStyles.balloon,ratios:{...boxRatioKeys,size:'sizeRatio',outline:'outlineRatio',thickness:'thicknessRatio',padding:'paddingRatio',tailX:'tailXRatio',tailY:'tailYRatio',tailWidth:'tailWidthRatio',shadowBlur:'shadowBlurRatio',shadowOffsetX:'shadowOffsetXRatio',shadowOffsetY:'shadowOffsetYRatio'}};
   if(kind==='caption')return {styles:boxStyles.caption,ratios:{...boxRatioKeys,size:'sizeRatio',padding:'paddingRatio',textOutlineWidth:'textOutlineWidthRatio'}};
-  return {styles:[...styleKeys,'blurAngle','textOutlineColor',...(kind==='dialogue'?['textColor']:[])],ratios:ratioKeys};
+  return {styles:[...styleKeys,'blurAngle','textOutlineColor',...(kind==='dialogue'?['speaker','textColor']:[])],ratios:ratioKeys};
 }
 function presetDimension(kind,key,width,height) {
   if(['balloon','caption'].includes(kind)){
@@ -33,7 +33,7 @@ export function styleFromLayer(layer,width,height) {
   for(const [key,ratio] of Object.entries(ratios))style[ratio]=(key==='thickness'?(layer[key]??0):layer[key])/presetDimension(layer.kind,key,width,height);
   return style;
 }
-function builtin(id,name,kind,changes={}) { const layer={...newLayer(kind,1000,750),...changes},style=styleFromLayer(layer,1000,750);delete style.glyphSeed;delete style.brushSeed;if(kind==='balloon')delete style.shapeSeed;return {id,name,kind,builtin:true,style}; }
+function builtin(id,name,kind,changes={}) { const layer={...newLayer(kind,1000,750),...changes},style=styleFromLayer(layer,1000,750);delete style.speaker;delete style.glyphSeed;delete style.brushSeed;if(kind==='balloon')delete style.shapeSeed;return {id,name,kind,builtin:true,style}; }
 export function defaultPreferences() {
   const presets=[
     builtin('dialogue-standard','縦書き・標準セリフ','dialogue'),
@@ -57,7 +57,7 @@ export function defaultPreferences() {
 export function applyPreset(layer,preset,width,height) {
   if(!preset||preset.kind!==layer.kind) return layer;
   const {styles,ratios}=presetFields(layer.kind);
-  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]===undefined&&(layer.kind==='balloon'||['textColor','textOutlineColor','glyphSeed','brushSeed'].includes(k))?layer[k]:preset.style[k]])),presetId:preset.id};
+  const next={...layer,...Object.fromEntries(styles.map(k=>[k,preset.style[k]===undefined&&(layer.kind==='balloon'||['speaker','textColor','textOutlineColor','glyphSeed','brushSeed'].includes(k))?layer[k]:preset.style[k]])),presetId:preset.id};
   for(const [key,ratio] of Object.entries(ratios)){
     const preservePosition=['textOffsetX','textOffsetY'].includes(key)||layer.kind==='balloon'&&key==='padding';
     const fallback=preservePosition?(layer[key]??0)/presetDimension(layer.kind,key,width,height):layer.kind==='balloon'?layer[key]/presetDimension(layer.kind,key,width,height):key==='minimumGlyphGap'?2/width:['thickness','blurX','blurY'].includes(key)?0:NaN;

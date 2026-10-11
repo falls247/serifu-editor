@@ -1,9 +1,9 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {newLayer} from '../src/renderer.js';import {defaultPreferences,createPreset,applyPreset,normalizePreferences} from '../src/presets.js';
-test('presets scale placement and typography while preserving text and speaker',()=>{
+test('presets scale placement and typography while preserving text and applying the saved speaker',()=>{
   const source={...newLayer('dialogue',1000,750),x:200,y:300,size:66,text:'保存しない文字'};
   const preset=createPreset('設定',source,1000,750),target=newLayer('dialogue',2000,1500,'female');target.text='今のセリフ';
-  applyPreset(target,preset,2000,1500);assert.equal(target.x,400);assert.equal(target.y,600);assert.equal(target.size,132);assert.equal(target.text,'今のセリフ');assert.equal(target.speaker,'female');
+  applyPreset(target,preset,2000,1500);assert.equal(target.x,400);assert.equal(target.y,600);assert.equal(target.size,132);assert.equal(target.text,'今のセリフ');assert.equal(target.speaker,'male');
 });
 test('custom presets and selected defaults round-trip without losing autosave interval',()=>{
   const prefs=defaultPreferences(),preset=createPreset('歪み', {...newLayer('sfx',1000,750),blur:4,distortion:70},1000,750);
@@ -25,15 +25,15 @@ test('brush presets retain texture and scale directional blur independently on n
   for(const key of ['blurXRatio','blurYRatio','blurStrength','inkCore','roughness','dryInk','brushTails'])delete legacy.style[key];
   applyPreset(target,legacy,1000,750);assert.equal(target.blurY,0);assert.equal(target.dryInk,0);
 });
-test('balloon presets scale text styling while keeping the current speech and speaker',()=>{
+test('balloon presets scale text styling and apply the saved speaker while keeping the current speech',()=>{
   const source={...newLayer('balloon',1000,750),text:'残すセリフ',speaker:'male',size:60,outline:8,thickness:2.5,font:'hand',vertical:false};
   const preset=createPreset('吹き出し文字',source,1000,750),target={...newLayer('balloon',2000,1500),text:'貼付先のセリフ',speaker:'female'};
   applyPreset(target,preset,2000,1500);
-  assert.equal(target.text,'貼付先のセリフ');assert.equal(target.speaker,'female');assert.equal(target.size,120);assert.equal(target.outline,16);assert.equal(target.thickness,5);assert.equal(target.font,'hand');assert.equal(target.vertical,false);
+  assert.equal(target.text,'貼付先のセリフ');assert.equal(target.speaker,'male');assert.equal(target.size,120);assert.equal(target.outline,16);assert.equal(target.thickness,5);assert.equal(target.font,'hand');assert.equal(target.vertical,false);
 });
 test('older balloon presets without speech styles remain valid and preserve current speech settings',()=>{
   const old={...createPreset('旧吹き出し',newLayer('balloon',1000,750),1000,750)};
-  for(const key of ['sizeRatio','outlineRatio','thicknessRatio'])delete old.style[key];delete old.style.font;delete old.style.vertical;
+  for(const key of ['sizeRatio','outlineRatio','thicknessRatio'])delete old.style[key];delete old.style.font;delete old.style.vertical;delete old.style.speaker;
   const prefs=defaultPreferences();prefs.presets.push(old);
   const remembered=normalizePreferences(JSON.parse(JSON.stringify(prefs))).presets.find(p=>p.id===old.id);
   assert.ok(remembered);
@@ -63,4 +63,26 @@ test('user lettering presets save variation percentages and the fixed layout see
   assert.equal(target.sizeVariation,8.5);assert.equal(target.horizontalJitter,3.5);assert.equal(target.glyphSeed,123456);
   delete remembered.style.sizeVariation;delete remembered.style.horizontalJitter;applyPreset(target,remembered,1000,750);
   assert.equal(target.sizeVariation,0);assert.equal(target.horizontalJitter,0);
+});
+test('male and female speech presets retain their speaker and automatic color through preference round-trips',()=>{
+  for(const kind of ['dialogue','balloon'])for(const speaker of ['male','female']){
+    const source={...newLayer(kind,1000,750,speaker),text:'保存元の本文'},preset=createPreset('話者',source,1000,750);
+    const prefs=defaultPreferences();prefs.presets.push(preset);prefs.defaults[kind]=preset.id;
+    const restored=normalizePreferences(JSON.parse(JSON.stringify(prefs))),remembered=restored.presets.find(p=>p.id===preset.id);
+    assert.equal(restored.defaults[kind],preset.id);assert.equal(remembered.style.speaker,speaker);
+    const target={...newLayer(kind,1000,750,speaker==='male'?'female':'male'),text:'適用先の本文'};
+    applyPreset(target,remembered,1000,750);assert.equal(target.speaker,speaker);assert.equal(target.text,'適用先の本文');assert.equal(target.textColor,null);
+    remembered.style.speaker='unknown';assert.equal(normalizePreferences(restored).presets.some(p=>p.id===preset.id),false);
+  }
+});
+test('built-in and legacy speech presets preserve the current speaker',()=>{
+  for(const kind of ['dialogue','balloon']){
+    const target=newLayer(kind,1000,750,'female'),prefs=defaultPreferences();
+    for(const preset of prefs.presets.filter(p=>p.kind===kind)){
+      assert.equal(preset.style.speaker,undefined);applyPreset(target,preset,1000,750);assert.equal(target.speaker,'female');
+    }
+    const legacy=createPreset('旧設定',newLayer(kind,1000,750),1000,750);delete legacy.style.speaker;
+    prefs.presets.push(legacy);const remembered=normalizePreferences(JSON.parse(JSON.stringify(prefs))).presets.find(p=>p.id===legacy.id);
+    assert.ok(remembered);applyPreset(target,remembered,1000,750);assert.equal(target.speaker,'female');
+  }
 });

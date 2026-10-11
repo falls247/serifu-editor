@@ -84,7 +84,7 @@ function pageFrom(element) {
   return pages.find(p => p.id === element.closest('.image-row')?.dataset.pageId);
 }
 
-function createPage({ id=crypto.randomUUID(), name, src, img, prepared, file = null, directory = null, layers = [], done = false, edited = false, expectedSize, preserveEdited=false }) {
+function createPage({ id=crypto.randomUUID(), name, src, img, prepared, file = null, directory = null, layers = [], done = false }) {
   let thumbnailBaseSrc;
   if(prepared){img=new Image(prepared.width,prepared.height);thumbnailBaseSrc=URL.createObjectURL(prepared.thumbnail);}
   else{
@@ -92,7 +92,7 @@ function createPage({ id=crypto.randomUUID(), name, src, img, prepared, file = n
     thumbnail.width=Math.max(1,Math.round(img.width*ratio));thumbnail.height=Math.max(1,Math.round(img.height*ratio));thumbnail.getContext('2d').drawImage(img,0,0,thumbnail.width,thumbnail.height);thumbnailBaseSrc=thumbnail.toDataURL('image/webp',.75);thumbnail.width=1;thumbnail.height=1;
     img.width=img.naturalWidth||img.width;img.height=img.naturalHeight||img.height;img.onload=null;img.onerror=null;img.src='';
   }
-  return { id, name, src, thumbnailSrc:thumbnailBaseSrc, thumbnailBaseSrc, thumbnailRenderedSignature:layers.length?null:thumbnailSignature({layers}), thumbnailGeneration:0, img, file, directory, layers, done, edited:expectedSize||preserveEdited?edited===true:edited===true||layers.length>0, selectedId: layers[0]?.id || null, undo: [], redo: [] };
+  return { id, name, src, thumbnailSrc:thumbnailBaseSrc, thumbnailBaseSrc, thumbnailRenderedSignature:layers.length?null:thumbnailSignature({layers}), thumbnailGeneration:0, img, file, directory, layers, done, edited:layers.length>0, selectedId: layers[0]?.id || null, undo: [], redo: [] };
 }
 const emptyThumbnailImage=document.createElement('canvas');
 emptyThumbnailImage.width=1;emptyThumbnailImage.height=1;
@@ -728,7 +728,7 @@ function movePageAfter(p){
 }
 
 function markChanged(p) {
-  dirty(); p.done = false;p.edited=true;scheduleThumbnailRefresh(p);updateGlobal();
+  dirty(); p.done = false;p.edited=p.layers.length>0;scheduleThumbnailRefresh(p);updateGlobal();
 }
 
 function edit(p, fn, rebuild = true) {
@@ -790,7 +790,7 @@ $('deck').addEventListener('click', event => {
     });
     p.row.querySelector(`.layer-card[data-layer-id="${p.selectedId}"] textarea`).focus({ preventScroll: true });
   } else if (action.startsWith('speaker-') && ['dialogue','balloon'].includes(l?.kind)) {
-    edit(p, () => l.speaker = action.slice(8));
+    edit(p, () => { l.speaker = action.slice(8);l.presetId=null; });
   } else if (action === 'save-preset' && l) {
     saveSelectedPreset();
   } else if (action === 'delete-preset' && l) {
@@ -844,7 +844,7 @@ async function bulkLayers(action,p,task){
   const copies=await prepareLayers(source.layers,layer=>action==='copy-all'||action==='cut-all'?structuredClone(layer):scaledCopy(layer,source.width,source.height,target.img.width,target.img.height),task);
   checkAbort(task.signal);task.stage('データ適用',copies.length);
   if(action==='copy-all'||action==='cut-all')pageClipboard={layers:copies,width:source.width,height:source.height,name:p.name,cut:action==='cut-all'};
-  if(action==='cut-all'){checkpoint(p);p.layers=[];p.selectedId=null;dirty();scheduleThumbnailRefresh(p);}
+  if(action==='cut-all'){checkpoint(p);p.layers=[];p.selectedId=null;markChanged(p);}
   else if(action==='paste-all'||action==='copy-next'){checkpoint(target);target.layers.push(...copies);target.selectedId=action==='copy-next'?copies.at(-1).id:copies[0].id;dirty();scheduleThumbnailRefresh(target);}
   task.update({processed:copies.length,succeeded:copies.length},true);task.stage('画面反映',1);
   if(action!=='copy-all'){renderCards(target);drawPage(target);}if(action==='copy-next')activate(target,target.selectedId,true);else updateGlobal();
@@ -930,15 +930,15 @@ window.addEventListener('keydown', event => {
     p.canvas.focus({ preventScroll: true }); status('選択オブジェクトを削除した。Ctrl／⌘＋Zで戻せる。');
     return;
   }
-  if (command && !event.altKey && !event.shiftKey && event.target===p.canvas && ['c','v'].includes(key)) {
+  if (command && !event.altKey && !event.shiftKey && ['c','v'].includes(key)) {
     if (event.repeat) return;
     if (key==='c' && selected(p)) {
       event.preventDefault();layerClipboard=copySelection(selected(p),p.img.width,p.img.height);clipboardPastes.clear();
-      status('選択した文字と設定をコピーした。貼付け先のプレビューで Ctrl／⌘＋V。');
+      status('選択オブジェクトをコピーした。貼付け先の画像を選んで Ctrl／⌘＋V。');
     } else if (key==='v' && layerClipboard) {
       event.preventDefault();const count=(clipboardPastes.get(p.id)||0)+1;clipboardPastes.set(p.id,count);
       edit(p,()=>{const copy=pasteSelection(layerClipboard,p.img.width,p.img.height,count*20);p.layers.push(copy);p.selectedId=copy.id;});
-      p.canvas.focus({preventScroll:true});status('文字と設定を貼り付けた。ドラッグで位置調整、Ctrl／⌘＋Zで戻す。');
+      p.canvas.focus({preventScroll:true});status('オブジェクトを貼り付けた。ドラッグで位置調整、Ctrl／⌘＋Zで戻す。');
     }
     return;
   }
@@ -959,7 +959,7 @@ function removePage(p) {
 
 $('previous').onclick = () => { const p = pages[pages.indexOf(active()) - 1]; if (p) activate(p, p.selectedId, true); };
 $('next').onclick = () => { const p = pages[pages.indexOf(active()) + 1]; if (p) activate(p, p.selectedId, true); };
-$('jump').onchange = () => { const p = pages.find(p => p.id === $('jump').value); if (p) activate(p, p.selectedId, true); };
+$('jump').onchange = () => { const p = pages.find(p => p.id === $('jump').value); if (p) { activate(p, p.selectedId, true);p.canvas.focus({preventScroll:true}); } };
 
 async function guard(fn,kind='処理',stageCount=1) {
   if(busy)return;busy=true;drag=null;
@@ -1079,7 +1079,7 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
     for await(const result of boundedResults(ready,async p=>prepareImage(p.blob,task,p.thumbnailSize),{...queueOptions(task,true),estimate:p=>({...jobEstimate({...p,expectedSize:p.allocationSize}),result:320*320*4+65536})})){
       if(result.error){task.result(ready[result.index].name,false);throw new Error(`${ready[result.index].name}: ${result.error.message}`);}checkAbort(task.signal);const p=ready[result.index],prepared=result.value;
       if(p.expectedSize&&(p.expectedSize.width!==prepared.width||p.expectedSize.height!==prepared.height))throw new Error(`画像寸法が不正: ${p.name}`);
-      const page=createPage({id:restoreIds?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,edited:p.edited===true||(!restoreIds&&p.layers.length>0),expectedSize:p.expectedSize,preserveEdited:restoreIds&&typeof p.edited==='boolean',src:URL.createObjectURL(p.blob),file:p.blob,prepared});loaded.push(page);
+      const page=createPage({id:restoreIds?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,src:URL.createObjectURL(p.blob),file:p.blob,prepared});loaded.push(page);
       if(page.layers.length){requestPageFonts(page);await renderPageThumbnail(page,task.signal);}
       task.result(p.name);
     }
@@ -1125,7 +1125,9 @@ updateGlobal();
 
 function makeLayer(kind,width,height,speaker='male') {
   const layer=newLayer(kind,width,height,speaker);
-  return applyPreset(layer,preferences.presets.find(p=>p.id===preferences.defaults[kind]),width,height);
+  applyPreset(layer,preferences.presets.find(p=>p.id===preferences.defaults[kind]),width,height);
+  if(kind==='dialogue'&&layer.speaker!==speaker){layer.speaker=speaker;layer.presetId=null;}
+  return layer;
 }
 function fillPresetSelect(select,kind,current,custom=false) {
   if(select===document.activeElement)return;
@@ -1171,7 +1173,7 @@ for(const [id,kind] of presetControls)$(id).onchange=()=>{
 };
 function saveSelectedPreset() {
   const p=active(),layer=p&&selected(p);if(busy||!layer||!PRESET_KINDS.includes(layer.kind))return;
-  const name=prompt('この設定のプリセット名（本文・話者は保持し、書式と配置を保存）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
+  const name=prompt('この設定のプリセット名（本文は保持し、話者・書式・配置を保存）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
   if(!name?.trim())return;
   if(name.trim().length>60){status('プリセット名は60文字以内で入力。');return;}
   const existing=preferences.presets.find(p=>!p.builtin&&p.kind===layer.kind&&p.name===name.trim());

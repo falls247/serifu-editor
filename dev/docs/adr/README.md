@@ -28,3 +28,4 @@
 - [ADR-0016: 吹き出し・キャプションの文字位置と改行領域](0016-text-position-and-balloon-content.md)
 
 - [ADR-0017: JSのsrc配下への移動と静的配信URL](0017-src-layout-and-static-assets.md)
+- [ADR-0018: 画像間のオブジェクトコピー、現在の編集情報による状態判定、話者付きプリセット](0018-object-clipboard-and-edit-state.md)
