@@ -44,7 +44,7 @@ try {
   assert.equal(await page.locator('#previousBatch').isDisabled(), true);
   assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '3');
   await first().locator('[data-kind=caption] [data-field=textOutlineWidth]').fill('4.5');
-  assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '4.5');
+  assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '5');
   await first().locator('.position-controls [data-field=textOutlineColor]').fill('#ff6600');
   assert.equal(await first().locator('[data-kind=caption] [data-field=textOutlineColor]').inputValue(), '#ff6600');
   const colored = await first().locator('canvas').evaluate(canvas => {
@@ -69,7 +69,7 @@ try {
   await first().locator('canvas').focus(); await page.keyboard.press('Delete');
   assert.equal(await first().locator('.layer-card').count(), 0);
   await page.keyboard.press('Control+z'); assert.equal(await text.inputValue(), 'BCD');
-  assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '4.5');
+  assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '5');
   await first().locator('[data-action=add-balloon]').click(); await first().locator('canvas').focus(); await page.keyboard.press('Delete');
   assert.equal(await first().locator('[data-kind=balloon]').count(), 0); await page.keyboard.press('Control+z');
   assert.equal(await first().locator('[data-kind=balloon]').count(), 1);
@@ -118,7 +118,7 @@ try {
   });
   await page.click('#saveEdited'); await ready();
   assert.deepEqual(await page.evaluate(() => Object.keys(window.savedFiles)), ['p001_001.png', 'p050_050.png', 'p051_051.png', 'p500_500.png', 'serifu-project.json']);
-  assert.equal(await page.evaluate(() => window.savedFiles['serifu-project.json'].pages[0].layers[0].textOutlineWidth), 4.5);
+  assert.equal(await page.evaluate(() => window.savedFiles['serifu-project.json'].pages[0].layers[0].textOutlineWidth), 5);
   await page.evaluate(() => window.savedFiles = {}); await page.click('#save'); await ready();
   assert.equal(await page.evaluate(() => Object.keys(window.savedFiles).length), 501);
   assert.equal(await page.evaluate(() => window.savedFiles['serifu-project.json'].pages.length), 500);
@@ -137,7 +137,7 @@ try {
   assert.equal(await page.locator('#thumbnailSidebar').isHidden(), true);
   await page.click('#restoreDraft'); await ready();
   assert.equal(await rows.count(), 50); assert.equal(await thumbs.count(), 500);
-  assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '4.5');
+  assert.equal(await first().locator('.caption-controls [data-field=textOutlineWidth]').inputValue(), '5');
   await page.click('#toggleThumbnails');
   await thumbs.nth(49).click();
   assert.equal(await rows.nth(49).locator('textarea').inputValue(), '境界の台詞');

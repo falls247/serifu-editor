@@ -12,7 +12,7 @@ try {
     server.once('exit', code => reject(new Error(`server exited: ${code}`)));
   });
   browser = await chromium.launch({ headless: true });
-  page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+  page = await browser.newPage({ viewport: { width: 1920, height: 1400 } });
   const errors = [];page.on('pageerror', error => errors.push(error.message));
   await page.goto(`http://127.0.0.1:${port}`);
   await page.uncheck('#autosaveEnabled');
@@ -102,9 +102,12 @@ try {
   await page.click('#restoreDraft');await ready();assert.deepEqual(await names(), ordered);
   await page.click('#toggleThumbnails');assert.equal(await handle.isVisible(), false);
   await page.click('#toggleThumbnails');assert.equal(await width(), 560);
-  await resize(720);
+  await resize(1200);
+  assert.equal(await handle.getAttribute('aria-valuemax'), '1280');
+  await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');assert.equal(await width(), 1200);
+  await page.click('#restoreDraft');await ready();assert.deepEqual(await names(), ordered);
   await page.setViewportSize({ width: 1100, height: 1080 });assert.ok(await width() <= 460);
-  await page.setViewportSize({ width: 1920, height: 1080 });assert.equal(await width(), 720);
+  await page.setViewportSize({ width: 1920, height: 1080 });assert.equal(await width(), 1200);
   await handle.dblclick();assert.equal(await width(), 576);
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('serifu.view.v1')).sidebarWidth), null);
   await resize(220);await handle.focus();await page.keyboard.press('ArrowLeft');assert.equal(await width(), 220);
