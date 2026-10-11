@@ -6,6 +6,7 @@ import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js
 import { PROJECT_VERSION, normalizeLayers, normalizeMaskEffects, reorderPageObjects, checkpoint, restore, duplicateLayer, dragPlacement, copyLayers, pasteSelectedLayers, selectedLayers, setSelection, syncSelection, hasEdits, scaledCopy, EFFECT_LIMITS, THICKNESS_LIMIT, defaultMaskEffect, normalizeMaskEffect, pruneMaskAssets } from './model.js';
 import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cropImage, cropHandles, cropModeAt, dragCropRectangle, uncroppedImageEdit, cropInFullView } from './image-edit.js';
 import { openFullPreview, previewIsOpen } from './preview-modal.js';
+import { toggleMagnifier, refreshMagnifier, closeMagnifier } from './preview-magnifier.js';
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
@@ -270,6 +271,7 @@ function drawPage(p) {
     maskEffects:p.maskEffects,maskAssets:p.maskAssets,draft:p.sam3Draft,
     maskSelection:p.id===activeId?p.maskEffects.find(effect=>effect.id===p.selectedMaskId)??null:null,
   });
+  refreshMagnifier(p);
   if(p.cropDraft){
     const r=p.cropDraft;ctx.save();ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0009';
     ctx.beginPath();ctx.rect(0,0,size.width,size.height);ctx.rect(r.x,r.y,r.width,r.height);ctx.fill('evenodd');
@@ -513,6 +515,7 @@ function activate(p, id = p.selectedId, scroll = false) {
 }
 
 function unmountPage(p) {
+  closeMagnifier(p);
   if (!p.row) { disposeSam3UI(p); return; }
   disposeSam3UI(p);
   persistPageControl(p);
@@ -1202,7 +1205,9 @@ $('deck').addEventListener('click', event => {
   } else if(action==='duplicate-image'){
     guard(task=>duplicateImage(p,task),'画像複製',2);
   } else if(action==='preview-full'){
-    persistPageControl(p);openFullPreview(p,event.target.closest('button'));
+    persistPageControl(p);closeMagnifier();openFullPreview(p,event.target.closest('button'));
+  } else if(action==='preview-magnifier'){
+    persistPageControl(p);toggleMagnifier(p,event.target.closest('button'));
   } else if(action==='crop-image'){
     if(p.cropDraft)cancelCrop(p);
     else{p.cropDraft=cropInFullView(p.img.width,p.img.height,p.imageEdit);updateImageView(p);updateGlobal();}

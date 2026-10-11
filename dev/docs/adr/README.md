@@ -36,3 +36,4 @@
 
 - [ADR-0023: SAM3推論と非破壊マスク加工の保存](0023-sam3-mask-effects-and-storage.md)
 - [ADR-0024: マスク加工と文字の重なり順を共通化する](0024-shared-mask-and-text-order.md)
+- [ADR-0025: 等倍拡大鏡とプレビュー描画の共有](0025-preview-magnifier-and-render-cache.md)

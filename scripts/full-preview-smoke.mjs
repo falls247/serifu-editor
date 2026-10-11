@@ -9,6 +9,15 @@ try {
   await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error('Preview server did not start')), 10000); server.stdout.once('data', () => { clearTimeout(timer); resolve(); }); server.once('error', reject); });
   browser = await chromium.launch({ headless: true }); page = await browser.newPage({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
   const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    window.previewWork = { decodes: 0, draws: 0 };
+    const decode = HTMLImageElement.prototype.decode, clear = CanvasRenderingContext2D.prototype.clearRect;
+    HTMLImageElement.prototype.decode = function (...args) { window.previewWork.decodes++; return decode.apply(this, args); };
+    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+      if (this.canvas.id === 'fullPreviewCanvas') window.previewWork.draws++;
+      return clear.apply(this, args);
+    };
+  });
   await page.goto(`http://127.0.0.1:${port}`); await page.uncheck('#autosaveEnabled');
   const fixture = await page.evaluate(async () => {
     const { newLayer } = await import('./src/renderer.js');
@@ -22,10 +31,70 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.image-row').length === 2 && !document.querySelector('#projectLoad').disabled);
   const row = page.locator('.image-row').first(), opener = row.locator('[data-action=preview-full]'), modal = page.locator('#fullPreview'), image = page.locator('#fullPreviewCanvas');
   assert.equal(await opener.evaluate(b => b.nextElementSibling.dataset.action), 'crop-image');
+  const magnifier = row.locator('[data-action=preview-magnifier]'), lens = row.locator('.preview-magnifier'), detail = lens.locator('canvas');
+  assert.equal(await magnifier.evaluate(b => b.nextElementSibling.dataset.action), 'preview-full');
   assert.equal(await page.locator('.shortcut-hint,.preview-hint').count(), 0);
   const dimensions = await row.evaluate(r => ({ original: r.querySelector('.original').getBoundingClientRect().width,
     preview: r.querySelector('canvas.preview').getBoundingClientRect().width, frame: r.querySelector('.preview-frame').clientWidth }));
   assert.ok(dimensions.preview > dimensions.original * 1.2); assert.ok(Math.abs(dimensions.preview - (dimensions.frame - 2)) < 1);
+  await page.evaluate(() => { window.previewWork = { decodes: 0, draws: 0 }; });
+  await magnifier.click(); await lens.locator('.magnifier-status').waitFor({ state: 'hidden' });
+  assert.equal(await magnifier.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.evaluate(() => window.previewWork.decodes), 0, 'magnifier reuses the mounted original');
+  const checkDetail = async () => {
+    const pixels = await detail.evaluate(c => {
+      const source = document.querySelector('#fullPreviewCanvas'), x = Number(c.dataset.sourceX), y = Number(c.dataset.sourceY);
+      const actual = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      const expected = source.getContext('2d').getImageData(x, y, c.width, c.height).data;
+      return { same: actual.every((byte, i) => byte === expected[i]), size: [c.width, c.height], css: [c.clientWidth, c.clientHeight] };
+    });
+    assert.deepEqual(pixels.size, pixels.css, 'one original pixel per CSS pixel'); assert.equal(pixels.same, true, 'lens preserves original-resolution edited pixels');
+  };
+  await checkDetail();
+  const dragBy = async (target, dx, dy) => {
+    const box = await target.boundingBox(); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down(); await page.mouse.move(box.x + box.width / 2 + dx, box.y + box.height / 2 + dy, { steps: 5 }); await page.mouse.up();
+  };
+  const checkCorners = async () => {
+    for (const [dx, dy, right, bottom] of [[-2000, -2000, false, false], [2000, -2000, true, false], [2000, 2000, true, true], [-2000, 2000, false, true]]) {
+      await dragBy(lens.locator('.magnifier-header'), dx, dy);
+      const actual = await detail.evaluate(c => ({ x: Number(c.dataset.sourceX), y: Number(c.dataset.sourceY),
+        width: c.width, height: c.height, originalWidth: document.querySelector('#fullPreviewCanvas').width, originalHeight: document.querySelector('#fullPreviewCanvas').height }));
+      assert.equal(actual.x, right ? actual.originalWidth - actual.width : 0, 'both horizontal image edges are reachable');
+      assert.equal(actual.y, bottom ? actual.originalHeight - actual.height : 0, 'both vertical image edges are reachable');
+      await checkDetail();
+    }
+  };
+  await checkCorners(); await dragBy(lens.locator('.magnifier-header'), -2000, -2000);
+  const initial = await lens.boundingBox();
+  await dragBy(lens.locator('.magnifier-resize'), -70, -50);
+  const smaller = await lens.boundingBox(); assert.ok(smaller.width < initial.width); assert.ok(smaller.height < initial.height); await checkDetail();
+  await dragBy(lens.locator('.magnifier-header'), 60, 30);
+  const moved = await lens.boundingBox(); assert.ok(moved.x > smaller.x); assert.ok(moved.y > smaller.y); await checkDetail();
+  await lens.locator('.magnifier-resize').focus(); await page.keyboard.press('Shift+ArrowRight');
+  assert.equal((await lens.boundingBox()).width, smaller.width + 10); await checkDetail();
+  const touchBefore = await lens.boundingBox();
+  const touch = await page.context().newCDPSession(page);
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: touchBefore.x + 20, y: touchBefore.y + 14 }] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touchBefore.x + 45, y: touchBefore.y + 39 }] });
+  await touch.send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }); await touch.detach();
+  assert.ok((await lens.boundingBox()).x > touchBefore.x); await checkDetail();
+  const beforeEdit = await image.evaluate(c => c.toDataURL());
+  await row.locator('.position-controls [data-field=x]').fill('900');
+  await page.waitForFunction(previous => document.querySelector('#fullPreviewCanvas').toDataURL() !== previous, beforeEdit);
+  await page.waitForFunction(() => document.querySelector('.preview-magnifier').getAttribute('aria-busy') === 'false'); await checkDetail();
+  await row.locator('[data-action=undo]').click();
+  await page.waitForFunction(previous => document.querySelector('#fullPreviewCanvas').toDataURL() === previous, beforeEdit); await checkDetail();
+  await lens.focus(); await page.keyboard.press('Escape'); assert.equal(await lens.count(), 0);
+  assert.equal(await magnifier.evaluate(b => b === document.activeElement), true);
+  await magnifier.click(); await lens.locator('.magnifier-status').waitFor({ state: 'hidden' });
+  const secondRow = page.locator('.image-row').nth(1);
+  await secondRow.locator('[data-action=preview-magnifier]').click();
+  await secondRow.locator('.magnifier-status').waitFor({ state: 'hidden' });
+  assert.equal(await lens.count(), 0); assert.equal(await page.locator('.preview-magnifier').count(), 1, 'only one magnifier is retained');
+  await magnifier.click(); await lens.locator('.magnifier-status').waitFor({ state: 'hidden' });
+  await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/preview-magnifier-desktop.png' });
+  await page.evaluate(() => { window.previewWork = { decodes: 0, draws: 0 }; });
   const integerFields = ['shapeSeed','spikeCount','brushSeed','glyphSeed','x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth','textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth','shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY'];
   const values = await row.locator('input[data-field][type=number],input[data-numeric-field][type=number]').evaluateAll(inputs => inputs.map(i => ({ field: i.dataset.field ?? i.dataset.numericField, value: i.value, step: i.step })));
   for (const input of values) {
@@ -35,6 +104,8 @@ try {
   }
   await row.locator('.position-controls [data-field=x]').focus();
   await opener.click(); await image.waitFor({ state: 'visible' });
+  assert.equal(await lens.count(), 0, 'modal replaces the magnifier');
+  assert.deepEqual(await page.evaluate(() => window.previewWork), { decodes: 0, draws: 0 }, 'modal shares the already rendered magnifier surface');
   assert.equal(await modal.isVisible(), true); assert.deepEqual(await image.evaluate(c => [c.width, c.height]), [1600, 1000]);
   assert.deepEqual(await image.evaluate(c => [c.getBoundingClientRect().width, c.getBoundingClientRect().height]), [1600, 1000]);
   assert.equal(await page.locator('#fullPreviewZoomValue').textContent(), '100%');
@@ -66,6 +137,15 @@ try {
   await page.locator('#fullPreviewZoom').fill('10'); assert.equal(await page.locator('#fullPreviewZoomOut').isDisabled(), true); await wheel(100); assert.equal(await page.locator('#fullPreviewZoom').inputValue(), '10');
   await viewport.focus(); await page.keyboard.press('Control+z'); await page.keyboard.press('ArrowRight'); await page.keyboard.press('Delete');
   await page.keyboard.press('Escape'); assert.equal(await modal.isVisible(), false); assert.equal(await opener.evaluate(b => b === document.activeElement), true);
+  await page.evaluate(() => { window.previewWork = { decodes: 0, draws: 0 }; });
+  const reopenMs = await opener.evaluate(async button => {
+    const start = performance.now(); button.click();
+    while (document.querySelector('#fullPreviewCanvas').hidden) await new Promise(requestAnimationFrame);
+    return performance.now() - start;
+  });
+  assert.deepEqual(await page.evaluate(() => window.previewWork), { decodes: 0, draws: 0 }, 'unchanged reopen skips decode and rendering');
+  console.log(`Cached 100% preview: ${reopenMs.toFixed(1)} ms`);
+  await page.locator('#fullPreviewClose').click();
   assert.equal(await row.locator('.layer-card').count(), 4);
   let pending = page.waitForEvent('download'); await row.locator('[data-action=save-image]').click(); let download = await pending;
   await page.waitForFunction(() => !document.querySelector('#projectLoad').disabled);
@@ -99,7 +179,30 @@ try {
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   const bounds = await modal.boundingBox(); assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 421);
   await page.screenshot({ path: 'artifacts/full-preview-mobile.png' }); await page.locator('#fullPreviewClose').click();
+  await magnifier.click(); await lens.locator('.magnifier-status').waitFor({ state: 'hidden' }); await checkDetail();
+  await dragBy(lens.locator('.magnifier-resize'), 1000, 1000);
+  const frame = await row.locator('.preview-frame').boundingBox(), enlarged = await lens.boundingBox();
+  assert.ok(enlarged.width <= frame.width && enlarged.height <= frame.height, 'resize stays inside the preview');
+  await checkCorners();
+  await lens.focus(); const panBefore = Number(await detail.getAttribute('data-source-x')); await page.keyboard.press('Shift+ArrowRight');
+  assert.ok(Number(await detail.getAttribute('data-source-x')) > panBefore, 'keyboard pans when the window fills its frame'); await checkDetail();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.screenshot({ path: 'artifacts/preview-magnifier-mobile.png' });
+  await lens.locator('.magnifier-close').click(); assert.equal(await magnifier.getAttribute('aria-pressed'), 'false');
+  const cancelled = await page.evaluate(async src => {
+    const { openFullPreview } = await import('./src/preview-modal.js');
+    const image = new Image(); image.src = src; await image.decode();
+    let finish;
+    Object.defineProperty(image, 'naturalWidth', { value: 0 });
+    image.decode = () => new Promise(resolve => { finish = resolve; });
+    const modal = document.querySelector('#fullPreview'), opening = openFullPreview({ id: 'delayed', name: 'delayed', src, img: image, layers: [] }, document.querySelector('[data-action=preview-full]'));
+    await new Promise(resolve => { modal.addEventListener('close', resolve, { once: true }); modal.close(); });
+    finish(); await opening;
+    const canvas = document.querySelector('#fullPreviewCanvas');
+    return { hidden: canvas.hidden, size: [canvas.width, canvas.height], overflow: document.body.style.overflow };
+  }, fixture.pages[0].src);
+  assert.deepEqual(cancelled, { hidden: true, size: [1, 1], overflow: '' }, 'closing during preparation cancels stale rendering and frees the surface');
   assert.deepEqual(errors, []);
-  console.log('Full-resolution edited modal, 10–200% zoom controls/Ctrl-wheel/anchor, scroll/focus/Escape, crop/rotation, PNG parity, integer pixel controls, one-decimal angles/percentages and precision preservation passed');
+  console.log('Magnifier: original pixel parity, drag/resize/keyboard, mobile bounds and shared cache passed. Full-resolution modal, zoom/scroll/focus/Escape, crop/rotation, PNG parity and numeric precision passed');
 } catch (error) { if (page) { await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/full-preview-failure.png' }).catch(() => {}); } throw error; }
 finally { await browser?.close(); server.kill(); }

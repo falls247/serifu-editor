@@ -74,6 +74,19 @@ canvas.preview.cropping{cursor:crosshair}
 #fullPreviewCanvas[hidden]{display:none}
 @media(max-width:520px){.full-preview{width:calc(100vw - 16px);height:94dvh;border-radius:9px}.full-preview-header{padding:12px;gap:10px}.full-preview-tools{padding:10px;gap:8px;flex-wrap:wrap}.full-preview-tools label{display:none}.full-preview-tools input{flex:1;width:auto;min-width:75px}.full-preview-stage{padding:12px}}
 .layer-card[data-speaker=female] .layer-summary-speaker{color:#ff85b9}
+.preview-frame{position:relative}
+.magnifier-toggle{display:inline-flex;align-items:center;justify-content:center}
+.magnifier-toggle[aria-pressed=true]{color:var(--lime);background:#35422a;border-color:#93af6f}
+.preview-magnifier{position:absolute;z-index:2;display:flex;flex-direction:column;overflow:hidden;border:1px solid var(--lime);border-radius:7px;background:#0c0e12;box-shadow:0 8px 28px #000a;cursor:move;touch-action:none;user-select:none}
+.preview-magnifier:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.magnifier-header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;height:28px;padding:0 6px 0 10px;border-bottom:1px solid #59654b;background:#283222;color:var(--lime);font:11px monospace}
+.magnifier-hint{margin-left:6px;font:9px sans-serif;color:#b6c4a8}
+.magnifier-close{border:0;background:transparent;color:inherit;padding:2px 5px;font-size:16px;line-height:1}
+.magnifier-canvas{display:block;flex:1;min-height:0;width:100%;height:0;object-fit:fill}
+.magnifier-status{position:absolute;left:10px;top:38px;right:10px;font-size:10px;color:var(--muted);pointer-events:none}
+.magnifier-status:empty{display:none}
+.magnifier-resize{position:absolute;right:0;bottom:0;width:24px;height:24px;padding:0;border:0;border-radius:0;background:linear-gradient(135deg,transparent 48%,#283222 48%);cursor:nwse-resize;touch-action:none}
+.magnifier-resize:after{content:'';position:absolute;right:4px;bottom:4px;width:7px;height:7px;border-right:2px solid var(--lime);border-bottom:2px solid var(--lime)}
 :is(.layer-card,.mask-effect-card):not(.selected){padding:6px 10px}
 :is(.layer-card,.mask-effect-card):not(.selected)>:not(.layer-summary,.mask-effect-summary){display:none}
 :is(.layer-card,.mask-effect-card):not(.selected)>:is(.layer-summary,.mask-effect-summary){display:-webkit-box;width:100%;text-align:left;padding:0;background:transparent;border:0;border-radius:0;color:#e9eaf0;white-space:normal;overflow-wrap:anywhere;line-height:1.5;font-size:13px;cursor:pointer;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}

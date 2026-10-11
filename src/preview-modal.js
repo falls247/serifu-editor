@@ -1,6 +1,6 @@
-import { draw, clamp } from './renderer.js';
+import { clamp } from './renderer.js';
 import { imageSize } from './image-edit.js';
-import { fontLoadQueries } from './fonts.js';
+import { getPreviewCanvas, releasePreviewCanvas } from './preview-render.js';
 
 const dialog = document.getElementById('fullPreview');
 const canvas = document.getElementById('fullPreviewCanvas');
@@ -30,27 +30,20 @@ function zoomTo(value, anchor = null) {
 
 export async function openFullPreview(page, trigger) {
   const token = ++generation, size = imageSize(page.img.width, page.img.height, page.imageEdit);
-  const snapshot = { src: page.src, layers: structuredClone(page.layers), imageEdit: structuredClone(page.imageEdit),
-    maskEffects: structuredClone(page.maskEffects ?? []), maskAssets: structuredClone(page.maskAssets ?? {}) };
   preview = { ...size, zoom: 100 }; opener = trigger;
   document.getElementById('fullPreviewTitle').textContent = page.name;
   document.getElementById('fullPreviewSize').textContent = `${size.width} × ${size.height} px`;
   message.textContent = 'プレビューを準備中…'; canvas.hidden = true;
   previousOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden';
-  dialog.showModal(); canvas.width = size.width; canvas.height = size.height;
+  dialog.showModal();
   zoomTo(100); viewport.scrollLeft = 0; viewport.scrollTop = 0;
-  const image = new Image();
   try {
-    image.src = snapshot.src;
-    await Promise.all([image.decode(), ...new Set(snapshot.layers.flatMap(fontLoadQueries))].map(job =>
-      typeof job === 'string' ? document.fonts?.load(job) : job));
-    if (token !== generation || !dialog.open) return;
-    draw(canvas.getContext('2d'), image, snapshot.layers, null, 1, 1, snapshot.imageEdit, {width: image.width, height: image.height},
-      {maskEffects:snapshot.maskEffects,maskAssets:snapshot.maskAssets});
+    const result = await getPreviewCanvas(page);
+    if (!result || token !== generation || !dialog.open) return;
     canvas.hidden = false; message.textContent = ''; viewport.scrollLeft = 0; viewport.scrollTop = 0;
   } catch (error) {
     if (token === generation && dialog.open) message.textContent = `プレビューを表示できなかった: ${error.message}`;
-  } finally { image.src = ''; }
+  }
 }
 
 slider.addEventListener('input', () => zoomTo(Number(slider.value)));
@@ -58,12 +51,17 @@ document.getElementById('fullPreviewZoomOut').onclick = () => zoomTo(preview.zoo
 document.getElementById('fullPreviewZoomIn').onclick = () => zoomTo(preview.zoom + 10);
 document.getElementById('fullPreviewActual').onclick = () => zoomTo(100);
 document.getElementById('fullPreviewClose').onclick = () => dialog.close();
+dialog.addEventListener('keydown', event => {
+  const { key: pressed } = event;
+  // Native undo can target the last edited background input even inside a dialog.
+  if ((event.ctrlKey || event.metaKey) && ['z', 'y'].includes(pressed.toLowerCase())) event.preventDefault();
+});
 dialog.addEventListener('wheel', event => {
   if (!event.ctrlKey || !preview) return;
   event.preventDefault(); event.stopPropagation();
   if (event.deltaY) zoomTo(preview.zoom + (event.deltaY < 0 ? 10 : -10), viewport.contains(event.target) ? { x: event.clientX, y: event.clientY } : null);
 }, { passive: false });
 dialog.addEventListener('close', () => {
-  generation++; preview = null; canvas.width = canvas.height = 1; canvas.hidden = true;
+  generation++; preview = null; canvas.hidden = true; releasePreviewCanvas();
   document.body.style.overflow = previousOverflow; opener?.isConnected && opener.focus({ preventScroll: true }); opener = null;
 });
