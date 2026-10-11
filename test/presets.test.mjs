@@ -1,15 +1,39 @@
 import test from 'node:test';import assert from 'node:assert/strict';
 import {newLayer} from '../src/renderer.js';import {defaultPreferences,createPreset,applyPreset,normalizePreferences} from '../src/presets.js';
-test('presets scale placement and typography while preserving text and applying the saved speaker',()=>{
+test('presets scale dimensions and typography while preserving XY and text and applying the saved speaker',()=>{
   const source={...newLayer('dialogue',1000,750),x:200,y:300,size:66,text:'保存しない文字'};
-  const preset=createPreset('設定',source,1000,750),target=newLayer('dialogue',2000,1500,'female');target.text='今のセリフ';
-  applyPreset(target,preset,2000,1500);assert.equal(target.x,400);assert.equal(target.y,600);assert.equal(target.size,132);assert.equal(target.text,'今のセリフ');assert.equal(target.speaker,'male');
+  const preset=createPreset('設定',source,1000,750),target={...newLayer('dialogue',2000,1500,'female'),x:123,y:456};target.text='今のセリフ';
+  applyPreset(target,preset,2000,1500);assert.equal(target.x,123);assert.equal(target.y,456);assert.equal(target.size,132);assert.equal(target.text,'今のセリフ');assert.equal(target.speaker,'male');
+});
+test('all preset kinds omit XY, ignore legacy positions and strip them when preferences are restored',()=>{
+  for(const kind of ['dialogue','sfx','balloon','caption']){
+    const source={...newLayer(kind,1000,750),x:110,y:220},preset=createPreset('位置を保存しない',source,1000,750);
+    for(const key of ['x','y','xRatio','yRatio'])assert.equal(Object.hasOwn(preset.style,key),false);
+    preset.style.xRatio=.11;preset.style.yRatio=.22;preset.style.x=110;preset.style.y=220;
+    const target={...newLayer(kind,2000,1500),x:-12.25,y:987.75,text:'現在の本文'};
+    applyPreset(target,preset,2000,1500);assert.equal(target.x,-12.25);assert.equal(target.y,987.75);assert.equal(target.text,'現在の本文');
+    const prefs=defaultPreferences();prefs.presets.push(preset);
+    const restored=normalizePreferences(prefs).presets.find(p=>p.id===preset.id);
+    assert.ok(restored);for(const key of ['x','y','xRatio','yRatio'])assert.equal(Object.hasOwn(restored.style,key),false);
+    assert.equal(preset.style.xRatio,.11,'normalization does not mutate supplied preferences');
+    for(const builtin of defaultPreferences().presets.filter(p=>p.kind===kind)){
+      applyPreset(target,builtin,2000,1500);assert.equal(target.x,-12.25);assert.equal(target.y,987.75);
+    }
+  }
 });
 test('custom presets and selected defaults round-trip without losing autosave interval',()=>{
   const prefs=defaultPreferences(),preset=createPreset('歪み', {...newLayer('sfx',1000,750),blur:4,distortion:70},1000,750);
   prefs.presets.push(preset);prefs.defaults.sfx=preset.id;prefs.autosave.minutes=.5;
   const restored=normalizePreferences(JSON.parse(JSON.stringify(prefs)));assert.equal(restored.defaults.sfx,preset.id);assert.equal(restored.autosave.minutes,.5);
   const applied=applyPreset(newLayer('sfx',1000,750),restored.presets.find(p=>p.id===preset.id),1000,750);assert.equal(applied.blur,4);assert.equal(applied.distortion,70);
+});
+test('font size memory defaults to 70px and normalizes saved settings without requiring legacy fields',()=>{
+  assert.equal(defaultPreferences().fontSizePreset,70);
+  assert.equal(normalizePreferences({version:1}).fontSizePreset,70);
+  assert.equal(normalizePreferences({...defaultPreferences(),fontSizePreset:82}).fontSizePreset,82);
+  assert.equal(normalizePreferences({...defaultPreferences(),fontSizePreset:82.4}).fontSizePreset,82);
+  for(const value of [null,'70',NaN,Infinity,7,501])assert.equal(normalizePreferences({...defaultPreferences(),fontSizePreset:value}).fontSizePreset,70);
+  for(const value of [8,500])assert.equal(normalizePreferences({...defaultPreferences(),fontSizePreset:value}).fontSizePreset,value);
 });
 test('fresh settings enable autosave every two minutes and ignore malformed presets',()=>{
   const prefs=normalizePreferences({version:1,presets:[null,{id:'bad',name:'bad',kind:'sfx',style:{}}],defaults:{sfx:'bad'}});

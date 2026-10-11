@@ -8,9 +8,9 @@ export const PREFS_KEY = 'serifu.preferences.v1';
 export const PRESET_KINDS = Object.freeze(['dialogue','sfx','balloon','caption']);
 export const MAX_USER_PRESETS = 100;
 const styleKeys = ['vertical','rotation','color','effect','font','warp','distortion','skew','stretchX','stretchY','blurStrength','inkCore','roughness','dryInk','brushTails','inkTexture','grungeAmount','scratchLength','scratchAngle','spatterAmount','sizeVariation','horizontalJitter','taperRate',...Object.keys(PLACEMENT_DEFAULTS).filter(key=>key!=='minimumGlyphGap'),'glyphSeed'];
-const ratioKeys = {x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRatio',outline:'outlineRatio',blur:'blurRatio',motionBlur:'motionRatio',blurX:'blurXRatio',blurY:'blurYRatio',minimumGlyphGap:'minimumGlyphGapRatio'};
+const ratioKeys = {w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRatio',outline:'outlineRatio',blur:'blurRatio',motionBlur:'motionRatio',blurX:'blurXRatio',blurY:'blurYRatio',minimumGlyphGap:'minimumGlyphGapRatio'};
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
-const boxRatioKeys={x:'xRatio',y:'yRatio',w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
+const boxRatioKeys={w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
   balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','sfxOrder','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
@@ -52,7 +52,7 @@ export function defaultPreferences() {
     builtin('balloon-standard','標準の吹き出し','balloon'),
     builtin('caption-standard','標準のキャプション','caption'),
   ];
-  return {version:1,presets,defaults:{dialogue:'dialogue-standard',sfx:'sfx-impact',balloon:'balloon-standard',caption:'caption-standard'},autosave:{enabled:true,minutes:2}};
+  return {version:1,presets,defaults:{dialogue:'dialogue-standard',sfx:'sfx-impact',balloon:'balloon-standard',caption:'caption-standard'},fontSizePreset:70,autosave:{enabled:true,minutes:2}};
 }
 export function applyPreset(layer,preset,width,height) {
   if(!preset||preset.kind!==layer.kind) return layer;
@@ -81,9 +81,14 @@ export function applyPreset(layer,preset,width,height) {
 export function normalizePreferences(input) {
   const result=defaultPreferences(),builtinCount=result.presets.length;
   if(!input||input.version!==1) return result;
+  if(Number.isFinite(input.fontSizePreset)&&input.fontSizePreset>=8&&input.fontSizePreset<=500)result.fontSizePreset=Math.round(input.fontSizePreset);
   for(const p of Array.isArray(input.presets)?input.presets:[]) {
     if(!p||p.builtin||!PRESET_KINDS.includes(p.kind)||typeof p.id!=='string'||!p.id||result.presets.some(existing=>existing.id===p.id)||typeof p.name!=='string'||!p.name.trim()||p.name.length>60)continue;
-    try { const probe=newLayer(p.kind,1000,750);applyPreset(probe,p,1000,750);result.presets.push({...p,name:p.name.trim(),builtin:false}); } catch {}
+    try {
+      const probe=newLayer(p.kind,1000,750);applyPreset(probe,p,1000,750);
+      const style={...p.style};for(const key of ['x','y','xRatio','yRatio'])delete style[key];
+      result.presets.push({...p,style,name:p.name.trim(),builtin:false});
+    } catch {}
   }
   result.presets=result.presets.slice(0,builtinCount+MAX_USER_PRESETS);
   for(const kind of PRESET_KINDS) if(result.presets.some(p=>p.id===input.defaults?.[kind]&&p.kind===kind))result.defaults[kind]=input.defaults[kind];

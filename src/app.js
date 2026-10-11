@@ -205,6 +205,7 @@ function updateGlobal() {
       }
     }
     if (!p.row) return;
+    updateFontSizeButtons(p);
     for(const action of ['remove','delete','duplicate-image','complete'])p.row.querySelector(`[data-action=${action}]`).disabled=busy||(action==='delete'&&!p.directory);
     p.row.classList.toggle('active', p.id === activeId);
     p.row.classList.toggle('done', p.done);
@@ -346,6 +347,15 @@ function selectObject(p,id,toggle=false,replace=false) {
   else setSelection(p,p.selectedIds,id);
 }
 
+function updateFontSizeButtons(p) {
+  const layer=selected(p),autoFit=layer?.kind==='caption'&&layer.autoFit;
+  for(const action of ['remember-font-size','apply-font-size']){
+    const button=p.row.querySelector(`[data-action=${action}]`);if(!button)continue;
+    button.disabled=busy||!layer||autoFit;
+    button.title=autoFit?'文字サイズの自動調整をOFFにすると使える':action==='apply-font-size'?`記憶した${preferences.fontSizePreset}pxを反映`:'現在の文字サイズを記憶';
+  }
+}
+
 function updateControls(p) {
   if (!p?.row) return;
   const l = selected(p), controls = p.row.querySelector('.position-controls');
@@ -383,6 +393,7 @@ function updateControls(p) {
     }
   }
   for(const input of controls.querySelectorAll('[data-numeric-field=size]'))input.disabled=caption&&l.autoFit;
+  updateFontSizeButtons(p);
   const captionStatus=controls.querySelector('.caption-fit-status');captionStatus.hidden=!caption;
   if(caption){const layout=captionLayout(p.canvas.getContext('2d'),l);captionStatus.textContent=`表示文字サイズ：${numericValue(layout.size,'size')}px · ${l.autoFit?'ボックスに自動追従':'手動指定'}${layout.fits?'':' · 本文が収まらないため、ボックスを広げるか文字を減らす。'}`;}
   const pendingQueries=l&&document.fonts?fontLoadQueries(l).filter(query=>!document.fonts.check(query)):[],fontStatus=p.row.querySelector('.font-status');
@@ -577,6 +588,13 @@ function addNumericControls(root,p){
     linked.value=input.value;linked.disabled=input.disabled;
     input.setAttribute('aria-label',`${title}${input.type==='range'?' スライダー':''}`);linked.setAttribute('aria-label',`${title}${linked.type==='range'?' スライダー':''}`);
     input.before(wrap);if(input.type==='number')wrap.append(input,linked);else wrap.append(linked,input);
+    if(field==='size'){
+      label.classList.add('font-size-setting');
+      const line=element('div','font-size-input');
+      const remember=button('remember-font-size','設定'),apply=button('apply-font-size','反映');
+      remember.type=apply.type='button';remember.setAttribute('aria-label','現在の文字サイズを記憶');apply.setAttribute('aria-label','記憶した文字サイズを反映');
+      line.append(input,remember,apply);wrap.prepend(line);
+    }
   }
 }
 function rememberCardDetails(p){
@@ -853,6 +871,14 @@ $('deck').addEventListener('click', event => {
     p.row.querySelector(`.layer-card[data-layer-id="${p.selectedId}"] textarea`).focus({ preventScroll: true });
   } else if (action.startsWith('speaker-') && ['dialogue','balloon'].includes(l?.kind)) {
     edit(p, () => { l.speaker = action.slice(8);l.presetId=null; });
+  } else if(action==='remember-font-size'&&l){
+    if(busy||l.kind==='caption'&&l.autoFit)return;
+    preferences.fontSizePreset=Math.round(l.size);const remembered=persistPreferences();dirty();updateGlobal();
+    if(remembered)status(`文字サイズ ${preferences.fontSizePreset}pxを記憶した。`);
+  } else if(action==='apply-font-size'&&l){
+    if(busy||l.kind==='caption'&&l.autoFit)return;
+    if(l.size!==preferences.fontSizePreset)edit(p,()=>{l.size=preferences.fontSizePreset;l.presetId=null;},false);
+    refreshPresetMenus(p);status(`文字サイズ ${preferences.fontSizePreset}pxを反映した。`);
   } else if (action === 'save-preset' && l) {
     saveSelectedPreset();
   } else if (action === 'delete-preset' && l) {
@@ -1283,6 +1309,7 @@ function persistPreferences() {
 function mergePresets(input) {
   if(!input)return '';
   const imported=normalizePreferences(input);
+  if(Number.isFinite(input.fontSizePreset)&&input.fontSizePreset>=8&&input.fontSizePreset<=500)preferences.fontSizePreset=imported.fontSizePreset;
   let count=preferences.presets.filter(p=>!p.builtin).length,skipped=0;
   for(const preset of imported.presets.filter(p=>!p.builtin)){
     if(preferences.presets.some(p=>p.id===preset.id))continue;
@@ -1298,7 +1325,7 @@ for(const [id,kind] of presetControls)$(id).onchange=()=>{
 };
 function saveSelectedPreset() {
   const p=active(),layer=p&&selected(p);if(busy||!layer||!PRESET_KINDS.includes(layer.kind))return;
-  const name=prompt('この設定のプリセット名（本文は保持し、話者・書式・配置を保存）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
+  const name=prompt('この設定のプリセット名（本文・XY位置は保持し、話者・書式・効果を保存）',preferences.presets.find(p=>p.id===layer.presetId&&!p.builtin)?.name||'');
   if(!name?.trim())return;
   if(name.trim().length>60){status('プリセット名は60文字以内で入力。');return;}
   const existing=preferences.presets.find(p=>!p.builtin&&p.kind===layer.kind&&p.name===name.trim());
