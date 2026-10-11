@@ -16,3 +16,5 @@
 引継書は現行コードの説明、ADR-0001〜0006は既存実装の事後記録。2026-10-10の本文出力・ページ順・一括保存先はADR-0007、表示件数・サムネイル・キャプション輪郭・DeleteはADR-0008、全4種類の名前付きプリセットはADR-0009へ記録した。一括処理のWorker化・容量制限・進捗・高速編集データ形式はADR-0010へ記録した。次の作業では実際のコード、適用される `AGENTS.md`、最新のユーザー指示を確認する。仕様や保存形式を変えた場合は、関連する文書と互換性の検証も更新する。
 
 2026-10-11：ブラウザ用JavaScriptを `src/` に集約。経緯は [ADR-0017](adr/0017-src-layout-and-static-assets.md)、現在の参照関係は [引継書](HANDOFF.md) を参照。過去の基準コミットはその記録時点のもの。
+
+2026-10-11 SAM3追加：[実装SOW](sow/SOW_20261011_sam3_segmentation.md)、[ADR-0023](adr/0023-sam3-mask-effects-and-storage.md)、[GPU・総合検証記録](sam3-gpu-validation.md)。マスク初期対応は版12。マスクと文字の共通順序、短縮カード、版13への更新は[ADR-0024](adr/0024-shared-mask-and-text-order.md)。

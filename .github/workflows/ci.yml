@@ -15,7 +15,11 @@ jobs:
       - run: npm install --no-save playwright
       - run: npx playwright install chromium --with-deps
       - run: npm run test:bulk
+      - run: npm run test:mask-render
+      - run: npm run test:mask-order
       - run: npm run test:browser
+      - run: npm run test:mask-storage
+      - run: npm run test:sam3-browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -24,3 +28,16 @@ jobs:
             artifacts/grunge-ink-preview.png
             artifacts/spiky-balloon-preview.png
           if-no-files-found: ignore
+
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install uv==0.11.7
+      - run: uv sync --locked
+        working-directory: backend
+      - run: uv run --locked pytest -m 'not gpu' -q
+        working-directory: backend

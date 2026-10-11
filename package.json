@@ -9,7 +9,7 @@
     "test": "node --test",
     "test:grunge-browser": "node scripts/grunge-smoke.mjs",
     "test:browser": "node scripts/layer-order-smoke.mjs && node scripts/page-filter-smoke.mjs && node scripts/thumbnail-sidebar-smoke.mjs && node scripts/font-size-preset-smoke.mjs && node scripts/full-preview-smoke.mjs && node scripts/image-edit-smoke.mjs && node scripts/clipboard-state-smoke.mjs && node scripts/drag-duplicate-smoke.mjs && node scripts/preview-layout-smoke.mjs && node scripts/sfx-controls-smoke.mjs && node scripts/lettering-brush-smoke.mjs && node scripts/grunge-smoke.mjs && node scripts/speech-style-smoke.mjs && node scripts/browser-smoke.mjs && node scripts/balloon-smoke.mjs && node scripts/caption-smoke.mjs && node scripts/text-position-smoke.mjs && node scripts/typography-smoke.mjs && node scripts/export-smoke.mjs && node scripts/paged-smoke.mjs && node scripts/editor-regression-smoke.mjs",
-    "check": "node --check src/app.js && node --check src/export.js && node --check src/renderer.js && node --check src/balloons.js && node --check src/captions.js && node --check src/typography.js && node --check src/ink.js && node --check src/fonts.js && node --check src/model.js && node --check src/presets.js && node --check src/storage.js && node --check server.mjs && node --check scripts/build.mjs && node --check scripts/fetch-font.mjs && node --check src/bulk-task.js && node --check src/bulk-pool.js && node --check src/image-worker.js && node --check src/export-cache.js && node --check src/project-io.js && node --check src/project-worker.js && node --check src/image-metadata.js && node --check src/zip.js && node --check scripts/bulk-smoke.mjs && node --check scripts/bulk-benchmark.mjs && node --check src/project-filenames.js && node --check scripts/editor-regression-smoke.mjs && node --check scripts/grunge-smoke.mjs && node --check scripts/speech-style-smoke.mjs && node --check src/glyph-layout.js && node --check src/brush-stroke.js && node --check scripts/lettering-brush-smoke.mjs && node --check scripts/sfx-controls-smoke.mjs && node --check scripts/preview-layout-smoke.mjs && node --check scripts/text-position-smoke.mjs && node --check scripts/clipboard-state-smoke.mjs && node --check src/image-edit.js && node --check scripts/image-edit-smoke.mjs && node --check src/preview-modal.js && node --check scripts/full-preview-smoke.mjs && node --check scripts/font-size-preset-smoke.mjs && node --check scripts/thumbnail-sidebar-smoke.mjs && node --check scripts/page-filter-smoke.mjs && node --check scripts/layer-order-smoke.mjs",
+    "check": "node scripts/check.mjs",
     "fonts": "node scripts/fetch-font.mjs",
     "test:bulk": "node scripts/bulk-smoke.mjs",
     "benchmark:bulk": "node scripts/bulk-benchmark.mjs",
@@ -25,6 +25,15 @@
     "test:font-size-browser": "node scripts/font-size-preset-smoke.mjs",
     "test:thumbnail-browser": "node scripts/thumbnail-sidebar-smoke.mjs",
     "test:page-filter-browser": "node scripts/page-filter-smoke.mjs",
-    "test:layer-order-browser": "node scripts/layer-order-smoke.mjs"
+    "test:layer-order-browser": "node scripts/layer-order-smoke.mjs",
+    "dev": "node scripts/dev.mjs",
+    "test:sam3-browser": "node scripts/sam3-browser-smoke.mjs",
+    "test:backend": "cd backend && uv run --locked pytest -m \"not gpu\" -q",
+    "test:mask-storage": "node scripts/mask-storage-smoke.mjs",
+    "test:mask-stress": "node scripts/mask-stress-smoke.mjs",
+    "test:mask-render": "node scripts/mask-render-smoke.mjs",
+    "test:mask-order": "node scripts/mask-order-smoke.mjs",
+    "test:sam3-real-browser": "node scripts/sam3-real-browser-smoke.mjs",
+    "test:sam3-gpu-lifecycle": "python3 scripts/sam3-gpu-lifecycle.py"
   }
 }

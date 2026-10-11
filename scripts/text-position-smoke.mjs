@@ -72,7 +72,7 @@ try {
   for(const sample of pixels.samples){assert.ok(sample.original.count>30);assert.equal(sample.shifted.count,sample.original.count);assert.equal(sample.shifted.left-sample.original.left,sample.textOffsetX);assert.equal(sample.shifted.top-sample.original.top,sample.textOffsetY);}
   assert.ok(pixels.inPadding.count>30);assert.ok(pixels.inPadding.right>350,'本文を元の余白領域へ移動しても枠内なら表示する');
   assert.equal(pixels.fitSize,pixels.shiftedFitSize);assert.equal(pixels.columns,1);assert.equal(pixels.paddedColumns,2);assert.equal(pixels.offscreenDiff,0,'HTML Canvas/OffscreenCanvas must match');assert.equal(pixels.workerDiff,0,'HTML Canvas/Worker must match');
-  await target.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);const preview=await source.locator('canvas').evaluate(canvas=>canvas.toDataURL());
+  await target.locator('canvas.preview').focus();await page.evaluate(()=>document.fonts.ready);const preview=await source.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL());
   let saving=page.waitForEvent('download');await source.locator('[data-action=save-image]').click();const png=await saving;
   const pngDiff=await page.evaluate(async([base64,preview])=>{
     const data=[];
@@ -86,7 +86,7 @@ try {
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25&&layer.textOffsetY===34);});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   for(const kind of ['balloon','caption']){const card=source.locator(`[data-kind=${kind}]`);assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-25');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'34');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'61':'19');}
-  await target.locator('canvas').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await source.locator('canvas').evaluate(canvas=>canvas.toDataURL()),preview);
+  await target.locator('canvas.preview').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await source.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL()),preview);
   await page.reload();await page.locator('#projectInput').setInputFiles({name:'text-positions.json',mimeType:'application/json',buffer:projectBytes});await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   for(const kind of ['balloon','caption'])assert.equal(await source.locator(`[data-kind=${kind}] [data-field=textOffsetY]`).inputValue(),'34');
   const balloonCard=source.locator('[data-kind=balloon]');if(!await balloonCard.evaluate(card=>card.classList.contains('selected')))await balloonCard.locator('.layer-summary').click();await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/text-position-desktop.png'});

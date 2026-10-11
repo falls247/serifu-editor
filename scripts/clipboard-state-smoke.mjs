@@ -73,7 +73,7 @@ try {
     await page.keyboard.press(`${command}+Shift+z`); assert.equal(await pasted.count(), 1);
     await page.keyboard.press(`${command}+z`);
     await page.locator('#jump').selectOption(sourceId);
-    assert.equal(await row().locator('canvas').evaluate(canvas => canvas === document.activeElement), true);
+    assert.equal(await row().locator('canvas.preview').evaluate(canvas => canvas === document.activeElement), true);
     assert.equal(await source.locator('textarea').inputValue(), `コピー元で変更-${layer.kind}`);
   }
   const balloon = row().locator('[data-kind=balloon]');
@@ -123,7 +123,7 @@ try {
   // 残るオブジェクトがある間は編集済み、最後の削除で未編集。
   while (await row().locator('.layer-card').count() > 1) {
     await selectCard(row().locator('.layer-card').first());
-    await row().locator('canvas').focus(); await page.keyboard.press('Delete');
+    await row().locator('canvas.preview').focus(); await page.keyboard.press('Delete');
     assert.equal(await row().locator('.edited-badge').isVisible(), true);
   }
   await selectCard(row().locator('.layer-card').first());

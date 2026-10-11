@@ -2,3 +2,11 @@ _site/
 node_modules/
 artifacts/
 assets/fonts/
+
+backend/.venv/
+backend/.pytest_cache/
+__pycache__/
+.env
+.env.*
+!.env.example
+*.pt

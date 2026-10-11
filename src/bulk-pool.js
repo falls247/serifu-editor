@@ -16,6 +16,11 @@ export class ImagePool {
     try{slot.worker.postMessage({operationId,jobId,kind,payload});}catch(error){finish(error);}
   });}
   async run(kind,payload,task,fallback){checkAbort(task?.signal);const supported=await this.start(task?.signal);checkAbort(task?.signal);
+    if(kind==='render-png'){
+      const maskEffects=(payload.maskEffects??[]).filter(effect=>effect.visible!==false),maskAssets={};
+      for(const id of new Set(maskEffects.map(effect=>effect.assetId))){const asset=payload.maskAssets?.[id];if(asset)maskAssets[id]={id:asset.id,imageWidth:asset.imageWidth,imageHeight:asset.imageHeight,bbox:asset.bbox,codec:asset.codec,byteLength:asset.byteLength,sha256:asset.sha256,data:asset.data};}
+      payload={...payload,maskEffects,maskAssets};
+    }
     const slot=this.workers.find(s=>!s.busy);
     if(supported&&slot){try{this.metrics.jobs++;return await this.send(slot,kind,payload,task?.data.operationId||crypto.randomUUID(),task?.signal);}catch(error){checkAbort(task?.signal);this.metrics.reasons.push(`${kind}: ${error.message}`);}}
     this.metrics.fallbackJobs++;await yieldToBrowser();checkAbort(task?.signal);return fallback();

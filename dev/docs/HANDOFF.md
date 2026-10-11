@@ -238,3 +238,18 @@ GitHub Pagesは `.github/workflows/pages.yml` がmainへのpush、または手�
 - 実装: `src/app.js` の `connectCanvas`。Ctrl／⌘＋ドラッグで選択レイヤーを同一ページ内に複製し、Ctrl／⌘＋Shift＋ドラッグでは移動量の大きい軸へ拘束。元の位置を起点とする水色破線ガイドはプレビュー限定、PNGには描かない。
 - 算出: `src/model.js:dragPlacement`。DOMの表示倍率に依存せず元画像座標系で扱い、単一のUndoチェックポイントで複製する。移動しないクリックは無変更、途中キャンセル時は複製を巻き戻す。
 - ハンドルのサイズ変更・回転・テール調整、通常ドラッグ、テキスト入力のショートカット動作は維持。確認: `test/drag-placement.test.mjs` と `scripts/drag-duplicate-smoke.mjs`。
+
+
+## SAM3追加（2026-10-11）
+
+実装計画は[SOW](sow/SOW_20261011_sam3_segmentation.md)、設計変更は[ADR-0023](adr/0023-sam3-mask-effects-and-storage.md)、実機を含む検証結果は[検証記録](sam3-gpu-validation.md)を参照する。ユーザー指定の`feat/sam3_detect`で実装し、最新main `cf3437e8a1a494132806ca26258336712439f42e`に含まれる文字順とサムネイル機能を維持する。
+
+文字順の仕様に版11が使用済みのため、マスク対応は版12／コンテナ版2。`normalizeLayer`の旧順移行条件（版11未満）を版12未満に変更しない。素材バイトはUndo履歴へ入れない。通常画面はrenderer末尾optionsにmaskEffects/maskAssets/draft/maskSelectionを渡し、書き出しにはdraftと選択を渡さない。変更時はPNGキャッシュとサムネイルを更新する。
+
+IndexedDB版2は旧ストアを保持してmasksを追加する。確定マスク全件を圧縮Blobとメタデータの現行スナップショットにまとめ、画像・編集メタデータと同一トランザクションで置き換える。保存前に参照とchecksumを検証し、失敗時に前回の有効な保存を残す。`scripts/mask-storage-smoke.mjs`は版1からの移行、復元、失敗・中断と素材解放を検証する。
+
+`npm run dev`はNode/FastAPIのプロセスグループを監視し、片方の異常終了やSIGINT/SIGTERMで両方を停止する。`SAM3_MOCK=1`だけがモックを有効にし、通常はgpu extraで固定版SAM3を使用する。`npm start`とGitHub PagesにはPythonを含めない。server/buildのES module許可リストと構文チェックに新moduleを含める。
+
+コミットとPR作成はユーザーのコミット承認後。実機未確認・未完了の項目は検証記録のまま引き継ぎ、正式完成と表現しない。
+
+2026-10-11の追加指示で、マスクカードも非選択時に短縮表示し、文字と共通の重なり順へ対応した。[ADR-0024](adr/0024-shared-mask-and-text-order.md)を参照。現在の出力は版13／コンテナ版2、旧JSON版12も読込可能。各オブジェクトの`layoutOrder`を保存する。配列を分けたまま共通`paintOrder`でカード・描画・Canvas選択を揃え、前面のマスクは文字を覆う。旧データの文字が前面にある見た目を維持し、順序変更時に全オブジェクトへ連番を付ける。版11未満の旧文字順移行は維持する。

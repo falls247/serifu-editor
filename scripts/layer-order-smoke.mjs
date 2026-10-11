@@ -26,7 +26,7 @@ try{
     await page.evaluate(()=>document.fonts.ready);
   };
   await load(legacy);
-  const row=page.locator('.image-row'),canvas=row.locator('canvas'),card=kind=>row.locator(`.layer-card[data-kind=${kind}]`);
+  const row=page.locator('.image-row'),canvas=row.locator('canvas.preview'),card=kind=>row.locator(`.layer-card[data-kind=${kind}]`);
   const order=()=>row.locator('.layer-card').evaluateAll(cards=>cards.map(card=>card.dataset.kind));
   const select=(kind,options)=>card(kind).locator('.layer-summary:visible,.kind-label:visible').first().click(options);
   const act=action=>row.locator(`.position-controls [data-action=${action}]`).click();

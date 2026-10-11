@@ -1,10 +1,10 @@
-import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp } from './renderer.js';
+import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp, paintOrder } from './renderer.js';
 import { inkSeed } from './ink.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
-export const PROJECT_VERSION=11;
+export const PROJECT_VERSION=13;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
@@ -15,7 +15,17 @@ function speechColors(input) {
   return {textColor,textOutlineColor};
 }
 
+function normalizedLayoutOrder(input, version = PROJECT_VERSION) {
+  if(input?.layoutOrder===undefined)return {};
+  if(version<13||!Number.isSafeInteger(input.layoutOrder)||input.layoutOrder<0)throw new Error('重なり順が不正');
+  return {layoutOrder:input.layoutOrder};
+}
+
 export function normalizeLayer(input, version = PROJECT_VERSION) {
+  return {...normalizeTextLayer(input,version),...normalizedLayoutOrder(input,version)};
+}
+
+function normalizeTextLayer(input, version) {
   if(input?.kind==='caption'){
     input={textOffsetX:0,textOffsetY:0,...input,...normalizeBrush(input),textOutlineWidth:input.textOutlineWidth===undefined?0:input.textOutlineWidth,textOutlineColor:input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor,shape:input.shape??'rect',shapeSeed:input.shapeSeed??0,distortion:input.distortion??55};
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
@@ -85,7 +95,68 @@ export function normalizeLayer(input, version = PROJECT_VERSION) {
   };
 }
 
-export const hasEdits = page => page.layers.length > 0 || !!page.imageEdit;
+export const hasEdits = page => page.layers.length > 0 || !!page.imageEdit || (page.maskEffects?.length ?? 0) > 0;
+
+export const MASK_EFFECT_TYPES = Object.freeze(['pixelate', 'blur', 'fill-black', 'fill-white']);
+
+export function defaultMaskEffect(asset, { id = crypto.randomUUID(), effect = 'pixelate', createdOrder = 0, name } = {}) {
+  if (!asset?.id || !asset.bbox) throw new Error('マスク素材が不正');
+  return {
+    id, kind: 'mask-effect', assetId: asset.id, name: name ?? `マスク加工 ${createdOrder + 1}`,
+    createdOrder, visible: true, effect, blockSize: 20, blurRadius: 12, marginPx: 0,
+    x: asset.bbox.x, y: asset.bbox.y, w: asset.bbox.width, h: asset.bbox.height,
+  };
+}
+
+export function normalizeMaskEffect(input, imageWidth, imageHeight, assetIds, version = PROJECT_VERSION) {
+  if (!input || typeof input !== 'object') throw new Error('マスク加工設定が不正');
+  const id = input.id, assetId = input.assetId;
+  if (typeof id !== 'string' || !id || id.length > 200 || ['__proto__','constructor','prototype'].includes(id)
+      || typeof assetId !== 'string' || !assetId || assetId.length > 200 || ['__proto__','constructor','prototype'].includes(assetId)) throw new Error('マスク加工IDが不正');
+  if (assetIds && !assetIds.has(assetId)) throw new Error('マスク素材の参照先が存在しない');
+  if (input.kind !== undefined && input.kind !== 'mask-effect') throw new Error('マスク加工の種類が不正');
+  const name = input.name ?? 'マスク加工';
+  if (typeof name !== 'string' || !name.trim() || name.length > 120) throw new Error('マスク加工名が不正');
+  if (!Number.isSafeInteger(input.createdOrder) || input.createdOrder < 0 || typeof input.visible !== 'boolean') throw new Error('マスク加工の順序または表示設定が不正');
+  if (!MASK_EFFECT_TYPES.includes(input.effect)) throw new Error('マスク加工方式が不正');
+  if (!Number.isSafeInteger(input.blockSize) || input.blockSize < 1 || input.blockSize > 200
+      || !Number.isSafeInteger(input.blurRadius) || input.blurRadius < 0 || input.blurRadius > 100
+      || !Number.isSafeInteger(input.marginPx) || input.marginPx < -100 || input.marginPx > 100) throw new Error('マスク加工の強度が範囲外');
+  if (![imageWidth, imageHeight].every(value => Number.isSafeInteger(value) && value > 0 && value <= 30000)) throw new Error('元画像の寸法が不正');
+  if (![input.x, input.y, input.w, input.h].every(Number.isSafeInteger) || input.x < 0 || input.y < 0 || input.w < 1 || input.h < 1
+      || input.w > imageWidth || input.h > imageHeight || input.x + input.w > imageWidth || input.y + input.h > imageHeight
+      || input.w * input.h > 100_000_000) throw new Error('マスク加工の座標・サイズが範囲外');
+  return { id, kind: 'mask-effect', assetId, name: name.trim(), createdOrder: input.createdOrder, visible: input.visible, effect: input.effect, ...normalizedLayoutOrder(input,version),
+    blockSize: input.blockSize, blurRadius: input.blurRadius, marginPx: input.marginPx, x: input.x, y: input.y, w: input.w, h: input.h };
+}
+
+export function normalizeMaskEffects(effects = [], imageWidth, imageHeight, assetIds, version = PROJECT_VERSION) {
+  if (!Array.isArray(effects)) throw new Error('マスク加工一覧が不正');
+  const ids = new Set();
+  return effects.map(effect => {
+    const normalized = normalizeMaskEffect(effect, imageWidth, imageHeight, assetIds,version);
+    if (ids.has(normalized.id)) throw new Error('マスク加工IDが重複している');
+    ids.add(normalized.id);
+    return normalized;
+  });
+}
+
+function referencedMaskAssets(page) {
+  const ids = new Set((page.maskEffects ?? []).map(effect => effect.assetId));
+  for (const snapshot of [...(page.undo ?? []), ...(page.redo ?? [])]) {
+    try { for (const effect of JSON.parse(snapshot).maskEffects ?? []) ids.add(effect.assetId); } catch { /* ignore invalid legacy snapshots */ }
+  }
+  return ids;
+}
+
+export function pruneMaskAssets(page) {
+  if (!page.maskAssets || typeof page.maskAssets !== 'object') return [];
+  const referenced = referencedMaskAssets(page), removed = [];
+  for (const id of Object.keys(page.maskAssets)) if (!referenced.has(id)) {
+    removed.push(page.maskAssets[id]); delete page.maskAssets[id];
+  }
+  return removed;
+}
 
 // Resolve legacy kind constraints once, before dropping the obsolete sfxOrder field.
 export function normalizeLayers(layers, version = PROJECT_VERSION) {
@@ -117,6 +188,13 @@ export function reorderLayers(layers, ids, action) {
   return ordered;
 }
 
+export function reorderPageObjects(page, ids, action) {
+  const before=paintOrder(page.layers,page.maskEffects??[]),ordered=reorderLayers(before,ids,action);
+  if(ordered.every((object,index)=>object===before[index]))return null;
+  const ranked=ordered.map((object,layoutOrder)=>({...object,layoutOrder}));
+  return {layers:ranked.filter(object=>object.kind!=='mask-effect'),maskEffects:ranked.filter(object=>object.kind==='mask-effect')};
+}
+
 export function selectedLayers(page) {
   const ids = new Set(page.selectedIds ?? [page.selectedId]);
   return page.layers.filter(layer => ids.has(layer.id));
@@ -126,22 +204,31 @@ export function setSelection(page, ids, primary = ids[0]) {
   const valid = new Set(page.layers.map(layer => layer.id));
   page.selectedIds = [...new Set(ids)].filter(id => valid.has(id));
   page.selectedId = page.selectedIds.includes(primary) ? primary : page.selectedIds[0] ?? null;
+  page.selectedMaskId = null;
 }
 
 export function syncSelection(page) {
+  const maskId = page.selectedMaskId;
+  if (maskId && page.maskEffects?.some(effect => effect.id === maskId)) {
+    setSelection(page, []);
+    page.selectedMaskId = maskId;
+    return;
+  }
   const ids = page.selectedId && page.selectedIds?.includes(page.selectedId) ? page.selectedIds : [page.selectedId];
   setSelection(page, ids, page.selectedId);
 }
 
 function historyState(page) {
   return JSON.stringify({ layers: page.layers, done: page.done, imageEdit: page.imageEdit ?? null,
-    selectedId: page.selectedId, selectedIds: page.selectedIds ?? [page.selectedId] });
+    selectedId: page.selectedId, selectedIds: page.selectedIds ?? [page.selectedId],
+    maskEffects: page.maskEffects ?? [], selectedMaskId: page.selectedMaskId ?? null });
 }
 
 export function checkpoint(page) {
   page.undo.push(historyState(page));
   if (page.undo.length > 100) page.undo.shift();
   page.redo = []; page.done = false;page.edited=true;
+  pruneMaskAssets(page);
 }
 
 export function restore(page, direction) {
@@ -150,8 +237,12 @@ export function restore(page, direction) {
   if (!from.length) return false;
   to.push(historyState(page));
   const state = JSON.parse(from.pop());
-  page.layers = state.layers; page.done = state.done; page.imageEdit = state.imageEdit ?? null; page.edited = hasEdits(page);
+  page.layers = state.layers; page.done = state.done; page.imageEdit = state.imageEdit ?? null;
+  page.maskEffects = state.maskEffects ?? [];
+  page.edited = hasEdits(page);
   setSelection(page, state.selectedIds ?? [state.selectedId ?? page.layers[0]?.id], state.selectedId);
+  page.selectedMaskId = state.selectedMaskId && page.maskEffects.some(effect => effect.id === state.selectedMaskId) ? state.selectedMaskId : null;
+  pruneMaskAssets(page);
   return true;
 }
 
@@ -167,7 +258,8 @@ export function dragPlacement(start, point, anchor, constrain = false) {
 }
 
 export function duplicateLayer(layer) {
-  return { ...layer, id: crypto.randomUUID(), x: layer.x + 20, y: layer.y + 20 };
+  const {layoutOrder,...copy}=layer;
+  return { ...copy, id: crypto.randomUUID(), x: layer.x + 20, y: layer.y + 20 };
 }
 
 export function copySelection(layer, width, height) {
@@ -175,6 +267,7 @@ export function copySelection(layer, width, height) {
 }
 
 export function scaledCopy(layer, sourceWidth, sourceHeight, targetWidth, targetHeight) {
+  const {layoutOrder,...copy}=layer;layer=copy;
   const sx=targetWidth/sourceWidth,sy=targetHeight/sourceHeight,scale=Math.min(sx,sy);
   if(layer.kind==='balloon')return {...structuredClone(layer),id:crypto.randomUUID(),x:layer.x*sx,y:layer.y*sy,w:clamp(layer.w*sx,30,30000),h:clamp(layer.h*sy,30,30000),
     textOffsetX:clamp((layer.textOffsetX??0)*sx,...BALLOON_LIMITS.textOffsetX),textOffsetY:clamp((layer.textOffsetY??0)*sy,...BALLOON_LIMITS.textOffsetY),padding:clamp((layer.padding??0)*scale,...BALLOON_LIMITS.padding),

@@ -30,7 +30,8 @@ function zoomTo(value, anchor = null) {
 
 export async function openFullPreview(page, trigger) {
   const token = ++generation, size = imageSize(page.img.width, page.img.height, page.imageEdit);
-  const snapshot = { src: page.src, layers: structuredClone(page.layers), imageEdit: structuredClone(page.imageEdit) };
+  const snapshot = { src: page.src, layers: structuredClone(page.layers), imageEdit: structuredClone(page.imageEdit),
+    maskEffects: structuredClone(page.maskEffects ?? []), maskAssets: structuredClone(page.maskAssets ?? {}) };
   preview = { ...size, zoom: 100 }; opener = trigger;
   document.getElementById('fullPreviewTitle').textContent = page.name;
   document.getElementById('fullPreviewSize').textContent = `${size.width} × ${size.height} px`;
@@ -44,7 +45,8 @@ export async function openFullPreview(page, trigger) {
     await Promise.all([image.decode(), ...new Set(snapshot.layers.flatMap(fontLoadQueries))].map(job =>
       typeof job === 'string' ? document.fonts?.load(job) : job));
     if (token !== generation || !dialog.open) return;
-    draw(canvas.getContext('2d'), image, snapshot.layers, null, 1, 1, snapshot.imageEdit);
+    draw(canvas.getContext('2d'), image, snapshot.layers, null, 1, 1, snapshot.imageEdit, {width: image.width, height: image.height},
+      {maskEffects:snapshot.maskEffects,maskAssets:snapshot.maskAssets});
     canvas.hidden = false; message.textContent = ''; viewport.scrollLeft = 0; viewport.scrollTop = 0;
   } catch (error) {
     if (token === generation && dialog.open) message.textContent = `プレビューを表示できなかった: ${error.message}`;
