@@ -21,7 +21,10 @@ try {
   const row=page.locator('.image-row').first(),canvas=row.locator('canvas.preview');
   const count=()=>row.locator('.layer-card').count();
   const value=async field=>Number(await row.locator(`.position-controls [data-field=${field}]`).inputValue());
-  const select=async index=>row.locator('.layer-card').nth(index).locator('.layer-summary').click();
+  const select=async index=>{
+    const summary=row.locator('.layer-card').nth(index).locator('.layer-summary');
+    if(await summary.isVisible())await summary.click();
+  };
   const position=async()=>{
     await canvas.scrollIntoViewIfNeeded();
     const box=await canvas.boundingBox();
