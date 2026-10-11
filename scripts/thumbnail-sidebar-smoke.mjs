@@ -115,7 +115,61 @@ try {
   assert.equal(await handle.isVisible(), false);assert.equal(await width(), 390);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
   assert.deepEqual(errors, []);
-  console.log('Thumbnail/sidebar browser smoke passed: native single/multi-column drag, batch crossing, keyboard, state/order persistence, external/cancelled drops, auto-scroll, resizing and mobile layout.');
+
+  // File drops work on an empty sidebar and append without replacing existing pages.
+  const dropPage = await browser.newPage();
+  dropPage.on('pageerror', error => errors.push(error.message));
+  await dropPage.goto(`http://127.0.0.1:${port}`);
+  await dropPage.uncheck('#autosaveEnabled');
+  const dropReady = () => dropPage.waitForFunction(() => !document.querySelector('#files').disabled);
+  const dropNames = () => dropPage.locator('.thumbnail-name').allTextContents();
+  await dropPage.evaluate(async () => {
+    const canvas = document.createElement('canvas');canvas.width = 32;canvas.height = 24;
+    window.dropImage = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    window.dropFiles = (selector, names) => {
+      const transfer = new DataTransfer();
+      for (const name of names) transfer.items.add(new File([window.dropImage], name));
+      const node = document.querySelector(selector);
+      const over = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: transfer });
+      node.dispatchEvent(over);
+      const highlighted = document.querySelector('#thumbnailSidebar').classList.contains('file-drop');
+      const drop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer });
+      node.dispatchEvent(drop);
+      return { prevented: over.defaultPrevented && drop.defaultPrevented, highlighted, effect: transfer.dropEffect };
+    };
+  });
+  const firstDrop = await dropPage.evaluate(() => window.dropFiles('#thumbnailList', ['10.png', '2.png', 'notes.txt']));
+  assert.equal(firstDrop.prevented, true);assert.equal(firstDrop.highlighted, true);
+  await dropReady();assert.deepEqual(await dropNames(), ['2.png', '10.png']);
+  const selectedId = await dropPage.locator('.thumbnail.active').getAttribute('data-page-id');
+  assert.equal(await dropPage.locator('.file-drop').count(), 0);
+
+  await dropPage.evaluate(() => {
+    const sidebar = document.querySelector('#thumbnailSidebar');
+    const transfer = new DataTransfer();transfer.items.add(new File([window.dropImage], 'hover.png'));
+    const protectedOver = new Event('dragover', { bubbles: true, cancelable: true });
+    Object.defineProperty(protectedOver, 'dataTransfer', { value: { types: ['Files'], files: [], dropEffect: 'none' } });
+    sidebar.dispatchEvent(protectedOver);
+    if (!protectedOver.defaultPrevented || !sidebar.classList.contains('file-drop')) throw new Error('Protected file drag was not accepted');
+    sidebar.dispatchEvent(new DragEvent('dragleave', { bubbles: true, relatedTarget: document.querySelector('.thumbnail'), dataTransfer: transfer }));
+    if (!sidebar.classList.contains('file-drop')) throw new Error('Highlight cleared while moving within sidebar');
+    sidebar.dispatchEvent(new DragEvent('dragleave', { bubbles: true, relatedTarget: document.body, dataTransfer: transfer }));
+  });
+  assert.equal(await dropPage.locator('.file-drop').count(), 0);
+  const busyDrop = await dropPage.evaluate(() => {
+    window.dropFiles('.thumbnail img', ['extra.webp', 'extra.png']);
+    return window.dropFiles('#thumbnailSidebar', ['blocked.png']);
+  });
+  assert.equal(busyDrop.prevented, true);assert.equal(busyDrop.highlighted, false);assert.equal(busyDrop.effect, 'none');
+  await dropReady();assert.deepEqual(await dropNames(), ['2.png', '10.png', 'extra.png', 'extra.webp']);
+  assert.equal(await dropPage.locator('.thumbnail.active').getAttribute('data-page-id'), selectedId);
+  await dropPage.evaluate(() => window.dropFiles('.thumbnail', ['notes.txt']));
+  assert.match(await dropPage.locator('#status').textContent(), /追加できる画像がない/);
+  assert.deepEqual(await dropNames(), ['2.png', '10.png', 'extra.png', 'extra.webp']);
+  assert.equal(await dropPage.locator('.file-drop').count(), 0);
+  assert.deepEqual(errors, []);
+  await dropPage.close();
+  console.log('Thumbnail/sidebar browser smoke passed: reordering, persistence, auto-scroll, resizing, mobile layout, file drops into empty/existing lists, mixed files, protected drag data, highlight cleanup and busy rejection.');
 } catch (error) {
   if (page) { await mkdir('artifacts', { recursive: true });await page.screenshot({ path: 'artifacts/thumbnail-sidebar-failure.png', fullPage: true }).catch(() => {}); }
   throw error;

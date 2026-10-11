@@ -110,6 +110,7 @@ canvas.preview.cropping{cursor:crosshair}
 @media(max-width:520px){.ink-texture-panel .effect-grid{grid-template-columns:minmax(0,1fr)}}
 
 /* サムネイルの並べ替えとサイドメニューの幅変更 */
+.thumbnail-sidebar.file-drop{outline:2px dashed var(--lime);outline-offset:-6px;box-shadow:inset 0 0 28px #c8f07818}
 .thumbnail-hint{margin:0;font-size:10px;line-height:1.6;color:var(--muted);flex-shrink:0}
 .thumbnail{position:relative;cursor:grab;user-select:none}
 .thumbnail.dragging{opacity:.4;cursor:grabbing}

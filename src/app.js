@@ -1315,10 +1315,36 @@ $('open').onclick = () => {
   },'画像追加',2);
 };
 $('files').onclick = () => {if(!busy)$('fileInput').click();};
+function addImageFiles(files) {
+  if (busy) return;
+  const images = [...files].filter(file => /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
+  if (!images.length) { status('追加できる画像がない。PNG / JPEG / WebP / GIF / AVIFを選択してほしい。'); return; }
+  return guard(task => addFiles(images.map(file => ({file})), task), '画像追加');
+}
 for (const id of ['fileInput', 'folderInput']) $(id).onchange = event => {
-  const files = [...event.target.files].sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true })); event.target.value = '';
-  guard(task=>addFiles(files.map(file=>({file})),task),'画像追加');
+  const files = [...event.target.files]; event.target.value = '';
+  addImageFiles(files);
 };
+function isFileDrop(event) {
+  return !thumbnailDrag && [...(event.dataTransfer?.types || [])].includes('Files');
+}
+for (const type of ['dragenter', 'dragover']) thumbnailSidebar.addEventListener(type, event => {
+  if (!isFileDrop(event)) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
+  thumbnailSidebar.classList.toggle('file-drop', !busy);
+});
+thumbnailSidebar.addEventListener('dragleave', event => {
+  if (!thumbnailSidebar.contains(event.relatedTarget)) thumbnailSidebar.classList.remove('file-drop');
+});
+thumbnailSidebar.addEventListener('drop', event => {
+  thumbnailSidebar.classList.remove('file-drop');
+  if (!isFileDrop(event)) return;
+  event.preventDefault();
+  addImageFiles(event.dataTransfer.files);
+});
+thumbnailSidebar.addEventListener('dragend', () => thumbnailSidebar.classList.remove('file-drop'));
 function snapshotPages() { return pages.map(p => ({ ...p, layers: structuredClone(p.layers) })); }
 function download(blob, name) {
   const a = document.createElement('a'), url = URL.createObjectURL(blob); a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 60000);
