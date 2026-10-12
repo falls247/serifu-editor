@@ -1,3 +1,5 @@
+import { sfxVisibleIndices } from './sfx-lettering-model.js';
+import { strokeGeometry, strokePolygon } from './sfx-stroke-geometry.js';
 import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { glyphFontDescription, clearFontCache } from './fonts.js';
 import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
@@ -224,6 +226,51 @@ function paintText(ctx, l) {
   }
 }
 
+
+function paintEditedSfx(ctx,layer){
+  // Only layers explicitly upgraded to lettering use this branch.
+  // base textGlyphs remains the legacy auto-layout provider for unedited fields.
+  const base=textGlyphs(ctx,layer);
+  const indices=sfxVisibleIndices(layer.text);
+  const positions=new Map(),items=[];
+  for(let i=0;i<base.length;i++){
+    const index=indices[i],glyph=layer.lettering.glyphs.find(g=>g.index===index);
+    if(index===undefined||!glyph)continue;
+    const letter=base[i],x=letter.x+glyph.dx+(letter.shift??0)*letter.baseSize*(layer.stretchX/100),y=letter.y+glyph.dy;
+    positions.set(index,{x,y,size:letter.size});
+    items.push({index,glyph,letter,x,y,z:glyph.z});
+  }
+  const omitted=new Set();
+  for(const stroke of layer.lettering.strokes)if(stroke.mode==='continuous')for(let k=0;k<stroke.runLength;k++)omitted.add(stroke.runStart+k);
+  const strokes=layer.lettering.strokes.filter(s=>s.mode==='continuous').map(s=>({stroke:s,z:layer.lettering.glyphs.find(g=>g.index===s.runStart)?.z??s.runStart}));
+  const ordered=[
+    ...items.filter(g=>!omitted.has(g.index)).map(item=>({...item,type:'glyph'})),
+    ...strokes.map(s=>({...s,type:'stroke',index:s.stroke.runStart}))
+  ].sort((a,b)=>a.z-b.z||a.index-b.index);
+  for(const item of ordered){
+    if(item.type==='stroke'){
+      const s=item.stroke,polygon=strokePolygon(strokeGeometry(s,positions,{vertical:layer.vertical,size:layer.size}));
+      if(polygon.length<3)continue;
+      const style=s.lookOverride||{},outline=style.outlineWidth??layer.outline;
+      ctx.save();ctx.beginPath();ctx.moveTo(polygon[0].x,polygon[0].y);
+      for(const point of polygon.slice(1))ctx.lineTo(point.x,point.y);
+      ctx.closePath();ctx.lineJoin='round';
+      if(outline>0){ctx.strokeStyle=style.outlineColor??layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.stroke();}
+      ctx.fillStyle=style.fill??layer.color;ctx.fill();ctx.restore();continue;
+    }
+    const {glyph:g,letter}=item,{char,size,angle}=letter;
+    const styled={...layer,size,font:g.overrides.font??layer.font,
+      color:g.overrides.fill??layer.color,textOutlineColor:g.overrides.outlineColor??layer.textOutlineColor,
+      outline:g.overrides.outlineWidth??layer.outline,textureSeed:g.inkVariantSeed};
+    const img=warpedGlyph(ctx,styled,char,angle,0);
+    ctx.save();ctx.translate(item.x,item.y);
+    ctx.rotate(g.rotation*Math.PI/180);
+    ctx.transform(g.scaleX,0,g.shear,g.scaleY,0,0);
+    ctx.drawImage(img.surface,-img.drawWidth/2,-img.drawHeight/2,img.drawWidth,img.drawHeight);
+    ctx.restore();
+  }
+}
+
 function hasMaskWork(options) {
   return (options?.maskEffects?.some(effect => effect.visible !== false) ?? false)
     || (options?.draft?.candidates?.some(candidate => candidate?.selected && candidate.mask) ?? false);
@@ -279,7 +326,7 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
       if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,l);ctx.restore();}
     }
     else if(l.kind==='caption')paintCaption(ctx,l);
-    else {ornament(ctx, l); paintText(ctx, l);}
+    else {ornament(ctx, l); if(l.kind==='sfx'&&l.lettering?.enabled)paintEditedSfx(ctx,l);else paintText(ctx, l);}
     ctx.restore();
   }
   const ids = Array.isArray(selected) ? selected : [selected];
