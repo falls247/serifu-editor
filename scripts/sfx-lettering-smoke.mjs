@@ -43,6 +43,10 @@ try{
   await card.locator('[data-action=sfx-glyph-select]').first().click();
   await card.locator('.sfx-stroke-panel summary').click();
   await card.locator('[data-glyph-stroke-shape]').selectOption('s');
+  await card.locator('[data-glyph-stroke-cap=start]').selectOption('taper');
+  await card.locator('[data-glyph-stroke-point]').selectOption('1');
+  await card.locator('[data-glyph-stroke-point-axis=y]').fill('0.23');
+  await card.locator('[data-glyph-stroke-point-axis=y]').press('Tab');
   await card.locator('[data-glyph-stroke-width=start]').fill('32');
   await card.locator('[data-glyph-stroke-width=start]').press('Tab');
   await page.selectOption('#projectFormat','json');
@@ -50,7 +54,9 @@ try{
   const project=JSON.parse(await readFile(await download.path(),'utf8'));
   const layer=project.pages[0].layers.find(l=>l.kind==='sfx');
   assert.equal(project.version,14);assert.equal(layer.text,'ザーーーーッ');
-  assert.equal(layer.lettering.strokes[0].shape,'s');
+  assert.equal(layer.lettering.strokes[0].shape,'custom');
+  assert.equal(layer.lettering.strokes[0].start.cap,'taper');
+  assert.equal(layer.lettering.strokes[0].path.points[1].y,0.23);
   assert.equal(layer.lettering.strokes[0].widths[0].w,32);
   assert.deepEqual(errors,[]);
   console.log('SFX glyph + stroke editor browser smoke PASS');

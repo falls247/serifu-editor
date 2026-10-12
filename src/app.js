@@ -905,7 +905,12 @@ function sfxLetteringPanel(p,l){
   }
   if(l.lettering.strokes.length){
     const fieldset=element('details','sfx-stroke-panel');fieldset.append(element('summary','','連続「ー」の調整'));
-    const run=l.lettering.strokes[0],modeLabel=element('label','','線の表示'),select=element('select');
+    const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];
+    mode.strokeRun=run.runStart;
+    const runLabel=element('label','','対象の線'),runSelect=element('select');runSelect.dataset.glyphStrokeRun='true';
+    for(const item of l.lettering.strokes){const option=element('option','',String(item.runStart+1)+'文字目／'+item.runLength+'連続');option.value=String(item.runStart);runSelect.append(option);}
+    runSelect.value=String(run.runStart);runLabel.append(runSelect);fieldset.append(runLabel);
+    const modeLabel=element('label','','線の表示'),select=element('select');
     select.dataset.glyphStrokeMode=String(run.runStart);
     for(const [name,title] of [['continuous','連続線'],['font','フォント文字']]){const option=element('option','',title);option.value=name;select.append(option);}
     select.value=run.mode;modeLabel.append(select);fieldset.append(modeLabel);
@@ -915,7 +920,29 @@ function sfxLetteringPanel(p,l){
     }
     const label=element('label','','曲線'),shape=element('select');shape.dataset.glyphStrokeShape='true';
     for(const [name,title] of [['straight','直線'],['arc','円弧'],['s','S字'],['wave','波形']]){const option=element('option','',title);option.value=name;shape.append(option);}
-    shape.value=run.shape;label.append(shape);fieldset.append(label);panel.append(fieldset);
+    shape.value=run.shape;label.append(shape);fieldset.append(label);
+    for(const side of ['start','end']){
+      const sideName=side==='start'?'始点':'終点';
+      const capLabel=element('label','',sideName+'の先端形状'),capSelect=element('select');
+      capSelect.dataset.glyphStrokeCap=side;
+      for(const [value,title] of [['round','丸'],['flat','平'],['taper','先細り'],['brush','筆先']]){
+        const opt=element('option','',title);opt.value=value;capSelect.append(opt);
+      }
+      capSelect.value=run[side].cap;capLabel.append(capSelect);fieldset.append(capLabel);
+      const detached=element('label','tail-toggle',sideName+'を文字から切り離す'),check=element('input');
+      check.type='checkbox';check.dataset.glyphStrokeDetach=side;check.checked=run[side].detached;detached.prepend(check);fieldset.append(detached);
+    }
+    const pointLabel=element('label','','曲線の制御点'),pointSelect=element('select');pointSelect.dataset.glyphStrokePoint='true';
+    for(let i=0;i<run.path.points.length;i++){const opt=element('option','',String(i+1)+'番');opt.value=String(i);pointSelect.append(opt);}
+    mode.strokePoint=Math.min(mode.strokePoint??1,run.path.points.length-1);pointSelect.value=String(mode.strokePoint);
+    pointLabel.append(pointSelect);fieldset.append(pointLabel);
+    const point=run.path.points[mode.strokePoint];
+    for(const axis of ['x','y']){
+      const label=element('label','',axis==='x'?'制御点の進行方向位置':'制御点の横方向位置'),input=element('input');
+      input.type='number';input.min='-10';input.max='10';input.step='0.01';
+      input.dataset.glyphStrokePointAxis=axis;input.value=String(point[axis]);label.append(input);fieldset.append(label);
+    }
+    panel.append(fieldset);
   }
   return panel;
 }
@@ -1261,7 +1288,7 @@ $('deck').addEventListener('input', event => {
 });
 $('deck').addEventListener('change',event=>{
   const input=event.target;
-  if(input.matches('[data-glyph-inherit],[data-glyph-field],[data-glyph-stroke-mode],[data-glyph-stroke-width],[data-glyph-stroke-shape]')){
+  if(input.matches('[data-glyph-inherit],[data-glyph-field],[data-glyph-stroke-mode],[data-glyph-stroke-width],[data-glyph-stroke-shape],[data-glyph-stroke-run],[data-glyph-stroke-cap],[data-glyph-stroke-detach],[data-glyph-stroke-point],[data-glyph-stroke-point-axis]')){
     const p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
     const mode=activeGlyphEdit(p,l);if(!mode)return;
     if(input.matches('[data-glyph-inherit]')){mode.inherit=input.value;return;}
@@ -1273,9 +1300,20 @@ $('deck').addEventListener('change',event=>{
         g.manual[field==='dx'||field==='dy'?'position':field==='z'?'z':'transform']=true;
       });return;
     }
-    const run=l.lettering.strokes[0];if(!run)return;
+    if(input.matches('[data-glyph-stroke-run]')){
+      mode.strokeRun=Number(input.value);mode.strokePoint=1;renderCards(p);return;
+    }
+    const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];if(!run)return;
+    if(input.matches('[data-glyph-stroke-point]')){mode.strokePoint=Number(input.value);renderCards(p);return;}
+    if(input.matches('[data-glyph-stroke-point-axis]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
     if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500))return;
     edit(p,()=>{
+      if(input.matches('[data-glyph-stroke-cap]'))run[input.dataset.glyphStrokeCap].cap=input.value;
+      if(input.matches('[data-glyph-stroke-detach]'))run[input.dataset.glyphStrokeDetach].detached=input.checked;
+      if(input.matches('[data-glyph-stroke-point-axis]')){
+        run.path.points[mode.strokePoint][input.dataset.glyphStrokePointAxis]=Number(input.value);
+        run.shape='custom';
+      }
       if(input.matches('[data-glyph-stroke-mode]'))run.mode=input.value;
       if(input.matches('[data-glyph-stroke-shape]')){run.shape=input.value;run.path.points=strokeShapePoints(input.value);}
       if(input.matches('[data-glyph-stroke-width]'))run.widths[input.dataset.glyphStrokeWidth==='start'?0:run.widths.length-1].w=Number(input.value);
