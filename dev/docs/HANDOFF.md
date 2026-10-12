@@ -257,4 +257,4 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 
 ## SFXグリフ編集の引継ぎ（部分実装）
 
-対象ブランチ: docs/sow-20261013-sfx-glyph-editor。src/sfx-lettering-model.js（P1）、src/sfx-stroke-geometry.js（P3の原型）、src/renderer.js（新SFX描画分岐）、src/app.js（編集開始、グリフ/線設定、ドラッグ、Undo/Redo）の順に確認。全113要件の完了ではない。P3〜P8の残作業一覧はADR 0027。既存IndexedDB v2のデータ移行は検証なしで進めない。
+対象ブランチ: docs/sow-20261013-sfx-glyph-editor。src/sfx-lettering-model.js（P1）、src/sfx-stroke-geometry.js（P3の原型）、src/renderer.js（新SFX描画分岐）、src/app.js（編集開始、グリフ/線設定、ドラッグ、Undo/Redo）の順に確認。全113要件の完了ではない。各runの数値制御点編集とv14 projectId/pageId保存まで追加。P3〜P8の残作業一覧はADR 0027。既存IndexedDB v2のデータ移行は検証なしで進めない。
