@@ -1,5 +1,6 @@
 import {checkAbort,yieldToBrowser} from './bulk-task.js';
 import {PROJECT_VERSION,normalizeMaskEffects} from './model.js';
+import {projectIdentity,pageIdentity,validProjectId} from './project-identity.js';
 import {assetFromEncoded,maskAssetMetadata,maskBytesToBase64,maxMaskPayloadBytes,verifyMaskAsset} from './mask-codec.js';
 const MAGIC=new Uint8Array([0x53,0x45,0x52,0x49,0x46,0x55,0,1]);
 export const MANIFEST_LIMIT=16*1024**2;
@@ -96,27 +97,28 @@ function createDecodedAssets(entries, imageWidth, imageHeight) {
   })).then(Object.fromEntries);
 }
 
-export async function* projectParts(pages,preferences,{format='serifu',task,sourceFolderName}={}){
+export async function* projectParts(pages,preferences,{format='serifu',task,sourceFolderName,projectId}={}){
+  if(projectId!==undefined&&!validProjectId(projectId))throw new Error('projectIdが不正');
   const signal=task?.signal;checkAbort(signal);
   task?.stage(format==='json'?'JSON変換':'原画像収録',pages.length);
   const maskPlans=pages.map(pageMaskPlan);let maskBytes={decoded:0,compressed:0};
   for(const plan of maskPlans)maskBytes=addAssetsMaskBytes(maskBytes,plan.assets);
   if(format==='json'){
     const folder=typeof sourceFolderName==='string'&&sourceFolderName?`,"sourceFolderName":${await projectJSON('stringify',sourceFolderName,{signal})}`:'';
-    yield `{"version":${PROJECT_VERSION},"preferences":${await projectJSON('stringify',preferences,{signal})}${folder},"pages":[`;
+    yield `{"version":${PROJECT_VERSION}${projectId?`,"projectId":"${projectId}"`:''},"preferences":${await projectJSON('stringify',preferences,{signal})}${folder},"pages":[`;
     for(let i=0;i<pages.length;i++){checkAbort(signal);const p=pages[i],src=p.src?.startsWith('data:')?p.src:await blobDataURL(await originalBlob(p),signal),mask=await verifyMaskPlan(maskPlans[i]);
-      const record={name:p.name,src,imageWidth:p.img.width,imageHeight:p.img.height,layers:p.layers,done:p.done===true,edited:p.edited===true,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects:mask.effects,maskAssets:await jsonMaskAssets(mask.assets)};
+      const record={...(validProjectId(p.id)?{id:p.id}:{}),name:p.name,src,imageWidth:p.img.width,imageHeight:p.img.height,layers:p.layers,done:p.done===true,edited:p.edited===true,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects:mask.effects,maskAssets:await jsonMaskAssets(mask.assets)};
       yield (i?',':'')+await projectJSON('stringify',record,{signal});task?.result(p.name);await yieldToBrowser();}
     yield ']}';return;
   }
   const assets=[],blobs=[],records=[],maskAssets=[],maskBlobs=[];
   for(let pageIndex=0;pageIndex<pages.length;pageIndex++){const p=pages[pageIndex];checkAbort(signal);const blob=await originalBlob(p);if(!mimePattern.test(blob.type))throw new Error(`未対応の原画像形式: ${p.name}`);
     const mask=await verifyMaskPlan(maskPlans[pageIndex]);
-    records.push({name:p.name,assetIndex:assets.length,layers:p.layers,done:p.done===true,edited:p.edited===true,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects:mask.effects});
+    records.push({...(validProjectId(p.id)?{id:p.id}:{}),name:p.name,assetIndex:assets.length,layers:p.layers,done:p.done===true,edited:p.edited===true,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects:mask.effects});
     assets.push({size:blob.size,mimeType:blob.type,width:p.img.width,height:p.img.height});blobs.push(blob);
     for(const [id,asset] of Object.entries(mask.assets)){maskAssets.push({pageIndex,...maskAssetMetadata(asset)});maskBlobs.push(asset.data);}
     if(blobs.length%20===0)await yieldToBrowser();}
-  const manifestData={containerVersion:2,projectVersion:PROJECT_VERSION,preferences,pages:records,assets,maskAssets};
+  const manifestData={containerVersion:2,projectVersion:PROJECT_VERSION,...(projectId?{projectId}:{}),preferences,pages:records,assets,maskAssets};
   if(typeof sourceFolderName==='string'&&sourceFolderName)manifestData.sourceFolderName=sourceFolderName;
   const manifest=new TextEncoder().encode(await projectJSON('stringify',manifestData,{signal}));
   if(manifest.byteLength>MANIFEST_LIMIT)throw new Error('編集メタデータが16MiBを超える');
@@ -128,7 +130,9 @@ export async function projectBlob(pages,preferences,options){const parts=[];for 
 function validatePages(data,container=false){
   const version=container?data.projectVersion:data.version;
   if(!Number.isInteger(version)||version<(container?6:1)||version>PROJECT_VERSION||!Array.isArray(data.pages)||!data.pages.length)throw new Error('未対応または空の編集データ');
+  projectIdentity(data,version);
   for(const p of data.pages){if(!p||typeof p.name!=='string'||!Array.isArray(p.layers))throw new Error('画像データが不正');
+    pageIdentity(p,version);
     if(!container&&(typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp|gif|avif);base64,[A-Za-z0-9+/\s]*={0,2}$/.test(p.src)))throw new Error('画像データが不正');
     if(version<12&&(Object.hasOwn(p,'maskEffects')||Object.hasOwn(p,'maskAssets')))throw new Error('旧版データに未対応のマスク情報がある');
     if(version<13&&[...p.layers,...(Array.isArray(p.maskEffects)?p.maskEffects:[])].some(object=>object&&Object.hasOwn(object,'layoutOrder')))throw new Error('旧版データに未対応の重なり順がある');
@@ -143,8 +147,8 @@ export async function readProject(file,{signal}={}){
   if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);const pages=[];
     if(data.version>=12)validateJSONMaskBudget(data.pages);
     for(const p of data.pages){const decodedAssets=data.version>=12?await createDecodedAssets(p.maskAssets??{},p.imageWidth,p.imageHeight):{};const maskEffects=data.version>=12?normalizeMaskEffects(p.maskEffects??[],p.imageWidth,p.imageHeight,new Set(Object.keys(decodedAssets)),data.version):[];
-      pages.push({name:p.name,src:p.src,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,decodedAssets),...(data.version>=12?{expectedSize:{width:p.imageWidth,height:p.imageHeight}}:{})});}
-    return {version:data.version,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};}
+      pages.push({...(p.id?{id:p.id}:{}),name:p.name,src:p.src,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,decodedAssets),...(data.version>=12?{expectedSize:{width:p.imageWidth,height:p.imageHeight}}:{})});}
+    return {version:data.version,...(data.projectId?{projectId:data.projectId}:{}),preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};}
   if(head.length!==12||!MAGIC.every((b,i)=>head[i]===b))throw new Error('未対応の高速編集データ');
   const length=new DataView(head.buffer).getUint32(8,true);if(!length||length>MANIFEST_LIMIT||12+length>file.size)throw new Error('manifest長が不正');
   const data=await projectJSON('parse',file.slice(12,12+length),{signal});
@@ -174,9 +178,9 @@ export async function readProject(file,{signal}={}){
       maskAssets[record.id]=await assetFromEncoded({...record,data:bytes});
     }
     const maskEffects=data.projectVersion>=12?normalizeMaskEffects(p.maskEffects??[],imageAsset.width,imageAsset.height,new Set(Object.keys(maskAssets)),data.projectVersion):[];
-    pages.push({name:p.name,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,maskAssets),blob:blobs[p.assetIndex],expectedSize:imageAsset});
+    pages.push({...(p.id?{id:p.id}:{}),name:p.name,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,maskAssets),blob:blobs[p.assetIndex],expectedSize:imageAsset});
   }
-  return {version:data.projectVersion,preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};
+  return {version:data.projectVersion,...(data.projectId?{projectId:data.projectId}:{}),preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};
 }
 export async function writeParts(directory,name,parts,signal,onWrite=()=>{},onClosing=()=>{}){
   checkAbort(signal);const file=await directory.getFileHandle(name,{create:true});checkAbort(signal);const writer=await file.createWritable();let closed=false;

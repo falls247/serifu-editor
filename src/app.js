@@ -50,6 +50,7 @@ function requestPageFonts(p){
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
+let projectId=crypto.randomUUID();
 const previewDeferredDraws = new Set(), previewDeferredThumbnails = new Set();
 let previewResumeScheduled = false;
 function resumePreviewBackground() {
@@ -1843,7 +1844,7 @@ async function saveImages(task,editedOnly=false,picked) {
   const folder=`${baseName}${editedOnly?'_edited':''}`;task.update({currentName:`${parent.name||'保存先'}/${folder}`},true);const directory=await awaitWithAbort(parent.getDirectoryHandle(folder,{create:true}),task.signal);let completed=0,projectSaved=false;task.metrics.pngWritten=0;task.metrics.projectSaved=false;
   try{await prepareExportFonts(snapshot,task);task.stage('PNG生成と書込み',snapshot.length);
     for await(const result of boundedResults(snapshot,p=>imageBlob(p,task),queueOptions(task))){const p=snapshot[result.index],name=pageExportName(p.name,p.pageIndex,allPages.length);task.update({currentName:name});if(result.error)throw new Error(`${p.name}: ${result.error.message}`);checkAbort(task.signal);const started=performance.now();await writeParts(directory,name,[result.value],task.signal);task.metrics.writeMs=(task.metrics.writeMs||0)+performance.now()-started;completed++;task.metrics.pngWritten=completed;task.result(name,true,result.value.size);}
-    await writeParts(directory,projectName,projectParts(snapshot,prefs,{format,task,sourceFolderName:folderName}),task.signal,bytes=>task.update({writtenBytes:task.data.writtenBytes+bytes}),()=>task.stage('編集データの書込み確定',1));projectSaved=true;task.result(projectName);task.metrics.pngWritten=completed;task.metrics.projectSaved=true;
+    await writeParts(directory,projectName,projectParts(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId}),task.signal,bytes=>task.update({writtenBytes:task.data.writtenBytes+bytes}),()=>task.stage('編集データの書込み確定',1));projectSaved=true;task.result(projectName);task.metrics.pngWritten=completed;task.metrics.projectSaved=true;
     if((!editedOnly||snapshot.length===allPages.length)&&captured===revision)changed=false;
     status(`${snapshot.length} 枚と編集データを「${parent.name?parent.name+'/':''}${folder}」へ保存した`);
   }catch(error){const failedStage=task.data.stage;task.metrics.errorFile=failedStage==='書体準備'?'':failedStage==='PNG生成と書込み'?task.data.currentName:projectName;task.update({currentName:`${folder} · PNG ${completed}枚 · 編集データ${projectSaved?'あり':'なし'}`},true);if(error.name==='AbortError')throw error;if(failedStage==='書体準備')task.result('書体準備',false);else{if(failedStage!=='PNG生成と書込み')task.stage('編集データの書込み確定',1);task.result(task.metrics.errorFile,false);}throw new Error(`${folder} 内に ${completed} 枚保存済み。${error.message}`);}
@@ -1854,7 +1855,7 @@ async function saveImagesZip(task,editedOnly){
   const archive=new ZipArchive(),name=`${baseName}${editedOnly?'_edited':''}.zip`;task.metrics.pngPacked=0;
   await prepareExportFonts(snapshot,task);task.stage('PNG生成とZIP準備',snapshot.length);
   for await(const result of boundedResults(snapshot,p=>imageBlob(p,task),queueOptions(task))){const p=snapshot[result.index],filename=pageExportName(p.name,p.pageIndex,allPages.length);task.update({currentName:filename});if(result.error)throw new Error(`${p.name}: ${result.error.message}`);await archive.add(filename,result.value,task.signal);task.metrics.pngPacked++;task.result(filename);}
-  const project=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName});task.stage('ZIP作成',1);await archive.add(projectName,project,task.signal);const blob=archive.blob(task.signal);task.result(name);task.stage('ダウンロード準備',1);checkAbort(task.signal);download(blob,name);task.metrics.archiveEntries=archive.entries.length;task.result(name);status(`${snapshot.length} 枚と編集データをまとめた「${name}」のダウンロードを開始した。展開して利用できる。`);
+  const project=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId});task.stage('ZIP作成',1);await archive.add(projectName,project,task.signal);const blob=archive.blob(task.signal);task.result(name);task.stage('ダウンロード準備',1);checkAbort(task.signal);download(blob,name);task.metrics.archiveEntries=archive.entries.length;task.result(name);status(`${snapshot.length} 枚と編集データをまとめた「${name}」のダウンロードを開始した。展開して利用できる。`);
 }
 function startSave(editedOnly=false){
   if(busy)return;let picked;
@@ -1870,7 +1871,7 @@ $('textSave').onclick = () => guard(async task => {
   download(new Blob(['\ufeff',text],{type:'text/plain;charset=utf-8'}),`serifu-${target}.txt`);task.result(`serifu-${target}.txt`);status(`${$('textTarget').selectedOptions[0].textContent}のテキストのダウンロードを開始した`);
 },'本文テキスト出力',3);
 $('projectSave').onclick = () => guard(async task => {
-  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs=structuredClone(preferences),format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
+  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs=structuredClone(preferences),format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
 },'編集データ保存',3);
 async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
   task.stage('検証',records.length);const validated=[];
@@ -2040,7 +2041,7 @@ async function temporarySave(manual=false) {
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
-  const meta={version:PROJECT_VERSION,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
+  const meta={version:PROJECT_VERSION,projectId,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
   const masks=snapshot.flatMap(page=>[...new Set(page.maskEffects.map(effect=>effect.assetId))].map(id=>{
     const asset=page.maskAssets?.[id];if(!asset)throw new Error(`「${page.name}」のマスク素材がない`);
     return {pageId:page.id,id,asset};
@@ -2076,6 +2077,7 @@ $('restoreDraft').onclick=()=>guard(async task=>{
   task.stage('画像取得',meta.pages.length);const ids=meta.pages.map(p=>p.id),[images,storedMasks]=await Promise.all([getDraftImages(ids),getDraftMasks(ids)]);checkAbort(task.signal);
   const masksByPage=new Map(meta.pages.map(p=>[p.id,{}]));for(const {pageId,id,asset} of storedMasks)masksByPage.get(pageId)[id]=asset;
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,maskAssets:masksByPage.get(p.id),blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
+  projectId=typeof meta.projectId==='string'?meta.projectId:crypto.randomUUID();
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
   sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
   batchStart=0;const presetNotice=mergePresets(meta.preferences);task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
