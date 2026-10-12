@@ -16,6 +16,7 @@
     "test:speech-browser": "node scripts/speech-style-smoke.mjs",
     "test:lettering-browser": "node scripts/lettering-brush-smoke.mjs",
     "test:sfx-controls-browser": "node scripts/sfx-controls-smoke.mjs",
+    "test:sfx-lettering-browser": "node scripts/sfx-lettering-smoke.mjs",
     "test:preview-browser": "node scripts/preview-layout-smoke.mjs",
     "test:text-position-browser": "node scripts/text-position-smoke.mjs",
     "test:drag-browser": "node scripts/drag-duplicate-smoke.mjs",
