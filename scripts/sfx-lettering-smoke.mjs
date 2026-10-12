@@ -41,6 +41,7 @@ try{
   assert.equal(await card.locator('[data-glyph-index]').count(),3);
   await card.locator('textarea[data-field=text]').fill('ザーーーーッ');
   await card.locator('[data-action=sfx-glyph-select]').first().click();
+  await card.locator('.sfx-stroke-panel summary').click();
   await card.locator('[data-glyph-stroke-shape]').selectOption('s');
   await card.locator('[data-glyph-stroke-width=start]').fill('32');
   await card.locator('[data-glyph-stroke-width=start]').press('Tab');
