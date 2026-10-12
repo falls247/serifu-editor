@@ -1,4 +1,6 @@
 import { graphemes } from './typography.js';
+import { sfxVisibleIndices } from './sfx-lettering-model.js';
+import { textGlyphs } from './renderer.js';
 import { startLettering, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
@@ -300,6 +302,19 @@ function drawPage(p) {
     maskEffects:p.maskEffects,maskAssets:p.maskAssets,draft:p.sam3Draft,
     maskSelection:p.id===activeId?p.maskEffects.find(effect=>effect.id===p.selectedMaskId)??null:null,
   });
+  const current=selected(p),glyphMode=activeGlyphEdit(p,current);
+  if(glyphMode&&!p.cropDraft){
+    const glyphs=textGlyphs(ctx,current),visible=sfxVisibleIndices(current.text);
+    const index=visible.indexOf(glyphMode.selected),base=glyphs[index],glyph=current.lettering.glyphs.find(g=>g.index===glyphMode.selected);
+    if(base&&glyph){
+      ctx.save();ctx.setTransform(scale,0,0,scale,0,0);
+      if(imageEdit)ctx.transform(...imageMatrix(p.img.width,p.img.height,imageEdit));
+      ctx.translate(current.x,current.y);ctx.rotate(current.rotation*Math.PI/180);
+      ctx.strokeStyle='#00bfff';ctx.lineWidth=2/Math.max(.1,displayScale);ctx.setLineDash([5/Math.max(.1,displayScale),3/Math.max(.1,displayScale)]);
+      const x=base.x+glyph.dx,y=base.y+glyph.dy,r=base.size*.6;
+      ctx.strokeRect(x-r,y-r,2*r,2*r);ctx.restore();
+    }
+  }
   refreshMagnifier(p);
   if(p.cropDraft){
     const r=p.cropDraft;ctx.save();ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0009';
@@ -1191,6 +1206,17 @@ $('deck').addEventListener('focusout', event => {
   editing.delete(event.target);
   const p = pageFrom(event.target);
   if(event.target.matches('[data-mask-field]'))return;
+  if(p&&event.target.matches('[data-field="text"]')){
+    const input=event.target,layer=p.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
+    if(layer?.kind==='sfx'&&layer.lettering?.enabled){
+      if(layer.text!==input.value){
+        try{const next=replaceLetteringText(layer,input.value,activeGlyphEdit(p,layer)?.inherit??'position');
+          edit(p,()=>Object.assign(layer,next));
+        }catch(error){status('効果音テキストを確定できない: '+error.message);input.value=layer.text;}
+      }
+      return;
+    }
+  }
   if (p) { persistControlValue(p,event.target); queueMicrotask(() => updateControls(p)); }
 });
 $('deck').addEventListener('input', event => {
@@ -1210,6 +1236,15 @@ $('deck').addEventListener('input', event => {
   if(field==='text')fitTextInput(input);
   const p = pageFrom(input), id = input.closest('.layer-card')?.dataset.layerId || p.selectedId;
   const l = p.layers.find(item => item.id === id); if (!l) return;
+  if(field==='text'&&l.kind==='sfx'&&l.lettering?.enabled){
+    try {
+      const next=replaceLetteringText(l,input.value,activeGlyphEdit(p,l)?.inherit??'position');
+      const originalText=l.text,originalLettering=l.lettering;
+      try{l.text=next.text;l.lettering=next.lettering;drawPage(p);}
+      finally{l.text=originalText;l.lettering=originalLettering;}
+    }catch(error){status('効果音テキストのプレビューに失敗: '+error.message);}
+    return; // IME/未確定テキストは正本を更新しない。
+  }
   let value = input.value;
   const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [0, 80], shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS, ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
@@ -1444,6 +1479,24 @@ function connectCanvas(p) {
       const start=previewCoords(event,p),mode=cropPointerMode(p,start);
       p.cropPointer={id:event.pointerId,start,mode,before:{...p.cropDraft}};p.canvas.style.cursor=CROP_CURSORS[mode];p.canvas.setPointerCapture(event.pointerId);return;
     }
+    const letterLayer=selected(p),glyphMode=activeGlyphEdit(p,letterLayer);
+    if(glyphMode){
+      event.preventDefault();activate(p);
+      const pos=coords(event,p),point=localPoint(letterLayer,pos.x,pos.y);
+      const visible=sfxVisibleIndices(letterLayer.text),glyphs=textGlyphs(p.canvas.getContext('2d'),letterLayer);
+      const nearest=glyphs.map((base,i)=>{
+        const g=letterLayer.lettering.glyphs.find(g=>g.index===visible[i]);
+        return g?{index:visible[i],distance:Math.hypot(point.x-base.x-g.dx,point.y-base.y-g.dy),radius:Math.max(15,base.size*.65)}:null;
+      }).filter(Boolean).filter(g=>g.distance<=g.radius).at(-1);
+      if(nearest){
+        glyphMode.selected=nearest.index;
+        const g=letterLayer.lettering.glyphs.find(g=>g.index===nearest.index);
+        p.glyphDrag={id:event.pointerId,index:nearest.index,anchor:point,before:{dx:g.dx,dy:g.dy},savedUndo:p.undo.length,oldRedo:p.redo.slice()};
+        p.canvas.setPointerCapture(event.pointerId);
+        renderCards(p);drawPage(p);
+      }
+      return; // 個別モードではSFX全体を誤ドラッグしない
+    }
     const size=imageSize(p.img.width,p.img.height,p.imageEdit),pos = coords(event, p), scale = p.canvas.getBoundingClientRect().width / size.width;
     const current = selected(p), handle = current && handleAt(current, pos.x, pos.y, scale);
     const currentMask=p.maskEffects.find(effect=>effect.id===p.selectedMaskId),maskMode=currentMask&&maskModeAt(currentMask,pos,scale);
@@ -1466,6 +1519,17 @@ function connectCanvas(p) {
     p.canvas.setPointerCapture(event.pointerId);
   });
   p.canvas.addEventListener('pointermove', event => {
+    if(p.glyphDrag?.id===event.pointerId){
+      const gesture=p.glyphDrag,l=selected(p);if(!l||!l.lettering)return;
+      const pos=coords(event,p),point=localPoint(l,pos.x,pos.y);
+      const dx=point.x-gesture.anchor.x,dy=point.y-gesture.anchor.y;
+      if(!gesture.changed&&(Math.abs(dx)>.1||Math.abs(dy)>.1)){checkpoint(p);gesture.changed=true;}
+      if(gesture.changed){
+        const glyph=l.lettering.glyphs.find(g=>g.index===gesture.index);
+        if(glyph){glyph.dx=gesture.before.dx+dx;glyph.dy=gesture.before.dy+dy;glyph.manual.position=true;drawPage(p);}
+      }
+      return;
+    }
     if(p.cropDraft){
       if(editLocked())return;
       const pointer=p.cropPointer,pos=previewCoords(event,p);
@@ -1513,6 +1577,16 @@ function connectCanvas(p) {
     drawPage(p); updateControls(p); updateGlobal();
   });
   const end = event => {
+    if(p.glyphDrag?.id===event.pointerId){
+      const gesture=p.glyphDrag;p.glyphDrag=null;
+      if(event.type!=='pointerup'&&gesture.changed){
+        const g=selected(p)?.lettering?.glyphs.find(g=>g.index===gesture.index);
+        if(g){g.dx=gesture.before.dx;g.dy=gesture.before.dy;g.manual.position=false;}
+        p.undo.length=gesture.savedUndo;p.redo=gesture.oldRedo;
+      }else if(gesture.changed){markChanged(p);}
+      if(p.canvas.hasPointerCapture(event.pointerId))p.canvas.releasePointerCapture(event.pointerId);
+      renderCards(p);drawPage(p);return;
+    }
     if(p.cropPointer?.id===event.pointerId){
       if(event.type!=='pointerup')p.cropDraft=p.cropPointer.before;
       p.cropPointer=null;if(p.canvas.hasPointerCapture(event.pointerId))p.canvas.releasePointerCapture(event.pointerId);
@@ -1538,7 +1612,7 @@ function connectCanvas(p) {
     updateControls(p);refreshPresetMenus();
   };
   p.canvas.addEventListener('pointerup', end); p.canvas.addEventListener('pointercancel', end);
-  p.canvas.addEventListener('lostpointercapture', event=>{if(p.cropPointer?.id===event.pointerId||drag?.maskId&&drag.page===p&&drag.id===event.pointerId)end(event);});
+  p.canvas.addEventListener('lostpointercapture', event=>{if(p.glyphDrag?.id===event.pointerId||p.cropPointer?.id===event.pointerId||drag?.maskId&&drag.page===p&&drag.id===event.pointerId)end(event);});
   p.canvas.addEventListener('pointerleave',()=>{if(!p.cropPointer)p.canvas.style.removeProperty('cursor');});
 }
 
@@ -1561,6 +1635,22 @@ window.addEventListener('keydown', event => {
     const index=presets.findIndex(preset=>preset.id===layer.presetId),step=key==='f'?1:-1;
     const preset=presets[index<0?(step===1?0:presets.length-1):(index+step+presets.length)%presets.length];
     event.preventDefault();applyLayerPreset(p,layer,preset);return;
+  }
+  const activeLetter=activeGlyphEdit(p,selected(p));
+  if(activeLetter&&!command&&!event.altKey){
+    if(key==='escape'){event.preventDefault();p.glyphEdit=null;renderCards(p);drawPage(p);return;}
+    if(key==='delete'||key==='backspace'){
+      event.preventDefault();const l=selected(p);
+      edit(p,()=>Object.assign(l,removeLetteringGlyphs(l,[activeLetter.selected])));
+      activeLetter.selected=l.lettering.glyphs[0]?.index??null;renderCards(p);return;
+    }
+    const vector={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
+    if(vector){
+      event.preventDefault();const l=selected(p),step=event.shiftKey?10:1;
+      edit(p,()=>{const g=l.lettering.glyphs.find(g=>g.index===activeLetter.selected);
+        if(g){g.dx+=vector[0]*step;g.dy+=vector[1]*step;g.manual.position=true;}
+      });return;
+    }
   }
   if(key==='delete'&&p.selectedMaskId&&!command&&!event.altKey&&!event.shiftKey){event.preventDefault();removeMaskEffect(p,p.selectedMaskId);status('選択中のマスク加工を削除した。');return;}
   if (key === 'delete' && event.target === p.canvas && !command && !event.altKey) {
@@ -1908,7 +1998,7 @@ const storageReady=(async()=>{
   catch(error){$('draftStatus').dataset.error='true';$('draftStatus').textContent=`一時保存を利用できない: ${error.message}`;}
 })();
 async function temporarySave(manual=false) {
-  if(!pages.length||busy)return;
+  if(!pages.length||busy||pages.some(p=>p.glyphDrag))return;
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
