@@ -1,10 +1,11 @@
+import { normalizeLettering } from './sfx-lettering-model.js';
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp, paintOrder } from './renderer.js';
 import { inkSeed } from './ink.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
-export const PROJECT_VERSION=13;
+export const PROJECT_VERSION=14;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
@@ -22,7 +23,7 @@ function normalizedLayoutOrder(input, version = PROJECT_VERSION) {
 }
 
 export function normalizeLayer(input, version = PROJECT_VERSION) {
-  return {...normalizeTextLayer(input,version),...normalizedLayoutOrder(input,version)};
+  return {...normalizeTextLayer(input,version),...normalizedLayoutOrder(input,version),...(version>=14&&typeof input?.id==='string'&&/^[a-f0-9-]{36}$/i.test(input.id)?{id:input.id}:{})};
 }
 
 function normalizeTextLayer(input, version) {
@@ -91,7 +92,7 @@ function normalizeTextLayer(input, version) {
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
     rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
     ...(kind==='dialogue'?speechColors(input):{textOutlineColor}),
-    ...extras, glyphSeed, inkTexture, textureSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
+    ...extras, glyphSeed, inkTexture, textureSeed, ...(kind==='sfx'&&input.lettering!=null?{lettering:normalizeLettering(input.lettering,input.text,{size:input.size,vertical:input.vertical})}:{}), presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }
 
