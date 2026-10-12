@@ -132,7 +132,7 @@ function validatePages(data,container=false){
   if(!Number.isInteger(version)||version<(container?6:1)||version>PROJECT_VERSION||!Array.isArray(data.pages)||!data.pages.length)throw new Error('未対応または空の編集データ');
   projectIdentity(data,version);
   for(const p of data.pages){if(!p||typeof p.name!=='string'||!Array.isArray(p.layers))throw new Error('画像データが不正');
-    pageIdentity(p,version);
+    if(version>=14)pageIdentity(p,version);
     if(!container&&(typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp|gif|avif);base64,[A-Za-z0-9+/\s]*={0,2}$/.test(p.src)))throw new Error('画像データが不正');
     if(version<12&&(Object.hasOwn(p,'maskEffects')||Object.hasOwn(p,'maskAssets')))throw new Error('旧版データに未対応のマスク情報がある');
     if(version<13&&[...p.layers,...(Array.isArray(p.maskEffects)?p.maskEffects:[])].some(object=>object&&Object.hasOwn(object,'layoutOrder')))throw new Error('旧版データに未対応の重なり順がある');
@@ -147,7 +147,7 @@ export async function readProject(file,{signal}={}){
   if(!MAGIC.slice(0,6).every((b,i)=>head[i]===b)){const data=await projectJSON('parse',file,{signal});validatePages(data);const pages=[];
     if(data.version>=12)validateJSONMaskBudget(data.pages);
     for(const p of data.pages){const decodedAssets=data.version>=12?await createDecodedAssets(p.maskAssets??{},p.imageWidth,p.imageHeight):{};const maskEffects=data.version>=12?normalizeMaskEffects(p.maskEffects??[],p.imageWidth,p.imageHeight,new Set(Object.keys(decodedAssets)),data.version):[];
-      pages.push({...(p.id?{id:p.id}:{}),name:p.name,src:p.src,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,decodedAssets),...(data.version>=12?{expectedSize:{width:p.imageWidth,height:p.imageHeight}}:{})});}
+      pages.push({...(data.version>=14&&validProjectId(p.id)?{id:p.id}:{}),name:p.name,src:p.src,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,decodedAssets),...(data.version>=12?{expectedSize:{width:p.imageWidth,height:p.imageHeight}}:{})});}
     return {version:data.version,...(data.projectId?{projectId:data.projectId}:{}),preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};}
   if(head.length!==12||!MAGIC.every((b,i)=>head[i]===b))throw new Error('未対応の高速編集データ');
   const length=new DataView(head.buffer).getUint32(8,true);if(!length||length>MANIFEST_LIMIT||12+length>file.size)throw new Error('manifest長が不正');
@@ -178,7 +178,7 @@ export async function readProject(file,{signal}={}){
       maskAssets[record.id]=await assetFromEncoded({...record,data:bytes});
     }
     const maskEffects=data.projectVersion>=12?normalizeMaskEffects(p.maskEffects??[],imageAsset.width,imageAsset.height,new Set(Object.keys(maskAssets)),data.projectVersion):[];
-    pages.push({...(p.id?{id:p.id}:{}),name:p.name,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,maskAssets),blob:blobs[p.assetIndex],expectedSize:imageAsset});
+    pages.push({...(data.projectVersion>=14&&validProjectId(p.id)?{id:p.id}:{}),name:p.name,layers:p.layers,done:p.done,edited:p.edited,...(p.imageEdit?{imageEdit:p.imageEdit}:{}),maskEffects,maskAssets:referencedMaskAssets(maskEffects,maskAssets),blob:blobs[p.assetIndex],expectedSize:imageAsset});
   }
   return {version:data.projectVersion,...(data.projectId?{projectId:data.projectId}:{}),preferences:data.preferences,...(typeof data.sourceFolderName==='string'?{sourceFolderName:data.sourceFolderName}:{}),pages};
 }
