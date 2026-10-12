@@ -1,3 +1,5 @@
+import { graphemes } from './typography.js';
+import { startLettering, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
@@ -855,6 +857,58 @@ function button(action, text, title) {
   return b;
 }
 
+
+const letteringFields={dx:['横位置',-30000,30000],dy:['縦位置',-30000,30000],
+  rotation:['回転',-3600,3600],scaleX:['横倍率',.01,20],scaleY:['縦倍率',.01,20],
+  shear:['せん断',-5,5],z:['重なり順',-100000,100000]};
+const activeGlyphEdit=(p,l)=>l?.kind==='sfx'&&l.lettering?.enabled&&p.glyphEdit?.id===l.id?p.glyphEdit:null;
+function sfxLetteringPanel(p,l){
+  const panel=element('section','sfx-lettering-panel'),mode=activeGlyphEdit(p,l);
+  panel.append(button(mode?'sfx-glyph-exit':'sfx-glyph-enter',mode?'文字編集を終了':'文字単位編集'));
+  if(!mode)return panel;
+  const inherit=element('label','','本文変更時の継承'),choice=element('select');choice.dataset.glyphInherit='true';
+  for(const [id,title] of [['position','位置優先'],['character','同じ文字を優先'],['reset','全リセット']]){
+    const option=element('option','',title);option.value=id;choice.append(option);
+  }
+  choice.value=mode.inherit;inherit.append(choice);panel.append(inherit);
+  const buttons=element('div','sfx-glyph-list'),chars=graphemes(l.text);
+  for(const g of l.lettering.glyphs){
+    const b=button('sfx-glyph-select',chars[g.index]);b.dataset.glyphIndex=String(g.index);
+    b.title='文字 '+(g.index+1)+'／Z '+g.z+(g.manual.position?'／手動配置':'');
+    b.setAttribute('aria-pressed',String(mode.selected===g.index));buttons.append(b);
+  }
+  panel.append(buttons);
+  const glyph=l.lettering.glyphs.find(g=>g.index===mode.selected);
+  if(glyph){
+    const fields=element('div','effect-grid');
+    for(const [key,[title,min,max]] of Object.entries(letteringFields)){
+      const label=element('label','',title),input=element('input');input.type='number';
+      input.dataset.glyphField=key;input.min=String(min);input.max=String(max);input.step=key==='z'?'1':'0.1';
+      input.value=String(glyph[key]);label.append(input);fields.append(label);
+    }
+    panel.append(fields,button('sfx-glyph-duplicate','文字を複製'),button('sfx-glyph-delete','文字を削除'),button('sfx-glyph-reset','位置・変形をリセット'));
+  }
+  if(l.lettering.strokes.length){
+    const fieldset=element('details','sfx-stroke-panel');fieldset.append(element('summary','','連続「ー」の調整'));
+    const run=l.lettering.strokes[0],modeLabel=element('label','','線の表示'),select=element('select');
+    select.dataset.glyphStrokeMode=String(run.runStart);
+    for(const [name,title] of [['continuous','連続線'],['font','フォント文字']]){const option=element('option','',title);option.value=name;select.append(option);}
+    select.value=run.mode;modeLabel.append(select);fieldset.append(modeLabel);
+    for(const [field,title,index] of [['start','始点の線幅',0],['end','終点の線幅',run.widths.length-1]]){
+      const label=element('label','',title),input=element('input');input.type='number';input.min='0';input.max='500';
+      input.dataset.glyphStrokeWidth=field;input.value=String(run.widths[index].w);label.append(input);fieldset.append(label);
+    }
+    const label=element('label','','曲線'),shape=element('select');shape.dataset.glyphStrokeShape='true';
+    for(const [name,title] of [['straight','直線'],['arc','円弧'],['s','S字'],['wave','波形']]){const option=element('option','',title);option.value=name;shape.append(option);}
+    shape.value=run.shape;label.append(shape);fieldset.append(label);panel.append(fieldset);
+  }
+  return panel;
+}
+const strokeShapePoints=shape=>shape==='arc'?[{x:0,y:0},{x:.33,y:.22},{x:.67,y:.22},{x:1,y:0}]
+  :shape==='s'?[{x:0,y:0},{x:.33,y:.35},{x:.67,y:-.35},{x:1,y:0}]
+  :shape==='wave'?[{x:0,y:0},{x:.16,y:.25},{x:.33,y:.25},{x:.5,y:0},{x:.67,y:-.25},{x:.83,y:-.25},{x:1,y:0}]
+  :[{x:0,y:0},{x:.33,y:0},{x:.67,y:0},{x:1,y:0}];
+
 function renderCards(p) {
   syncSelection(p);
   updateImageView(p);
@@ -954,7 +1008,7 @@ function renderCards(p) {
       card.append(element('p','effect-note','「なし」「先細り」は集中線・立体影なし。ブラー・掠れ・歪みは下のパラメータで独立調整。'));
     }
     if(l.kind==='sfx') {
-      card.append(placementControls(l));
+      card.append(sfxLetteringPanel(p,l),placementControls(l));
       const details=element('details','effect-details');details.append(element('summary','','ブラー・掠れ・歪みの調整'));
       const grid=element('div','effect-grid');
       const labels={blurY:'縦ブラー（px）',blurX:'横ブラー（px）',blurStrength:'滲みの強さ（%）',inkCore:'文字の芯（%）',roughness:'輪郭の荒れ（%）',dryInk:'筆の掠れ（%）',brushTails:'ハネ・払い（%）',blur:'全方向ブラー（px）',motionBlur:'流れる残像（px）',blurAngle:'残像の方向 °',distortion:'歪み（%）',skew:'傾き °',stretchX:'横倍率（%）',stretchY:'縦倍率（%）'};
@@ -1171,6 +1225,28 @@ $('deck').addEventListener('input', event => {
   markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
 $('deck').addEventListener('change',event=>{
+  const input=event.target;
+  if(input.matches('[data-glyph-inherit],[data-glyph-field],[data-glyph-stroke-mode],[data-glyph-stroke-width],[data-glyph-stroke-shape]')){
+    const p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
+    const mode=activeGlyphEdit(p,l);if(!mode)return;
+    if(input.matches('[data-glyph-inherit]')){mode.inherit=input.value;return;}
+    if(input.matches('[data-glyph-field]')){
+      const field=input.dataset.glyphField,limit=letteringFields[field],value=Number(input.value);
+      if(!limit||!input.value||!Number.isFinite(value)||value<limit[1]||value>limit[2])return;
+      edit(p,()=>{const g=l.lettering.glyphs.find(g=>g.index===mode.selected);if(!g)return;
+        g[field]=field==='z'?Math.round(value):value;
+        g.manual[field==='dx'||field==='dy'?'position':field==='z'?'z':'transform']=true;
+      });return;
+    }
+    const run=l.lettering.strokes[0];if(!run)return;
+    if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500))return;
+    edit(p,()=>{
+      if(input.matches('[data-glyph-stroke-mode]'))run.mode=input.value;
+      if(input.matches('[data-glyph-stroke-shape]')){run.shape=input.value;run.path.points=strokeShapePoints(input.value);}
+      if(input.matches('[data-glyph-stroke-width]'))run.widths[input.dataset.glyphStrokeWidth==='start'?0:run.widths.length-1].w=Number(input.value);
+    });return;
+  }
+
   if(event.target.matches('[data-mask-field]')){const p=pageFrom(event.target);updateMaskEffectField(p,event.target);editing.delete(event.target);return;}
   editing.delete(event.target);if(event.target.matches('input[type=number][data-field],input[type=number][data-numeric-field]')){const p=pageFrom(event.target),l=p?.layers.find(l=>l.id===(event.target.closest('.layer-card')?.dataset.layerId||p.selectedId));if(l)syncControlValue(event.target,l[controlField(event.target)],p);}
 });
@@ -1193,6 +1269,34 @@ $('deck').addEventListener('click', event => {
   if(toggle){p.canvas.focus({preventScroll:true});return;}
   if (!action || (busy&&['move-up','move-down','move-after','remove','delete','duplicate-image','complete','copy-next','copy-all','cut-all','paste-all','save-image','crop-image','apply-crop','cancel-crop','rotate-left','rotate-right','reset-image'].includes(action))) return;
   const l = selected(p);
+  if(action==='sfx-glyph-enter'&&l?.kind==='sfx'){
+    if(!l.lettering?.enabled)edit(p,()=>{l.lettering=startLettering(l);},false);
+    p.glyphEdit={id:l.id,selected:l.lettering.glyphs[0]?.index??null,inherit:'position'};
+    renderCards(p);drawPage(p);return;
+  }
+  if(action==='sfx-glyph-exit'){p.glyphEdit=null;renderCards(p);drawPage(p);return;}
+  const glyphMode=activeGlyphEdit(p,l);
+  if(glyphMode){
+    if(action==='sfx-glyph-select'){
+      glyphMode.selected=Number(event.target.closest('[data-glyph-index]').dataset.glyphIndex);
+      renderCards(p);drawPage(p);return;
+    }
+    if(action==='sfx-glyph-duplicate'){
+      const original=glyphMode.selected;
+      edit(p,()=>Object.assign(l,duplicateLetteringGlyphs(l,[original])));
+      glyphMode.selected=Math.min(original+1,l.lettering.glyphs.length-1);renderCards(p);return;
+    }
+    if(action==='sfx-glyph-delete'){
+      edit(p,()=>Object.assign(l,removeLetteringGlyphs(l,[glyphMode.selected])));
+      glyphMode.selected=l.lettering.glyphs[0]?.index??null;renderCards(p);return;
+    }
+    if(action==='sfx-glyph-reset'){
+      edit(p,()=>{const g=l.lettering.glyphs.find(g=>g.index===glyphMode.selected);if(g){
+        Object.assign(g,{dx:0,dy:0,rotation:0,scaleX:1,scaleY:1,shear:0});
+        g.manual.position=false;g.manual.transform=false;
+      }});return;
+    }
+  }
   if (action.startsWith('add-')) {
     const kind = action === 'add-caption'?'caption':action === 'add-balloon'?'balloon':action === 'add-sfx' ? 'sfx' : 'dialogue', speaker = action === 'add-female' ? 'female' : 'male';
     edit(p, () => {

@@ -15,7 +15,7 @@ test('grapheme indexはUTF-16長ではなく結合文字を1文字として数�
 test('不正な入力を描画前に拒否し既存オブジェクトは破壊しない',()=>{
   const old=layer('ドン');const l=startLettering(old);l.glyphs[0].dx=Infinity;
   assert.throws(()=>normalizeLettering(l,old.text,old),/dx/);
-  const dup=startLettering(old);dup.glyphs.push(dup.glyphs[0]);
+  const dup=startLettering(old);dup.glyphs[1].index=dup.glyphs[0].index;
   assert.throws(()=>normalizeLettering(dup,old.text,old),/文字index/);
   assert.equal(old.lettering,undefined);
 });
