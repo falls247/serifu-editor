@@ -258,3 +258,8 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 ## SFXグリフ編集の引継ぎ（部分実装）
 
 対象ブランチ: docs/sow-20261013-sfx-glyph-editor。src/sfx-lettering-model.js（P1）、src/sfx-stroke-geometry.js（P3の原型）、src/renderer.js（新SFX描画分岐）、src/app.js（編集開始、グリフ/線設定、ドラッグ、Undo/Redo）の順に確認。全113要件の完了ではない。各runの数値制御点編集とv14 projectId/pageId保存まで追加。P3〜P8の残作業一覧はADR 0027。既存IndexedDB v2のデータ移行は検証なしで進めない。
+
+
+## 2026-10-13 SFX/プロジェクト永続化の最新引継ぎ
+
+前掲の「SFXグリフ編集の引継ぎ（部分実装）」は**当初時点の状態**。現在はv14形式・合成外周・テンプレート・IndexedDB v3履歴・lease/fencing・同ID競合UI等のコードが追加されているが、**CIは赤、P0〜P8の受入完了はゼロ**。参照する最優先の作業台帳は [SOW冒頭§0](sow/SOW_20261013_serifu_sfx_glyph_editor.md) 。特に `balloon-smoke.mjs:166` と `sam3-browser-smoke.mjs:355` の既存回帰、保存データ互換/GC/他タブ排他を解消せずにマージしてはならない。実装先は `docs/sow-20261013-sfx-glyph-editor`、`main`へはユーザーの別途指示がない限りマージしない。

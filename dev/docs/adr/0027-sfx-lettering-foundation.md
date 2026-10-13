@@ -26,3 +26,8 @@
 - src/sfx-lettering-model.js および src/sfx-stroke-geometry.js のNode単体テスト。
 - scripts/sfx-lettering-smoke.mjs でグリフ操作・本文同期・Undo/Redo・JSONのブラウザスモーク。
 - 既存チェックはGitHub Actions「Checks」から当該SHAの結果を参照。失敗が残る場合は完了扱いとしない。
+
+
+## 2026-10-13 引継ぎ注記（基準コード `bad0fe8c`）
+
+**上の「未実装」箇条書きは初期コミット時点の記録であり、現在の実装状態ではない。** `project-history.js`、`project-lock.js`、`project-conflict.js`、`sfx-lettering-templates.js`、`sfx-outline-groups.js` の初期コードが追加された。ただし機能受入は**未完了**で、保存/復元・SAM3/吹き出しのブラウザ回帰に失敗している。**最新かつ具体的な進捗・優先作業・再現方法は [SOW §0](../sow/SOW_20261013_serifu_sfx_glyph_editor.md#0-実装進捗次の開発エージェント向け作業指示2026-10-13-更新) を正本として確認**する。旧ストア削除やSOWの完了判定は行わず、同SOWのH-01/H-02/D-01から着手する。
