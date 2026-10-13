@@ -1,6 +1,7 @@
 import { graphemes } from './typography.js';
 import { sfxVisibleIndices } from './sfx-lettering-model.js';
 import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
+import {validProjectId} from './project-identity.js';
 import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY} from './sfx-lettering-templates.js';
 import { textGlyphs } from './renderer.js';
 import { startLettering, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
@@ -2058,7 +2059,11 @@ $('projectInput').onchange = event => {
   const file=event.target.files[0];event.target.value='';if(!file)return;
   guard(async task=>{task.stage('ファイル解析',1);let data;try{data=await readProject(file,{signal:task.signal});task.result(file.name);}catch(error){if(error.name!=='AbortError')task.result(file.name,false);throw error;}const loaded=await prepareProjectPages(data.pages,data.version,task);checkAbort(task.signal);
     sourceFolderName=data.sourceFolderName||projectFolderName(file.name)||sourceFolderName;
-    pages.push(...loaded);const presetNotice=mergePresets(data.preferences);dirty();task.stage('一覧反映',loaded.length);refreshJump();activate(loaded[0],loaded[0].selectedId,true);task.update({processed:loaded.length,succeeded:loaded.length},true);
+    pages.push(...loaded);const presetNotice=mergePresets(data.preferences);
+    if(Array.isArray(data.preferences?.sfxTemplates)){
+      sfxTemplates=mergeSfxTemplates(sfxTemplates,data.preferences.sfxTemplates,{conflict:'skip'});saveSfxTemplates();
+    }
+    dirty();task.stage('一覧反映',loaded.length);refreshJump();activate(loaded[0],loaded[0].selectedId,true);task.update({processed:loaded.length,succeeded:loaded.length},true);
     status((data.version===1?'旧データを追加。吹き出しは白縁の男性セリフへ変換した。':'編集データを追加。元ファイルとの接続がないため元画像削除は無効。')+presetNotice);
   },'編集データ読込',4);
 };
@@ -2287,11 +2292,15 @@ $('restoreDraft').onclick=()=>guard(async task=>{
   task.stage('画像取得',meta.pages.length);const ids=meta.pages.map(p=>p.id),[images,storedMasks]=await Promise.all([getDraftImages(ids),getDraftMasks(ids)]);checkAbort(task.signal);
   const masksByPage=new Map(meta.pages.map(p=>[p.id,{}]));for(const {pageId,id,asset} of storedMasks)masksByPage.get(pageId)[id]=asset;
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,maskAssets:masksByPage.get(p.id),blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
-  projectId=typeof meta.projectId==='string'?meta.projectId:crypto.randomUUID();
+  projectId=validProjectId(meta.projectId)?meta.projectId:crypto.randomUUID();
   const claim=await claimProjectLease(projectId,tabIdentity);projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
   sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
-  batchStart=0;const presetNotice=mergePresets(meta.preferences);task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
+  batchStart=0;const presetNotice=mergePresets(meta.preferences);
+  if(Array.isArray(meta.preferences?.sfxTemplates)){
+    sfxTemplates=mergeSfxTemplates(sfxTemplates,meta.preferences.sfxTemplates,{conflict:'skip'});saveSfxTemplates();
+  }
+  task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
   dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;needLeaseReload=false;updateDraftUI();updateLeaseAccess();void refreshProjectHistories();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
 },'一時保存復元',5);
 $('clearDraft').onclick=()=>guard(async()=>{
