@@ -21,7 +21,7 @@
   <div class="collection-bar">
     <div class="collection-info"><strong id="count">0 枚</strong><span id="progress">画像ごとに編集内容を保持</span></div>
     <nav aria-label="画像間の移動"><button id="previous" title="前の画像">←</button><select id="jump" aria-label="編集する画像"></select><button id="next" title="次の画像">→</button></nav>
-    <div class="project-actions"><button id="projectLoad">編集データを読込</button><label>保存形式<select id="projectFormat" aria-label="編集データ形式"><option value="serifu" selected>高速形式 (.serifu)</option><option value="json">従来形式 (.json)</option></select></label><button id="projectSave">編集データを保存</button></div>
+    <div class="project-actions"><button id="projectLoad">編集データを追加</button><button id="projectOpen">プロジェクトを開く</button><input id="projectOpenInput" type="file" accept=".json,.serifu,application/json" hidden><label>保存形式<select id="projectFormat" aria-label="編集データ形式"><option value="serifu" selected>高速形式 (.serifu)</option><option value="json">従来形式 (.json)</option></select></label><button id="projectSave">編集データを保存</button></div>
   </div>
   <div class="settings-bar">
     <div class="text-export-controls" role="group" aria-label="全ページのテキスト出力">

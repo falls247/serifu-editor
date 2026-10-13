@@ -1,5 +1,6 @@
 import { graphemes } from './typography.js';
 import { sfxVisibleIndices } from './sfx-lettering-model.js';
+import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
 import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY} from './sfx-lettering-templates.js';
 import { textGlyphs } from './renderer.js';
 import { startLettering, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
@@ -16,7 +17,7 @@ import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
 import { getDraftMeta, getDraftImages, getDraftMasks, clearDraft as forgetDraft } from './storage.js';
-import {saveProjectSnapshot,projectImageIds,listProjectHistories,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets} from './project-history.js';
+import {saveProjectSnapshot,projectImageIds,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets} from './project-history.js';
 import {claimProjectLease,releaseProjectLease,signalProjectActivity,tabIdentity} from './project-lock.js';
 import { BulkTask, boundedResults, checkAbort, awaitWithAbort, yieldToBrowser, prepareLayers } from './bulk-task.js';
 import { ZipArchive } from './zip.js';
@@ -1925,11 +1926,11 @@ $('textSave').onclick = () => guard(async task => {
   download(new Blob(['\ufeff',text],{type:'text/plain;charset=utf-8'}),`serifu-${target}.txt`);task.result(`serifu-${target}.txt`);status(`${$('textTarget').selectedOptions[0].textContent}のテキストのダウンロードを開始した`);
 },'本文テキスト出力',3);
 $('projectSave').onclick = () => guard(async task => {
-  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs=structuredClone(preferences),format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
+  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)},format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
 },'編集データ保存',3);
 async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
   task.stage('検証',records.length);const validated=[];
-  for(const p of records){checkAbort(task.signal);try{validated.push({...p,layers:normalizeLayers(p.layers,version)});task.result(p.name);}catch(error){task.result(p.name,false);throw new Error(`${p.name}: ${error.message}`);}if(validated.length%20===0)await yieldToBrowser();}
+  for(const p of records){checkAbort(task.signal);try{const normalized=normalizeLayers(p.layers,version);validated.push({...p,layers:restoreIds?normalized:normalized.map(layer=>({...layer,id:crypto.randomUUID()}))});task.result(p.name);}catch(error){task.result(p.name,false);throw new Error(`${p.name}: ${error.message}`);}if(validated.length%20===0)await yieldToBrowser();}
   const loaded=[],sources=new Map();if(records.length>=4)imagePool.resize(4);task.stage('画像準備',records.length);
   try{for(let start=0;start<validated.length;start+=20){
     const batch=validated.slice(start,start+20),ready=[];
@@ -1952,6 +1953,59 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
   }catch(error){loaded.forEach(releasePage);throw error;}
 }
 $('projectLoad').onclick = () => {if(!busy)$('projectInput').click();};
+$('projectOpen').onclick=()=>{if(!busy)$('projectOpenInput').click();};
+$('projectOpenInput').onchange=event=>{
+  const file=event.target.files[0];event.target.value='';if(!file)return;
+  guard(async task=>{
+    task.stage('プロジェクトファイルを解析',1);
+    const fileData=await readProject(file,{signal:task.signal});task.result(file.name);
+    let data=fileData,identity=data.projectId||crypto.randomUUID();
+    const projects=await listStoredProjects();
+    const saved=projects.find(p=>p.projectId===identity)?.latest;
+    let snapshot=saved?await getStoredSnapshot(saved.snapshotId):null;
+    let option='file';
+    if(snapshot){
+      const same=await projectFileMatchesSnapshot(fileData,snapshot,{signal:task.signal});
+      if(!same)option=await projectConflictChoice();
+      if(option==='cancel')return;
+    }
+    if(option==='copy')identity=crypto.randomUUID();
+    if(option==='autosave'){
+      if(!snapshot)throw new Error('自動保存の正常な内容が存在しない');
+      const ids=snapshot.meta.pages.map(p=>p.id);
+      const [images,masks]=await Promise.all([projectSnapshotImages(snapshot,ids),projectSnapshotMasks(snapshot,ids)]);
+      const byId=new Map(images.map(x=>[x.id,x.blob])),byMask=new Map(ids.map(id=>[id,{}]));
+      for(const item of masks)byMask.get(item.pageId)[item.id]=item.asset;
+      data={version:snapshot.meta.version,projectId:identity,pages:snapshot.meta.pages.map(page=>({...page,blob:byId.get(page.id),maskAssets:byMask.get(page.id)})),preferences:snapshot.meta.preferences,sourceFolderName:snapshot.meta.sourceFolderName};
+    }
+    const loaded=await prepareProjectPages(data.pages,data.version,task,{restoreIds:true});
+    checkAbort(task.signal);
+    const oldId=projectId;
+    if(oldId!==identity)await releaseProjectLease(oldId,tabIdentity);
+    projectId=identity;
+    await signalProjectActivity(projectId,tabIdentity,{interaction:true});
+    const claimed=await claimProjectLease(projectId,tabIdentity);
+    projectLease=claimed.held?{owner:tabIdentity,token:claimed.token}:null;readOnly=!claimed.held;
+    pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;
+    activeId=loaded[0]?.id||null;drag=null;pngCache.clear();batchStart=0;
+    sourceFolderName=data.sourceFolderName||projectFolderName(file.name)||sourceFolderName;
+    const presetNotice=mergePresets(data.preferences);
+    if(Array.isArray(data.preferences?.sfxTemplates)){
+      sfxTemplates=mergeSfxTemplates(sfxTemplates,data.preferences.sfxTemplates,{conflict:'skip'});saveSfxTemplates();
+    }
+    task.stage('プロジェクト切替',loaded.length);
+    refreshJump();if(active())activate(active());
+    dirty();
+    if(option==='autosave'){lastSavedRevision=revision;changed=false;draftMeta=snapshot.meta;}
+    else {lastSavedRevision=-1;draftMeta=null;}
+    needLeaseReload=false;
+    updateDraftUI();updateLeaseAccess();void refreshProjectHistories();
+    task.update({processed:loaded.length,succeeded:loaded.length},true);
+    status(option==='copy'?'別プロジェクトとして開いた。旧プロジェクトの自動保存と履歴はそのまま保持した。':
+      option==='autosave'?'既存の最新自動保存からプロジェクトを開いた。'+presetNotice:
+      'ファイルの内容でプロジェクトを開いた。旧履歴は維持する。'+presetNotice);
+  },'プロジェクトを開く',6);
+};
 $('projectInput').onchange = event => {
   const file=event.target.files[0];event.target.value='';if(!file)return;
   guard(async task=>{task.stage('ファイル解析',1);let data;try{data=await readProject(file,{signal:task.signal});task.result(file.name);}catch(error){if(error.name!=='AbortError')task.result(file.name,false);throw error;}const loaded=await prepareProjectPages(data.pages,data.version,task);checkAbort(task.signal);
@@ -2144,7 +2198,7 @@ async function temporarySave(manual=false) {
   if(!pages.length||busy||readOnly||pages.some(p=>p.glyphDrag))return;
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
-  const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
+  const snapshot=snapshotPages(),captured=revision,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)};
   const meta={version:PROJECT_VERSION,projectId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
   const masks=snapshot.flatMap(page=>[...new Set(page.maskEffects.map(effect=>effect.assetId))].map(id=>{
     const asset=page.maskAssets?.[id];if(!asset)throw new Error(`「${page.name}」のマスク素材がない`);
