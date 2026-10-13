@@ -14,7 +14,9 @@ import { toggleMagnifier, refreshMagnifier, closeMagnifier } from './preview-mag
 import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
-import { getDraftMeta, getDraftImages, getDraftMasks, getImageIds, saveDraft as writeDraft, clearDraft as forgetDraft } from './storage.js';
+import { getDraftMeta, getDraftImages, getDraftMasks, clearDraft as forgetDraft } from './storage.js';
+import {saveProjectSnapshot,projectImageIds,listProjectHistories,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets} from './project-history.js';
+import {claimProjectLease,releaseProjectLease,signalProjectActivity,tabIdentity} from './project-lock.js';
 import { BulkTask, boundedResults, checkAbort, awaitWithAbort, yieldToBrowser, prepareLayers } from './bulk-task.js';
 import { ZipArchive } from './zip.js';
 import { imageDimensions } from './image-metadata.js';
@@ -50,7 +52,7 @@ function requestPageFonts(p){
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
-let projectId=crypto.randomUUID();
+let projectId=crypto.randomUUID(),projectLease=null,readOnly=false,needLeaseReload=false;
 const previewDeferredDraws = new Set(), previewDeferredThumbnails = new Set();
 let previewResumeScheduled = false;
 function resumePreviewBackground() {
@@ -73,7 +75,7 @@ function resumePreviewBackground() {
 $('fullPreview').addEventListener('close', resumePreviewBackground);
 let sourceDirectory = null, sourceFolderName = null, currentTask=null, fontVersion=0;
 const imagePool=new ImagePool(),pngCache=new ExportCache(),sam3Client=new Sam3Client();
-const editLocked=()=>busy&&currentTask?.data.kind!=='画像追加';
+const editLocked=()=>readOnly||(busy&&currentTask?.data.kind!=='画像追加');
 const viewLocked=()=>busy&&currentTask?.data.kind==='レイヤー一括操作';
 function displayTask(data){
   const running=['running','cancelling'].includes(data.state);
@@ -107,8 +109,14 @@ let pageClipboard=null;
 const clipboardPastes=new Map();
 let preferences;
 try { preferences=normalizePreferences(JSON.parse(localStorage.getItem(PREFS_KEY))); } catch { preferences=defaultPreferences(); }
-let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null, autosaveTimer=null;
-function dirty() { changed=true; revision++; }
+let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null, autosaveTimer=null,latestSaveTimer=null;
+function dirty() {
+  changed=true;revision++;
+  if(preferences?.autosave?.enabled){
+    clearTimeout(latestSaveTimer);
+    latestSaveTimer=setTimeout(()=>{if(!readOnly&&!busy&&!pages.some(p=>p.glyphDrag))void temporarySave(false);},750);
+  }
+}
 const editing = new WeakSet();
 const active = () => pages.find(p => p.id === activeId);
 const selected = p => p.layers.find(l => l.id === p.selectedId);
@@ -2037,22 +2045,26 @@ const storageReady=(async()=>{
   catch(error){$('draftStatus').dataset.error='true';$('draftStatus').textContent=`一時保存を利用できない: ${error.message}`;}
 })();
 async function temporarySave(manual=false) {
-  if(!pages.length||busy||pages.some(p=>p.glyphDrag))return;
+  if(!pages.length||busy||readOnly||pages.some(p=>p.glyphDrag))return;
   if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs=structuredClone(preferences);
-  const meta={version:PROJECT_VERSION,projectId,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
+  const meta={version:PROJECT_VERSION,projectId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
   const masks=snapshot.flatMap(page=>[...new Set(page.maskEffects.map(effect=>effect.assetId))].map(id=>{
     const asset=page.maskAssets?.[id];if(!asset)throw new Error(`「${page.name}」のマスク素材がない`);
     return {pageId:page.id,id,asset};
   }));
   const task=new BulkTask(manual?'一時保存':'自動保存',{stageCount:3,onProgress:data=>{if(manual&&currentTask?.data.operationId===data.operationId)displayTask(data);else if(!manual)$('draftStatus').textContent=`自動保存 · ${data.stage} ${data.processed}/${data.total??'未確定'}`;}});
   if(manual){currentTask=task;task.emit(true);}delete $('draftStatus').dataset.error;
-  draftTask=(async()=>{await storageReady;checkAbort(task.signal);const ids=await getImageIds(),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
+  draftTask=(async()=>{await storageReady;checkAbort(task.signal);
+    const claim=await claimProjectLease(projectId,tabIdentity);if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
+    projectLease={owner:tabIdentity,token:claim.token};
+    const ids=await projectImageIds(projectId),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
     for(const p of missing){checkAbort(task.signal);const blob=await originalBlob(p),original=pages.find(page=>page.id===p.id);if(original)original.assetBlob=blob;images.push({id:p.id,blob});task.result(p.name);if(images.length%20===0)await yieldToBrowser();}
     task.metrics.newImages=images.length;task.stage('DB要求',images.length);if(!images.length)task.stage('コミット',1);
-    await writeDraft(meta,images,{signal:task.signal,masks,onProgress:(processed,total)=>{if(processed===total)task.stage('コミット',1);else task.update({processed,total,succeeded:0});}});
-    task.result('一時保存');draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;
+    await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence:projectLease});
+    task.stage('コミット',1);
+    task.result('一時保存');draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;void refreshProjectHistories();
   })();updateDraftUI();let failure;
   try{await draftTask;if(manual)status('画像・文字・位置・設定をこのブラウザに一時保存した。');}
   catch(error){failure=error;if(error.name!=='AbortError')task.result('一時保存',false);$('draftStatus').dataset.error='true';$('draftStatus').textContent=error.name==='AbortError'?'一時保存を中断。前回の保存を維持。':error.name==='QuotaExceededError'?'保存容量不足。編集データを書き出して保管。':`一時保存に失敗: ${error.message}`;if(manual)status($('draftStatus').textContent);}
@@ -2078,10 +2090,11 @@ $('restoreDraft').onclick=()=>guard(async task=>{
   const masksByPage=new Map(meta.pages.map(p=>[p.id,{}]));for(const {pageId,id,asset} of storedMasks)masksByPage.get(pageId)[id]=asset;
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,maskAssets:masksByPage.get(p.id),blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
   projectId=typeof meta.projectId==='string'?meta.projectId:crypto.randomUUID();
+  const claim=await claimProjectLease(projectId,tabIdentity);projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
   sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
   batchStart=0;const presetNotice=mergePresets(meta.preferences);task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
-  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
+  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();updateGlobal();void refreshProjectHistories();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
 },'一時保存復元',5);
 $('clearDraft').onclick=()=>guard(async()=>{
   if(!confirm('このブラウザの一時保存を消去する？ 編集中の画像は残る。'))return;
