@@ -1,8 +1,11 @@
+import {WARP_CHOICES,EFFECTS} from './renderer.js';
+import {EFFECT_LIMITS,THICKNESS_LIMIT} from './model.js';
+import {PLACEMENT_LIMITS} from './glyph-layout.js';
 import {startLettering,normalizeLettering,sfxRuns} from './sfx-lettering-model.js';
 
 export const TEMPLATE_VERSION=1;
 export const SFX_TEMPLATE_KEY='serifu.sfx.templates.v1';
-const STYLE_KEYS=['font','size','color','outline','textOutlineColor','effect','stretchX','stretchY','thickness','blur','motionBlur','blurAngle','grungeAmount','textureSeed','kerningMode','kerningStrength','glyphOverlap'];
+const STYLE_KEYS=['font','size','color','outline','textOutlineColor','effect','stretchX','stretchY','thickness','blur','motionBlur','blurAngle','grungeAmount','textureSeed','kerningMode','kerningStrength','glyphOverlap','minimumGlyphGap','overlapAllowance','rotationJitter','verticalJitter','spacingJitter','lineAlign','sizeVariation','horizontalJitter','distortion','warp','skew','roughness','dryInk','brushTails','blurX','blurY','blurStrength','inkCore','inkTexture','grungeAmount','scratchLength','scratchAngle','spatterAmount','taperRate'];
 const clamp=(value,min,max)=>Math.min(max,Math.max(min,value));
 const safeObject=value=>value&&typeof value==='object'&&!Array.isArray(value);
 export function validateSfxTemplate(template){
@@ -26,6 +29,16 @@ export function validateSfxTemplate(template){
        !safeObject(stroke.value)||!Array.isArray(stroke.value.path?.points)||!Array.isArray(stroke.value.widths)||
        stroke.value.path.points.length>64||stroke.value.widths.length>64)throw new Error('SFXテンプレートの長音線が不正');
   }
+  const enums={effect:Object.keys(EFFECTS),kerningMode:['standard','optical'],lineAlign:['top','center'],warp:Object.keys(WARP_CHOICES),inkTexture:['none','grunge']};
+  const limits={...EFFECT_LIMITS,...PLACEMENT_LIMITS,size:[8,500],outline:[0,80],thickness:THICKNESS_LIMIT,stretchX:[10,300],stretchY:[10,300],blur:[0,80],motionBlur:[0,500],blurAngle:[-360,360],textureSeed:[0,4294967295],kerningStrength:[0,100],glyphOverlap:[0,100]};
+  for(const [key,value] of Object.entries(data.style)){
+    if(enums[key]&&!enums[key].includes(value))throw new Error('SFXテンプレートのstyleが不正');
+    if(['color','textOutlineColor'].includes(key)&&!/^#[0-9a-f]{6}$/i.test(value))throw new Error('SFXテンプレートの色が不正');
+    if(key==='font'&&(typeof value!=='string'||value.length>128||!value))throw new Error('SFXテンプレートの書体が不正');
+    if(!enums[key]&&!['font','color','textOutlineColor'].includes(key)){const [min,max]=limits[key]??[-3600,4294967295];if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max)throw new Error('SFXテンプレートの数値が不正');}
+  }
+  normalizeLettering({schemaVersion:1,enabled:true,glyphs:data.glyphs.map((g,index)=>({...g,index,dx:g.dx,dy:g.dy,pivot:{preset:'center',x:0,y:0}}))},'あ'.repeat(data.glyphs.length),{size:data.baseSize});
+  for(const stroke of data.strokes)normalizeLettering({schemaVersion:1,enabled:true,strokes:[{...stroke.value,runStart:0,runLength:2}]},'ーー',{size:data.baseSize});
   return structuredClone(template);
 }
 export function createSfxTemplate(layer,name){
@@ -34,7 +47,8 @@ export function createSfxTemplate(layer,name){
   const design={width:layer.w,height:layer.h,baseSize:layer.size,
     style:Object.fromEntries(STYLE_KEYS.filter(k=>layer[k]!==undefined).map(k=>[k,structuredClone(layer[k])])),
     arrangement:{layoutMode:lettering.layoutMode,overlapIntensity:lettering.overlapIntensity,orientation:lettering.orientation},
-    glyphs:glyphs.map(g=>({dx:g.dx/layer.w,dy:g.dy/layer.h,rotation:g.rotation,scaleX:g.scaleX,scaleY:g.scaleY,shear:g.shear,z:g.z,overrides:structuredClone(g.overrides)})),
+    glyphs:glyphs.map(g=>({origin:g.origin?{x:g.origin.x/layer.w,y:g.origin.y/layer.h}:null,dx:g.dx/layer.w,dy:g.dy/layer.h,rotation:g.rotation,scaleX:g.scaleX,scaleY:g.scaleY,shear:g.shear,z:g.z,overrides:structuredClone(g.overrides)})),
+    outlineGroups:structuredClone(lettering.outlineGroups),
     strokes:strokes.map((s,i)=>({relativeIndex:strokes.length===1?0:i/(strokes.length-1),value:structuredClone(s)}))};
   return validateSfxTemplate({version:TEMPLATE_VERSION,id:crypto.randomUUID(),name:name.trim(),design});
 }
@@ -59,7 +73,7 @@ export function applySfxTemplate(layer,template,{mode='all',reuseSeed=false}={})
   let lettering=startLettering(base);
   if(layout){
     const oldWidth=layer.w,oldHeight=layer.h;
-    base.w=design.width;base.h=design.height;
+    base.w=design.width;base.h=design.height;lettering.baseBox={w:base.w,h:base.h};
     lettering.layoutMode=design.arrangement?.layoutMode??lettering.layoutMode;
     lettering.overlapIntensity=clamp(design.arrangement?.overlapIntensity??lettering.overlapIntensity,0,100);
     const n=lettering.glyphs.length;
@@ -67,11 +81,12 @@ export function applySfxTemplate(layer,template,{mode='all',reuseSeed=false}={})
       const target=lettering.glyphs[i],example=mappedGlyph(design.glyphs,n<2?0:i/(n-1));
       if(!example)continue;
       Object.assign(target,{dx:example.dx*base.w,dy:example.dy*base.h,rotation:example.rotation,
-        scaleX:example.scaleX,scaleY:example.scaleY,shear:example.shear,z:example.z});
+        origin:example.origin?{x:example.origin.x*base.w,y:example.origin.y*base.h}:null,scaleX:example.scaleX,scaleY:example.scaleY,shear:example.shear,z:example.z});
       target.manual.position=true;target.manual.transform=true;target.manual.z=true;
       if(style){target.overrides=structuredClone(example.overrides);target.manual.style=true;}
     }
-    const runs=sfxRuns(base.text);
+    lettering.outlineGroups=(design.outlineGroups||[]).flatMap(group=>{const members=[...new Set(group.members.map(i=>Math.round(i/Math.max(1,design.glyphs.length-1)*Math.max(0,n-1))))].filter(i=>i<n).map(i=>lettering.glyphs[i].index);return members.length?[{...structuredClone(group),members}]:[];});
+    const runs=sfxRuns(base.text,{single:true});
     for(let i=0;i<runs.length;i++){
       if(!design.strokes.length)break;
       const sample=design.strokes[Math.min(design.strokes.length-1,Math.round((runs.length<2?0:i/(runs.length-1))*(design.strokes.length-1)))].value;
@@ -81,6 +96,7 @@ export function applySfxTemplate(layer,template,{mode='all',reuseSeed=false}={})
     if(!reuseSeed){
       lettering.layoutSeed=crypto.getRandomValues(new Uint32Array(1))[0];
       lettering.inkSeed=crypto.getRandomValues(new Uint32Array(1))[0];
+      lettering.glyphs.forEach(g=>g.inkVariantSeed=(lettering.inkSeed+Math.imul(g.index+1,2654435761))>>>0);
     }
     // Text, page position and layer ID are never stored in or copied from templates.
     void oldWidth;void oldHeight;
@@ -118,4 +134,12 @@ export function mergeSfxTemplates(current,incoming,{conflict='skip'}={}){
   }
   if(byId.size>100)throw new Error('テンプレート件数が上限を超える');
   return [...byId.values()];
+}
+
+export function validateStrokePresets(records){
+  if(!Array.isArray(records)||records.length>100)throw new Error('線プリセットは100件まで');
+  const seen=new Set();return records.map(record=>{
+    if(!record||typeof record.name!=='string'||!record.name.trim()||record.name.length>100||seen.has(record.name)||!record.value)throw new Error('線プリセットの名前が不正');seen.add(record.name);
+    const value=normalizeLettering({schemaVersion:1,enabled:true,strokes:[{...record.value,runStart:0,runLength:2}]},'ーー',{size:80}).strokes[0];return {name:record.name,value};
+  });
 }

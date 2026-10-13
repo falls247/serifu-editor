@@ -29,7 +29,17 @@ export const FONT_FILES=Object.values(FONT_CATALOG).filter(font=>font.file).flat
   {directory:font.directory,source:font.bundled?font.license:'OFL.txt',file:font.license,sha:font.licenseSha,bundled:font.bundled===true},
 ]);
 export const FONT_STYLES=Object.values(FONT_CATALOG).filter(font=>font.file).map(font=>`@font-face{font-family:${font.family};src:url('./assets/fonts/${font.file}') format('truetype');font-weight:${font.faceWeight||font.weight};font-display:swap}`).join('\n');
+const sessionFonts=new Map();
+export async function registerSessionFont(key,blob){
+  if(typeof key!=='string'||!key||key.length>128||!(blob instanceof Blob)||blob.size>20*1024*1024)throw new Error('フォントファイルが不正（上限20MiB）');
+  const family='SerifuUpload'+crypto.randomUUID().replaceAll('-',''),face=new FontFace(family,await blob.arrayBuffer());await face.load();document.fonts.add(face);
+  sessionFonts.set(key,{family:'"'+family+'", sans-serif',weight:400,load:'400 64px '+family});clearFontCache();
+}
+export const hasSessionFont=key=>sessionFonts.has(key);
+export const sessionFontChoices=()=>Object.fromEntries([...sessionFonts.keys()].map(key=>[key,{label:key+'（アップロード）'}]));
+export function missingLayerFonts(layer){return [layer.font,...(layer.lettering?.glyphs||[]).map(g=>g.overrides.font)].filter(key=>key&&!FONT_CATALOG[key]&&!sessionFonts.has(key));}
 export function fontDescription(layer) {
+  if(sessionFonts.has(layer.font))return sessionFonts.get(layer.font);
   const font=FONT_CATALOG[layer.font]||FONT_CATALOG.sans;
   const fallback=font.file&&layer.font!=='gekifude'?`"${FONT_CATALOG.gekifude.family}", `:'';
   return {family:font.file?`"${font.family}", ${fallback}${font.fallback}`:font.family,weight:font.weight||(layer.kind==='sfx'?900:700),load:font.file?`${font.weight} 64px ${font.family}`:null};
@@ -37,7 +47,7 @@ export function fontDescription(layer) {
 export function fontKeys(layer){
   return FONT_CATALOG[layer.font]?.file?[...new Set([layer.font,'gekifude'])]:[];
 }
-export function fontLoadQueries(layer){return fontKeys(layer).map(font=>fontDescription({...layer,font}).load);}
+export function fontLoadQueries(layer){const keys=new Set([layer.font,...(layer.lettering?.glyphs||[]).map(g=>g.overrides.font).filter(Boolean)]);return [...new Set([...keys].flatMap(key=>sessionFonts.has(key)?[fontDescription({...layer,font:key}).load]:fontKeys({...layer,font:key}).map(font=>fontDescription({...layer,font}).load)))];}
 const glyphFonts=new Map();
 export function clearFontCache(){glyphFonts.clear();}
 // Some TTFs map visible symbols to empty glyphs: CSS fallback cannot detect them.
