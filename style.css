@@ -268,3 +268,25 @@ canvas.preview.cropping{cursor:crosshair}
 .sfx-template-panel{margin-top:10px;border:1px solid var(--line);padding:8px;border-radius:8px}
 .sfx-template-panel select{width:100%}
 .sfx-template-panel button{font-size:11px;margin:5px 4px 0 0}
+/* Reserve the fixed navigation space when scrolling interactive image surfaces. */
+html{scroll-padding-top:140px;scroll-padding-bottom:110px}
+.sam3-overlay,.original,.preview{scroll-margin-top:140px;scroll-margin-bottom:110px}
+.sfx-advanced-panel{width:100%;padding:8px;border:1px solid #425468;border-radius:8px}
+.sfx-advanced-panel label{display:block;margin:8px 0}
+.sfx-advanced-panel button{margin:4px;padding:8px}
+.sfx-overflow{color:#ffbd79;font-size:11px}
+.preview-frame:has(.preview:focus){overscroll-behavior:contain}
+.image-row.sfx-editing .preview{touch-action:none;flex-shrink:0;max-width:none}
+.image-row.sfx-editing .preview-frame{overflow:auto;justify-content:flex-start}
+@media(max-width:700px){.sfx-advanced-panel input,.sfx-advanced-panel select{min-height:44px}.sfx-advanced-panel button{min-height:44px}.sfx-lettering-panel{max-height:65vh;overflow:auto}}
+@media(max-width:700px){
+  .image-row.sfx-editing .original-pane{grid-row:1}
+  .image-row.sfx-editing .preview-pane{grid-row:2}
+  .image-row.sfx-editing .dialogue-pane{grid-row:3}
+}
+.sfx-advanced-panel [data-sfx-editor-action^=layout-] canvas{display:block;max-width:100%;margin-top:4px;background:#151b24}
+@media(max-width:700px){
+  .image-row.sfx-editing .original-pane{order:1}
+  .image-row.sfx-editing .preview-pane{order:2}
+  .image-row.sfx-editing .dialogue-pane{order:3}
+}

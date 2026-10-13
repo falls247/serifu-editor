@@ -1,10 +1,13 @@
+import {beginLetteringGesture,moveLetteringGesture,endLetteringGesture,drawLetteringOverlay,advancedLetteringPanel,sceneFor} from './sfx-editor.js';
+import {glyphSelection,selectGlyph,freezeGlyphOrigins,copyLetteringSelection,pasteLetteringSelection,duplicateSelectedGlyphs,transformGlyphSelection,rotateLetteringOrientation,scaleLetteringData} from './sfx-edit-operations.js';
+import {strokeFrame} from './sfx-stroke-geometry.js';
 import { graphemes } from './typography.js';
 import { sfxVisibleIndices } from './sfx-lettering-model.js';
 import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
 import {validProjectId} from './project-identity.js';
-import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY} from './sfx-lettering-templates.js';
-import { textGlyphs } from './renderer.js';
-import { startLettering, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
+import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY,validateStrokePresets} from './sfx-lettering-templates.js';
+import { textGlyphs,sfxScene } from './renderer.js';
+import { startLettering, defaultGlyph, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
@@ -18,7 +21,7 @@ import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
 import { getDraftMeta, getDraftImages, getDraftMasks, clearDraft as forgetDraft } from './storage.js';
-import {saveProjectSnapshot,projectImageIds,activateStoredProject,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets,projectStorageReport,deleteStoredProject,migrateLegacyDraft} from './project-history.js';
+import {saveProjectSnapshot,projectImageIds,readProjectBundle,latestProjectSnapshot,activeProjectSnapshot,activateStoredProject,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets,projectStorageReport,deleteStoredProject,migrateLegacyDraft} from './project-history.js';
 import {claimProjectLease,releaseProjectLease,signalProjectActivity,tabIdentity} from './project-lock.js';
 import { BulkTask, boundedResults, checkAbort, awaitWithAbort, yieldToBrowser, prepareLayers } from './bulk-task.js';
 import { ZipArchive } from './zip.js';
@@ -27,7 +30,7 @@ import { ImagePool } from './bulk-pool.js';
 import { ExportCache, exportKey } from './export-cache.js';
 import { originalBlob, projectParts, projectBlob, readProject, writeParts, MAX_PROJECT_MASK_DECODED_BYTES } from './project-io.js';
 import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
-import { FONT_CATALOG, FONT_STYLES, fontLoadQueries } from './fonts.js';
+import { FONT_CATALOG, FONT_STYLES, fontLoadQueries,registerSessionFont,hasSessionFont,missingLayerFonts,sessionFontChoices } from './fonts.js';
 import { Sam3Client } from './sam3-client.js';
 import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
 
@@ -55,7 +58,9 @@ function requestPageFonts(p){
   }
 }
 let pages = [], activeId = null, busy = false, drag = null, changed = false;
-let projectId=crypto.randomUUID(),projectLease=null,readOnly=false,needLeaseReload=false;
+let projectId=crypto.randomUUID(),projectLease=null,readOnly=false,needLeaseReload=false,appliedReadOnly=false;
+const rememberProject=()=>{try{sessionStorage.setItem('serifu.active-project',projectId);}catch{}};
+const rememberedProject=()=>{try{return sessionStorage.getItem('serifu.active-project');}catch{return null;}};
 const previewDeferredDraws = new Set(), previewDeferredThumbnails = new Set();
 let previewResumeScheduled = false;
 function resumePreviewBackground() {
@@ -78,6 +83,7 @@ function resumePreviewBackground() {
 $('fullPreview').addEventListener('close', resumePreviewBackground);
 let sourceDirectory = null, sourceFolderName = null, currentTask=null, fontVersion=0;
 const imagePool=new ImagePool(),pngCache=new ExportCache(),sam3Client=new Sam3Client();
+Object.defineProperty(window,'serifuLiveMetrics',{get:()=>({visibility:document.visibilityState,focused:document.hasFocus(),task:currentTask?{...currentTask.data,metrics:structuredClone(currentTask.metrics)}:null,workers:imagePool.workers.map(s=>({ready:s.ready,busy:s.busy,job:s.currentJob})),starting:!!imagePool.starting,pool:structuredClone(imagePool.metrics)})});
 const editLocked=()=>readOnly||(busy&&currentTask?.data.kind!=='画像追加');
 const viewLocked=()=>busy&&currentTask?.data.kind==='レイヤー一括操作';
 function displayTask(data){
@@ -119,15 +125,18 @@ function saveSfxTemplates(){
   try{localStorage.setItem(SFX_TEMPLATE_KEY,encodeSfxTemplates(sfxTemplates));return true;}
   catch(error){status('テンプレートの保存に失敗: '+error.message);return false;}
 }
-let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null,activeDraftTask=null, autosaveTimer=null,latestSaveTimer=null;
+let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null,activeDraftTask=null, autosaveTimer=null,historyTimer=null,latestSaveTimer=null,autosaveQuotaPaused=false;
 function dirty() {
   changed=true;revision++;
-  if(preferences?.autosave?.enabled){
+  if(preferences?.autosave?.enabled&&!autosaveQuotaPaused){
     clearTimeout(latestSaveTimer);
     latestSaveTimer=setTimeout(()=>{if(!readOnly&&!busy&&!pages.some(p=>p.glyphDrag))void temporarySave(false).catch(error=>status('自動保存を開始できない: '+error.message));},750);
   }
 }
-const editing = new WeakSet();
+const editing = new WeakSet(),composing=new WeakSet();
+$('deck').addEventListener('compositionstart',event=>composing.add(event.target));
+$('deck').addEventListener('compositionend',event=>composing.delete(event.target));
+$('deck').addEventListener('keydown',event=>{const input=event.target;if(event.isComposing||composing.has(input)||!input.matches('textarea[data-field=text]'))return;const p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);if(!l?.lettering?.enabled)return;if(event.key==='Escape'){event.preventDefault();event.stopPropagation();input.value=l.text;drawPage(p);}else if((event.ctrlKey||event.metaKey)&&event.key==='Enter'){event.preventDefault();input.blur();}});
 const active = () => pages.find(p => p.id === activeId);
 const selected = p => p.layers.find(l => l.id === p.selectedId);
 const status = text => $('status').textContent = text;
@@ -244,7 +253,9 @@ function updateGlobal() {
   $('next').disabled = viewLocked() || index < 0 || index >= displayed.length - 1;
   $('jump').disabled = viewLocked() || !displayed.length;
   if ($('jump').value !== activeId) $('jump').value = activeId || '';
-  $('deck').inert = editLocked();
+  $('deck').inert = busy&&currentTask?.data.kind!=='画像追加';
+  if(readOnly||appliedReadOnly)for(const input of $('deck').querySelectorAll('textarea,input:not([data-page-destination]),select:not([data-page-destination])')){if(readOnly)input.setAttribute('data-viewer-disabled','true');if(readOnly)input.disabled=true;else if(input.hasAttribute('data-viewer-disabled')){input.disabled=false;input.removeAttribute('data-viewer-disabled');}}
+  appliedReadOnly=readOnly;
   $('thumbnailList').inert = viewLocked();
   for (const id of ['pageSize', 'toggleThumbnails', 'thumbnailScale']) $(id).disabled = viewLocked();
   const batchEnd = view.pageSize === 'all' ? displayed.length : Math.min(displayed.length, batchStart + view.pageSize);
@@ -253,9 +264,9 @@ function updateGlobal() {
   $('nextBatch').disabled = viewLocked() || batchEnd >= displayed.length;
   const pageIndex = pages.findIndex(p => p.id === activeId);
   $('thumbnailProgress').textContent = `現在 ${pageIndex < 0 ? 0 : pageIndex + 1} / ${pages.length} · 確認済み ${pages.filter(p=>p.done).length}`;
-  $('temporarySave').disabled=busy||!!draftTask||!pages.length;
+  $('temporarySave').disabled=readOnly||busy||!!draftTask||!pages.length;
   $('savePreset').disabled=busy||!active()||!selected(active())||!PRESET_KINDS.includes(selected(active()).kind);
-  for(const id of [...presetControls.map(([id])=>id),'autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy;
+  for(const id of [...presetControls.map(([id])=>id),'autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy||(readOnly&&id!=='restoreDraft');
   for(const b of document.querySelectorAll('[data-delete-preset]'))b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
   updateDraftUI();
   pages.forEach((p, i) => {
@@ -277,6 +288,9 @@ function updateGlobal() {
       }
     }
     if (!p.row) return;
+    const rowState=JSON.stringify([busy,readOnly,currentTask?.data.kind,p.id===activeId,i,p.done,p.edited,p.undo.length,p.redo.length,p.layers.length,p.maskEffects.length,p.selectedId,p.selectedMaskId,preferences.fontSizePreset,!!p.cropDraft,!!p.imageEdit,!!p.directory,pageClipboard?.name,pageClipboard?.layers.length,displayed.at(-1)?.id===p.id]);
+    const pageDestination=p.row.querySelector('[data-page-destination]');if(pageDestination.max!==String(pages.length))pageDestination.max=String(pages.length);
+    if(p.globalUIState===rowState)return;p.globalUIState=rowState;
     updateFontSizeButtons(p);
     for(const action of ['remove','delete','duplicate-image','complete'])p.row.querySelector(`[data-action=${action}]`).disabled=busy||(action==='delete'&&!p.directory);
     p.row.classList.toggle('active', p.id === activeId);
@@ -323,17 +337,15 @@ function drawPage(p) {
   });
   const current=selected(p),glyphMode=activeGlyphEdit(p,current);
   if(glyphMode&&!p.cropDraft){
-    const glyphs=textGlyphs(ctx,current),visible=sfxVisibleIndices(current.text);
-    const index=visible.indexOf(glyphMode.selected),base=glyphs[index],glyph=current.lettering.glyphs.find(g=>g.index===glyphMode.selected);
-    if(base&&glyph){
-      ctx.save();ctx.setTransform(scale,0,0,scale,0,0);
-      if(imageEdit)ctx.transform(...imageMatrix(p.img.width,p.img.height,imageEdit));
-      ctx.translate(current.x,current.y);ctx.rotate(current.rotation*Math.PI/180);
-      ctx.strokeStyle='#00bfff';ctx.lineWidth=2/Math.max(.1,displayScale);ctx.setLineDash([5/Math.max(.1,displayScale),3/Math.max(.1,displayScale)]);
-      const x=base.x+glyph.dx,y=base.y+glyph.dy,r=base.size*.6;
-      ctx.strokeRect(x-r,y-r,2*r,2*r);ctx.restore();
-    }
+    const scene=sceneFor(p,current);
+    ctx.save();ctx.setTransform(scale,0,0,scale,0,0);
+    if(imageEdit)ctx.transform(...imageMatrix(p.img.width,p.img.height,imageEdit));
+    ctx.translate(current.x,current.y);ctx.rotate(current.rotation*Math.PI/180);
+    drawLetteringOverlay(ctx,current,glyphMode,scene,Math.max(.01,displayScale),p.glyphDrag);ctx.restore();
+    const overflow=scene.items.some(item=>{const b=item.bounds;return [{x:b.minX,y:b.minY},{x:b.maxX,y:b.maxY},{x:b.minX,y:b.maxY},{x:b.maxX,y:b.minY}].some(point=>{const angle=current.rotation*Math.PI/180,x=current.x+point.x*Math.cos(angle)-point.y*Math.sin(angle),y=current.y+point.x*Math.sin(angle)+point.y*Math.cos(angle);const crop=p.imageEdit?.crop??{x:0,y:0,width:p.img.width,height:p.img.height};return x<crop.x||y<crop.y||x>crop.x+crop.width||y>crop.y+crop.height;});});
+    const warning=p.row?.querySelector('.sfx-overflow');if(warning){warning.hidden=!overflow;warning.textContent='画像外の文字・線はPNGでクリップされる。編集データと画像原寸は維持。';}
   }
+
   refreshMagnifier(p);
   if(p.cropDraft){
     const r=p.cropDraft;ctx.save();ctx.setTransform(scale,0,0,scale,0,0);ctx.fillStyle='#0009';
@@ -384,7 +396,8 @@ function persistControlValue(p,input) {
     if(numericValue(layer[field],field)===value)return;
   }
   if(Object.is(layer[field],value))return;
-  checkpoint(p);layer[field]=value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))layer.brushEngine='pressure';if(field!=='text')layer.presetId=null;
+  if(field==='text'&&layer.lettering?.enabled){if(composing.has(input))return;const next=replaceLetteringText(layer,value,activeGlyphEdit(p,layer)?.inherit??'position');edit(p,()=>Object.assign(layer,next));return;}
+  checkpoint(p);if(field==='vertical'&&layer.lettering?.enabled)Object.assign(layer,rotateLetteringOrientation(layer,value));else layer[field]=value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))layer.brushEngine='pressure';if(field!=='text')layer.presetId=null;
   if(field==='text'){fitTextInput(input);const summary=card.querySelector('.layer-summary');if(summary)renderLayerSummary(layer,summary);}
   markChanged(p);
   drawPage(p);
@@ -403,7 +416,7 @@ function sizePreview(p) {
     const aspect=image===p.canvas?size.width/size.height:p.img.width/p.img.height;
     const imageFrame=image===p.canvas?frame:originalFrame;
     const width=Math.max(1,Math.min(imageFrame.clientWidth-2,maxHeight*aspect));
-    image.style.width=`${width}px`;image.style.height=`${width/aspect}px`;
+    const zoom=image===p.canvas&&activeGlyphEdit(p,selected(p))?p.sfxZoom||1:1;image.style.width=`${width*zoom}px`;image.style.height=`${width/aspect*zoom}px`;if(image===p.canvas&&(zoom!==1||imageFrame.style.height))imageFrame.style.height=activeGlyphEdit(p,selected(p))?`${Math.min(maxHeight,width/aspect)}px`:'';
   }
   p.row.querySelector('.original-toolbar').style.height=`${p.row.querySelector('.preview-toolbar:not(.original-toolbar)').getBoundingClientRect().height}px`;
   drawPage(p);
@@ -892,6 +905,41 @@ function button(action, text, title) {
 }
 
 
+let sfxClipboard=null,strokeClipboard=null;
+let strokePresets=[];
+try{strokePresets=validateStrokePresets(JSON.parse(localStorage.getItem('serifu.sfx.strokes.v1')||'[]'));}catch{}
+function mergeStrokePresets(records){
+  const names=new Set(strokePresets.map(p=>p.name));strokePresets.push(...records.filter(p=>!names.has(p.name)).slice(0,100-strokePresets.length));
+  try{localStorage.setItem('serifu.sfx.strokes.v1',JSON.stringify(strokePresets));}catch{}
+}
+function pasteStrokeLook(p,l,run,part,source=strokeClipboard?.run){
+  if(!source){status('線をコピーまたは登録してから適用する。');return;}
+  edit(p,()=>{
+    if(part==='all'||part==='shape'){run.path=structuredClone(source.path);run.shape=source.shape;run.start=structuredClone(source.start);run.end=structuredClone(source.end);for(const side of ['start','end']){run[side].detached=false;delete run[side].fixedPosition;}}
+    if(part==='all'||part==='width')run.widths=structuredClone(source.widths);
+    if(part==='all'||part==='look')run.lookOverride=structuredClone(source.lookOverride);
+  });
+}
+function saveStrokePreset(run){
+  const name=prompt('線プリセット名','新しい線');if(!name?.trim())return;
+  if(strokePresets.some(p=>p.name===name)&&!confirm('同名の線プリセットを上書きする？'))return;
+  strokePresets=strokePresets.filter(p=>p.name!==name);strokePresets.push({name:name.slice(0,100),value:structuredClone(run)});
+  if(strokePresets.length>100){strokePresets.pop();status('線プリセットは100件まで。');return;}
+  try{localStorage.setItem('serifu.sfx.strokes.v1',JSON.stringify(strokePresets));status('線プリセットを登録した。');}catch(error){status('線プリセットの記憶に失敗: '+error.message);}
+}
+function loadStrokePreset(p,l,run){
+  const name=prompt('線プリセット名（'+strokePresets.map(p=>p.name).join('、')+'）',strokePresets[0]?.name||'');
+  const preset=strokePresets.find(p=>p.name===name);if(preset)pasteStrokeLook(p,l,run,'all',preset.value);
+}
+function pasteSfxClipboard(p,l,mode,clipboard){
+  if(editLocked()||!clipboard)return;
+  edit(p,()=>{const scene=sceneFor(p,l);freezeGlyphOrigins(l,scene);const base=scene.glyphs.find(g=>g.index===mode.selected),result=pasteLetteringSelection(l,clipboard,{after:mode.selected,position:base?{x:base.x+20,y:base.y+20}:{x:0,y:0}});Object.assign(l,result.layer);mode.indices=result.indices;mode.selected=result.indices[0]??null;});
+}
+function plainSfxClipboard(text){const chars=graphemes(text.replace(/\r\n?/g,'\n'));return {sourceId:null,text:chars.join(''),glyphs:chars.flatMap((char,index)=>char==='\n'?[]:[defaultGlyph(index)]),strokes:[]};}
+function deleteSfxSelection(p,l,mode){
+  const indices=new Set(glyphSelection(mode));for(const run of l.lettering.strokes)if((mode.strokeRuns||[]).includes(run.runStart))for(let i=0;i<run.runLength;i++)indices.add(run.runStart+i);
+  edit(p,()=>{freezeGlyphOrigins(l,sceneFor(p,l));Object.assign(l,removeLetteringGlyphs(l,[...indices]));});mode.selected=l.lettering.glyphs[0]?.index??null;mode.indices=mode.selected==null?[]:[mode.selected];mode.strokeRuns=[];renderCards(p);drawPage(p);
+}
 const letteringFields={dx:['横位置',-30000,30000],dy:['縦位置',-30000,30000],
   rotation:['回転',-3600,3600],scaleX:['横倍率',.01,20],scaleY:['縦倍率',.01,20],
   shear:['せん断',-5,5],z:['重なり順',-100000,100000]};
@@ -909,9 +957,9 @@ function sfxLetteringPanel(p,l){
   for(const g of l.lettering.glyphs){
     const b=button('sfx-glyph-select',chars[g.index]);b.dataset.glyphIndex=String(g.index);
     b.title='文字 '+(g.index+1)+'／Z '+g.z+(g.manual.position?'／手動配置':'');
-    b.setAttribute('aria-pressed',String(mode.selected===g.index));buttons.append(b);
+    b.setAttribute('aria-pressed',String(glyphSelection(mode).includes(g.index)));buttons.append(b);
   }
-  panel.append(buttons);
+  panel.append(buttons,button('sfx-text-apply','本文を確定'));
   const templateControls=element('details','sfx-template-panel');
   templateControls.append(element('summary','','SFXデザインテンプレート'));
   const templateLabel=element('label','','テンプレート'),templateSelect=element('select');
@@ -923,7 +971,8 @@ function sfxLetteringPanel(p,l){
   applyMode.dataset.sfxTemplateApplyMode='true';
   for(const [value,title] of [['all','すべて'],['style','スタイルのみ'],['layout','レイアウトのみ']])applyMode.append(new Option(title,value));
   applyLabel.append(applyMode);templateControls.append(applyLabel);
-  templateControls.append(button('sfx-template-save','デザインを登録'),button('sfx-template-apply','適用'),button('sfx-template-export','JSON出力'),button('sfx-template-import','JSON読込'));
+  const seedLabel=element('label','','テンプレートの乱数'),seedPolicy=element('select');seedPolicy.dataset.sfxTemplateSeed='true';seedPolicy.append(new Option('新規生成','new'),new Option('現在の模様を維持','same'));seedLabel.append(seedPolicy);templateControls.append(seedLabel);
+  templateControls.append(button('sfx-template-save','デザインを登録'),button('sfx-template-apply','適用'),button('sfx-template-export','JSON出力'),button('sfx-template-import','JSON読込'),button('sfx-template-rename','名前変更'),button('sfx-template-delete','削除'));
   panel.append(templateControls);
   const glyph=l.lettering.glyphs.find(g=>g.index===mode.selected);
   if(glyph){
@@ -931,10 +980,12 @@ function sfxLetteringPanel(p,l){
     for(const [key,[title,min,max]] of Object.entries(letteringFields)){
       const label=element('label','',title),input=element('input');input.type='number';
       input.dataset.glyphField=key;input.min=String(min);input.max=String(max);input.step=key==='z'?'1':'0.1';
-      input.value=String(glyph[key]);label.append(input);fields.append(label);
+      const values=l.lettering.glyphs.filter(g=>glyphSelection(mode).includes(g.index)).map(g=>g[key]);input.value=values.every(v=>v===values[0])?String(glyph[key]):'';input.placeholder=values.every(v=>v===values[0])?'':'混在';label.append(input);fields.append(label);
     }
     panel.append(fields,button('sfx-glyph-duplicate','文字を複製'),button('sfx-glyph-delete','文字を削除'),button('sfx-glyph-reset','位置・変形をリセット'));
   }
+  panel.append(advancedLetteringPanel(p,l,mode,{edit:fn=>edit(p,fn),render:()=>{renderCards(p);drawPage(p);},fonts:{...FONT_CATALOG,...sessionFontChoices()},copyStroke:(run,part)=>{strokeClipboard={run:structuredClone(run),part};status('線の'+part+'をコピーした。');},pasteStroke:(run,part)=>pasteStrokeLook(p,l,run,part),saveStroke:run=>saveStrokePreset(run),loadStroke:run=>loadStrokePreset(p,l,run)}));
+  const warning=element('p','sfx-overflow');warning.setAttribute('role','status');warning.hidden=true;panel.append(warning);
   const groups=element('details','sfx-outline-group-panel');
   groups.append(element('summary','','外側輪郭の結合'));
   const groupSelect=element('select');groupSelect.dataset.sfxOutlineGroupSelect='true';
@@ -947,7 +998,7 @@ function sfxLetteringPanel(p,l){
   groups.append(groupSelect,button('sfx-outline-group-all','全文字を結合'),button('sfx-outline-group-new','選択文字から作成'));
   const currentGroup=l.lettering.outlineGroups[mode.outlineGroup];
   if(currentGroup){
-    groups.append(button('sfx-outline-group-toggle','選択文字を追加／除外'),button('sfx-outline-group-remove','グループ削除'));
+    groups.append(button('sfx-outline-group-toggle','選択文字を追加／除外'),button('sfx-outline-group-remove','グループ削除'),button('sfx-outline-group-unlock','自動追従へ戻す'));
     const width=element('input');width.type='number';width.min='0';width.max='80';width.step='0.5';
     width.dataset.sfxGroupWidth='true';width.value=String(currentGroup.styleOverride?.width??l.outline);
     const color=element('input');color.type='color';color.dataset.sfxGroupColor='true';color.value=currentGroup.styleOverride?.color??l.textOutlineColor??'#ffffff';
@@ -1004,7 +1055,9 @@ const strokeShapePoints=shape=>shape==='arc'?[{x:0,y:0},{x:.33,y:.22},{x:.67,y:.
   :[{x:0,y:0},{x:.33,y:0},{x:.67,y:0},{x:1,y:0}];
 
 function renderCards(p) {
-  syncSelection(p);
+  if(p.renderingCards)return;p.renderingCards=true;
+  try{
+  syncSelection(p);p.row?.classList.toggle('sfx-editing',!!activeGlyphEdit(p,selected(p)));
   updateImageView(p);
   if (!p.row) return;
   rememberCardDetails(p);
@@ -1117,10 +1170,11 @@ function renderCards(p) {
   for(const [index,effect] of p.maskEffects.entries())cards.set(effect.id,createMaskEffectCard(effect,p.maskAssets[effect.assetId],index,p.id===activeId&&p.selectedMaskId===effect.id,p.img.width,p.img.height));
   for(const object of paintOrder(p.layers,p.maskEffects))container.append(cards.get(object.id));
   refreshPresetMenus(p); updateControls(p);
+  }finally{p.renderingCards=false;}
 }
 
 function mountPage(p) {
-  const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;
+  const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;delete p.globalUIState;
   row.querySelector('[data-page-destination]').value=p.moveAfterPage??'';
   addNumericControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
@@ -1185,6 +1239,7 @@ function movePageAfter(p){
 }
 
 function markChanged(p) {
+  const letter=selected(p);if(letter?.lettering?.enabled){const scene=sceneFor(p,letter);letter.w=clamp(Math.max(letter.w,...scene.items.map(i=>Math.max(Math.abs(i.bounds.minX),Math.abs(i.bounds.maxX))*2+8)),30,30000);letter.h=clamp(Math.max(letter.h,...scene.items.map(i=>Math.max(Math.abs(i.bounds.minY),Math.abs(i.bounds.maxY))*2+8)),30,30000);}
   dirty(); p.done = false;p.edited=hasEdits(p);syncSelection(p);scheduleThumbnailRefresh(p);updateGlobal();
 }
 
@@ -1263,7 +1318,8 @@ function commitSam3Candidates(p,candidates,settings) {
 
 function edit(p, fn, rebuild = true) {
   if (editLocked()) return;
-  checkpoint(p); fn(); markChanged(p);
+  checkpoint(p); fn();
+  markChanged(p);
   if (rebuild) renderCards(p);else updateControls(p);
   drawPage(p);
 }
@@ -1275,7 +1331,7 @@ function moveObjects(p,action) {
 }
 
 $('deck').addEventListener('focusin', event => {
-  if (editLocked()||event.target.closest('button[data-action], .layer-summary, .mask-effect-summary')) return;
+  if ((busy&&currentTask?.data.kind!=='画像追加')||event.target.closest('button[data-action], .layer-summary, .mask-effect-summary')) return;
   const p = pageFrom(event.target); if (!p) return;
   const maskCard=event.target.closest('.mask-effect-card');if(maskCard){if(p.id!==activeId||p.selectedMaskId!==maskCard.dataset.maskId)selectMask(p,maskCard.dataset.maskId);return;}
   const id = event.target.closest('.layer-card')?.dataset.layerId;
@@ -1284,8 +1340,10 @@ $('deck').addEventListener('focusin', event => {
 $('deck').addEventListener('focusout', event => {
   editing.delete(event.target);
   const p = pageFrom(event.target);
+  if(p?.renderingCards)return;
   if(event.target.matches('[data-mask-field]'))return;
   if(p&&event.target.matches('[data-field="text"]')){
+    if(composing.has(event.target))return;
     const input=event.target,layer=p.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
     if(layer?.kind==='sfx'&&layer.lettering?.enabled){
       if(layer.text!==input.value){
@@ -1334,7 +1392,7 @@ $('deck').addEventListener('input', event => {
   else if(field==='tail'||field==='autoFit'||field==='shadowEnabled')value=input.checked;
   if (l[field] === value) return;
   if (!editing.has(input)) { checkpoint(p); editing.add(input); }
-  l[field] = value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))l.brushEngine='pressure';if(field!=='text')l.presetId=null;
+  if(field==='vertical'&&l.kind==='sfx'&&l.lettering?.enabled)Object.assign(l,rotateLetteringOrientation(l,value));else l[field] = value;if(field==='borderStyle'||field==='brushSeed'||Object.hasOwn(BRUSH_LIMITS,field))l.brushEngine='pressure';if(field!=='text')l.presetId=null;
   if(field==='text'){const summary=input.closest('.layer-card')?.querySelector('.layer-summary');if(summary)renderLayerSummary(l,summary);}
   markChanged(p);drawPage(p);updateControls(p);if(field!=='text')refreshPresetMenus(p);
 });
@@ -1350,7 +1408,7 @@ $('deck').addEventListener('change',event=>{
       const group=l.lettering.outlineGroups[mode.outlineGroup];if(!group)return;
       const numeric=Number(input.value);
       if(input.matches('[data-sfx-group-width]')&&(!input.value||!Number.isFinite(numeric)||numeric<0||numeric>80))return;
-      edit(p,()=>{group.styleOverride={...group.styleOverride,color:group.styleOverride?.color??l.textOutlineColor??'#ffffff',
+      edit(p,()=>{group.locked=true;group.mode='manual';group.styleOverride={...group.styleOverride,color:group.styleOverride?.color??l.textOutlineColor??'#ffffff',
         width:group.styleOverride?.width??l.outline,
         ...(input.matches('[data-sfx-group-color]')?{color:input.value}:{width:numeric})};});return;
     }
@@ -1358,9 +1416,14 @@ $('deck').addEventListener('change',event=>{
     if(input.matches('[data-glyph-field]')){
       const field=input.dataset.glyphField,limit=letteringFields[field],value=Number(input.value);
       if(!limit||!input.value||!Number.isFinite(value)||value<limit[1]||value>limit[2])return;
-      edit(p,()=>{const g=l.lettering.glyphs.find(g=>g.index===mode.selected);if(!g)return;
-        g[field]=field==='z'?Math.round(value):value;
-        g.manual[field==='dx'||field==='dy'?'position':field==='z'?'z':'transform']=true;
+      edit(p,()=>{
+        const indices=glyphSelection(mode),scene=sceneFor(p,l);freezeGlyphOrigins(l,scene);
+        const targets=l.lettering.glyphs.filter(g=>indices.includes(g.index));
+        if(targets.length>1&&['rotation','scaleX','scaleY'].includes(field)){
+          const before=new Map(targets.map(g=>[g.index,g[field]])),mean=targets.reduce((n,g)=>n+g[field],0)/targets.length,kind=mode.valueMode||'absolute',target=kind==='absolute'?value:kind==='add'?mean+value:mean*value;
+          transformGlyphSelection(l,indices,scene,field==='rotation'?{rotation:target-mean}:{[field]:Math.max(.01,target/(mean||1))});
+          for(const g of targets)g[field]=clamp(kind==='absolute'?value:kind==='add'?before.get(g.index)+value:before.get(g.index)*value,limit[1],limit[2]);
+        }else for(const g of targets){const next=mode.valueMode==='add'?g[field]+value:mode.valueMode==='multiply'?g[field]*value:value;g[field]=field==='z'?Math.round(clamp(next,limit[1],limit[2])):clamp(next,limit[1],limit[2]);g.manual[field==='dx'||field==='dy'?'position':field==='z'?'z':'transform']=true;}
       });return;
     }
     if(input.matches('[data-glyph-stroke-run]')){
@@ -1372,7 +1435,7 @@ $('deck').addEventListener('change',event=>{
     if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500))return;
     edit(p,()=>{
       if(input.matches('[data-glyph-stroke-cap]'))run[input.dataset.glyphStrokeCap].cap=input.value;
-      if(input.matches('[data-glyph-stroke-detach]'))run[input.dataset.glyphStrokeDetach].detached=input.checked;
+      if(input.matches('[data-glyph-stroke-detach]')){const side=input.dataset.glyphStrokeDetach,frame=strokeFrame(run,sceneFor(p,l).positions,{vertical:l.vertical,size:l.size});if(input.checked&&frame)run[side].fixedPosition={...(side==='start'?frame.start:frame.end)};else delete run[side].fixedPosition;run[side].detached=input.checked;}
       if(input.matches('[data-glyph-stroke-point-axis]')){
         run.path.points[mode.strokePoint][input.dataset.glyphStrokePointAxis]=Number(input.value);
         run.shape='custom';
@@ -1387,8 +1450,8 @@ $('deck').addEventListener('change',event=>{
   editing.delete(event.target);if(event.target.matches('input[type=number][data-field],input[type=number][data-numeric-field]')){const p=pageFrom(event.target),l=p?.layers.find(l=>l.id===(event.target.closest('.layer-card')?.dataset.layerId||p.selectedId));if(l)syncControlValue(event.target,l[controlField(event.target)],p);}
 });
 
-$('deck').addEventListener('click', event => {
-  if (editLocked()) return;
+$('deck').addEventListener('click', async event => {
+  if(busy&&currentTask?.data.kind!=='画像追加')return;
   const p = pageFrom(event.target); if (!p) return;
   const action = event.target.closest('[data-action]')?.dataset.action;
   if(action==='preview-full'){
@@ -1399,32 +1462,35 @@ $('deck').addEventListener('click', event => {
   const maskCard=event.target.closest('.mask-effect-card');
   if(maskCard){const maskId=maskCard.dataset.maskId;selectMask(p,maskId);const maskAction=event.target.closest('[data-mask-action]')?.dataset.maskAction;if(maskAction==='delete'){removeMaskEffect(p,maskId);status('選択中のマスク加工を削除した。');}else if(['forward','backward','frontmost','backmost'].includes(maskAction))moveObjects(p,maskAction);return;}
   const card = event.target.closest('.layer-card'), cardId = card?.dataset.layerId;
-  const toggle=event.shiftKey&&!!event.target.closest('.layer-summary,.kind-label');
+  const toggle=event.shiftKey&&!!event.target.closest('.layer-summary,.kind-label')&&!event.target.closest('.sfx-lettering-panel');
   if(cardId)selectObject(p,cardId,toggle,!toggle);
   activate(p, toggle?p.selectedId:cardId || p.selectedId);
   if(toggle){p.canvas.focus({preventScroll:true});return;}
+  if(readOnly&&action&&!['preview-full','preview-magnifier','copy-all','save-image'].includes(action))return;
   if (!action || (busy&&['move-up','move-down','move-after','remove','delete','duplicate-image','complete','copy-next','copy-all','cut-all','paste-all','save-image','crop-image','apply-crop','cancel-crop','rotate-left','rotate-right','reset-image'].includes(action))) return;
   const l = selected(p);
   if(action==='sfx-glyph-enter'&&l?.kind==='sfx'){
     if(!l.lettering?.enabled)edit(p,()=>{l.lettering=startLettering(l);},false);
-    p.glyphEdit={id:l.id,selected:l.lettering.glyphs[0]?.index??null,inherit:'position'};
+    p.glyphEdit={id:l.id,selected:l.lettering.glyphs[0]?.index??null,indices:l.lettering.glyphs.slice(0,1).map(g=>g.index),strokeRuns:[],inherit:'position',editMode:'glyph'};
     renderCards(p);drawPage(p);return;
   }
   if(action==='sfx-glyph-exit'){p.glyphEdit=null;renderCards(p);drawPage(p);return;}
   const glyphMode=activeGlyphEdit(p,l);
   if(glyphMode){
+    if(action==='sfx-text-apply'){card?.querySelector('textarea[data-field=text]')?.blur();return;}
     if(action==='sfx-outline-group-all'||action==='sfx-outline-group-new'){
-      const members=action==='sfx-outline-group-all'?l.lettering.glyphs.map(g=>g.index):[glyphMode.selected].filter(x=>x!==null);
+      const members=action==='sfx-outline-group-all'?l.lettering.glyphs.map(g=>g.index):glyphSelection(glyphMode);
       if(members.length)edit(p,()=>{l.lettering.outlineGroups.push({members,mode:action==='sfx-outline-group-all'?'auto':'manual',
-        locked:false,styleOverride:null});glyphMode.outlineGroup=l.lettering.outlineGroups.length-1;});return;
+        locked:action!=='sfx-outline-group-all',styleOverride:null});if(action==='sfx-outline-group-all')l.lettering.outlineMode='union';glyphMode.outlineGroup=l.lettering.outlineGroups.length-1;});return;
     }
     if(action==='sfx-outline-group-toggle'){
       const group=l.lettering.outlineGroups[glyphMode.outlineGroup];if(!group)return;
       const next=new Set(group.members);
       if(next.has(glyphMode.selected)){if(next.size===1)return;next.delete(glyphMode.selected);}
       else next.add(glyphMode.selected);
-      edit(p,()=>{group.members=[...next].sort((a,b)=>a-b);group.mode='manual';});return;
+      edit(p,()=>{group.members=[...next].sort((a,b)=>a-b);group.mode='manual';group.locked=true;});return;
     }
+    if(action==='sfx-outline-group-unlock'){const group=l.lettering.outlineGroups[glyphMode.outlineGroup];if(group)edit(p,()=>{group.locked=false;group.mode='auto';l.lettering.outlineMode='union';});return;}
     if(action==='sfx-outline-group-remove'){
       if(!l.lettering.outlineGroups[glyphMode.outlineGroup])return;
       edit(p,()=>{l.lettering.outlineGroups.splice(glyphMode.outlineGroup,1);
@@ -1432,16 +1498,17 @@ $('deck').addEventListener('click', event => {
     }
     if(action==='sfx-template-save'){
       const name=prompt('テンプレート名','新しいSFXデザイン');if(!name)return;
-      try{sfxTemplates=mergeSfxTemplates(sfxTemplates,[createSfxTemplate(l,name)],{conflict:'rename'});saveSfxTemplates();renderCards(p);status('SFXデザインテンプレートを登録した。');}
+      try{sfxTemplates=mergeSfxTemplates(sfxTemplates,[createSfxTemplate(l,name)],{conflict:'rename'});saveSfxTemplates();dirty();renderCards(p);status('SFXデザインテンプレートを登録した。');}
       catch(error){status('テンプレート登録失敗: '+error.message);}return;
     }
     if(action==='sfx-template-apply'){
       const template=sfxTemplates.find(x=>x.id===card?.querySelector('[data-sfx-template-select]')?.value);
       if(!template){status('テンプレートを選択してください。');return;}
-      try{const mode=card.querySelector('[data-sfx-template-apply-mode]')?.value||'all';
-        edit(p,()=>Object.assign(l,applySfxTemplate(l,template,{mode})));status('原文とページ座標を保持して適用した。');}
+      try{const mode=card.querySelector('[data-sfx-template-apply-mode]')?.value||'all',candidate=applySfxTemplate(l,template,{mode,reuseSeed:card.querySelector('[data-sfx-template-seed]')?.value==='same'});if(!await resolveMissingFonts([candidate]))return;
+        edit(p,()=>Object.assign(l,candidate));status('原文とページ座標を保持して適用した。');}
       catch(error){status('テンプレート適用失敗: '+error.message);}return;
     }
+    if(action==='sfx-template-rename'||action==='sfx-template-delete'){const t=sfxTemplates.find(x=>x.id===card?.querySelector('[data-sfx-template-select]')?.value);if(!t)return;if(action==='sfx-template-delete'){if(!confirm('テンプレート「'+t.name+'」を削除する？'))return;sfxTemplates=sfxTemplates.filter(x=>x.id!==t.id);}else{const name=prompt('新しいテンプレート名',t.name);if(!name?.trim()||name.length>100||sfxTemplates.some(x=>x.id!==t.id&&x.name===name))return;t.name=name.trim();}saveSfxTemplates();dirty();renderCards(p);return;}
     if(action==='sfx-template-export'){
       try{download(new Blob([encodeSfxTemplates(sfxTemplates)],{type:'application/json'}),'serifu-sfx-templates.json');}
       catch(error){status('テンプレート書出しに失敗: '+error.message);}return;
@@ -1451,25 +1518,21 @@ $('deck').addEventListener('click', event => {
       input.onchange=async()=>{const file=input.files?.[0];if(!file)return;
         try{const incoming=decodeSfxTemplates(await file.text());
           const policy=prompt('ID/名前競合: skip（スキップ）/ overwrite（上書き）/ rename（名前変更）','skip')||'skip';
-          sfxTemplates=mergeSfxTemplates(sfxTemplates,incoming,{conflict:policy});saveSfxTemplates();renderCards(p);}
+          sfxTemplates=mergeSfxTemplates(sfxTemplates,incoming,{conflict:policy});saveSfxTemplates();dirty();renderCards(p);}
         catch(error){status('テンプレート読込失敗: '+error.message);}};
       input.click();return;
     }
     if(action==='sfx-glyph-select'){
-      glyphMode.selected=Number(event.target.closest('[data-glyph-index]').dataset.glyphIndex);
+      selectGlyph(glyphMode,Number(event.target.closest('[data-glyph-index]').dataset.glyphIndex),{toggle:event.shiftKey,range:event.shiftKey&&event.altKey,visible:l.lettering.glyphs.map(g=>g.index)});glyphMode.strokeRuns=[];
       renderCards(p);drawPage(p);return;
     }
     if(action==='sfx-glyph-duplicate'){
-      const original=glyphMode.selected;
-      edit(p,()=>Object.assign(l,duplicateLetteringGlyphs(l,[original])));
-      glyphMode.selected=Math.min(original+1,l.lettering.glyphs.length-1);renderCards(p);return;
+      const indices=glyphSelection(glyphMode);edit(p,()=>Object.assign(l,duplicateSelectedGlyphs(l,indices,sceneFor(p,l))));
+      glyphMode.indices=indices.sort((a,b)=>a-b).map((i,n)=>i+n+1);glyphMode.selected=glyphMode.indices[0]??null;renderCards(p);drawPage(p);return;
     }
-    if(action==='sfx-glyph-delete'){
-      edit(p,()=>Object.assign(l,removeLetteringGlyphs(l,[glyphMode.selected])));
-      glyphMode.selected=l.lettering.glyphs[0]?.index??null;renderCards(p);return;
-    }
+    if(action==='sfx-glyph-delete'){deleteSfxSelection(p,l,glyphMode);return;}
     if(action==='sfx-glyph-reset'){
-      edit(p,()=>{const g=l.lettering.glyphs.find(g=>g.index===glyphMode.selected);if(g){
+      edit(p,()=>{for(const g of l.lettering.glyphs.filter(g=>glyphSelection(glyphMode).includes(g.index))){
         Object.assign(g,{dx:0,dy:0,rotation:0,scaleX:1,scaleY:1,shear:0});
         g.manual.position=false;g.manual.transform=false;
       }});return;
@@ -1551,8 +1614,8 @@ $('deck').addEventListener('click', event => {
     if (p.layers.length && !confirm(`「${p.name}」を一覧から外す？ 未保存の編集は失われる。元ファイルは残る。`)) return;
     removePage(p);
   } else if (action === 'delete') {
+    if (!p.directory || !confirm(`元画像「${p.name}」をフォルダから完全に削除する？\nゴミ箱には移動しない。未保存の編集も失われる。`)) return;
     guard(async () => {
-      if (!p.directory || !confirm(`元画像「${p.name}」をフォルダから完全に削除する？\nゴミ箱には移動しない。未保存の編集も失われる。`)) return;
       await p.directory.removeEntry(p.name); removePage(p); status('元画像を削除した');
     });
   }
@@ -1615,30 +1678,17 @@ function editMaskDrag(p,event){
 }
 
 function connectCanvas(p) {
+  p.canvas.addEventListener('paste',event=>{const l=selected(p),mode=activeGlyphEdit(p,l);if(!mode||editLocked())return;const text=event.clipboardData?.getData('text/plain');if(!text)return;event.preventDefault();pasteSfxClipboard(p,l,mode,sfxClipboard?.text===text?sfxClipboard:plainSfxClipboard(text));});
+  p.canvas.addEventListener('dblclick',event=>{if(editLocked())return;const pos=coords(event,p),l=paintOrder(p.layers).reverse().find(l=>l.kind==='sfx'&&hit(l,pos.x,pos.y));if(l){selectObject(p,l.id);activate(p);p.row.querySelector(`[data-layer-id="${l.id}"] [data-action=sfx-glyph-enter]`)?.click();}});
   p.canvas.addEventListener('pointerdown', event => {
-    if (editLocked() || !event.isPrimary || event.button !== 0 || drag) return;
+    if(editLocked()||event.button!==0||drag)return;
+    const letter=selected(p),mode=activeGlyphEdit(p,letter);
+    if(mode){event.preventDefault();mode.touch=event.pointerType==='touch';activate(p);beginLetteringGesture(p,letter,mode,event,localPoint(letter,...Object.values(coords(event,p))),p.canvas.getBoundingClientRect().width/imageSize(p.img.width,p.img.height,p.imageEdit).width,{render:()=>drawPage(p),magnify:()=>toggleMagnifier(p,p.row.querySelector('[data-action=preview-magnifier]')||p.canvas)});return;}
+    if(!event.isPrimary)return;
     if(p.cropDraft){
       event.preventDefault();activate(p);p.canvas.focus({preventScroll:true});
       const start=previewCoords(event,p),mode=cropPointerMode(p,start);
       p.cropPointer={id:event.pointerId,start,mode,before:{...p.cropDraft}};p.canvas.style.cursor=CROP_CURSORS[mode];p.canvas.setPointerCapture(event.pointerId);return;
-    }
-    const letterLayer=selected(p),glyphMode=activeGlyphEdit(p,letterLayer);
-    if(glyphMode){
-      event.preventDefault();activate(p);
-      const pos=coords(event,p),point=localPoint(letterLayer,pos.x,pos.y);
-      const visible=sfxVisibleIndices(letterLayer.text),glyphs=textGlyphs(p.canvas.getContext('2d'),letterLayer);
-      const nearest=glyphs.map((base,i)=>{
-        const g=letterLayer.lettering.glyphs.find(g=>g.index===visible[i]);
-        return g?{index:visible[i],distance:Math.hypot(point.x-base.x-g.dx,point.y-base.y-g.dy),radius:Math.max(15,base.size*.65)}:null;
-      }).filter(Boolean).filter(g=>g.distance<=g.radius).at(-1);
-      if(nearest){
-        glyphMode.selected=nearest.index;
-        const g=letterLayer.lettering.glyphs.find(g=>g.index===nearest.index);
-        p.glyphDrag={id:event.pointerId,index:nearest.index,anchor:point,before:{dx:g.dx,dy:g.dy},savedUndo:p.undo.length,oldRedo:p.redo.slice()};
-        p.canvas.setPointerCapture(event.pointerId);
-        renderCards(p);drawPage(p);
-      }
-      return; // 個別モードではSFX全体を誤ドラッグしない
     }
     const size=imageSize(p.img.width,p.img.height,p.imageEdit),pos = coords(event, p), scale = p.canvas.getBoundingClientRect().width / size.width;
     const current = selected(p), handle = current && handleAt(current, pos.x, pos.y, scale);
@@ -1662,17 +1712,8 @@ function connectCanvas(p) {
     p.canvas.setPointerCapture(event.pointerId);
   });
   p.canvas.addEventListener('pointermove', event => {
-    if(p.glyphDrag?.id===event.pointerId){
-      const gesture=p.glyphDrag,l=selected(p);if(!l||!l.lettering)return;
-      const pos=coords(event,p),point=localPoint(l,pos.x,pos.y);
-      const dx=point.x-gesture.anchor.x,dy=point.y-gesture.anchor.y;
-      if(!gesture.changed&&(Math.abs(dx)>.1||Math.abs(dy)>.1)){checkpoint(p);gesture.changed=true;}
-      if(gesture.changed){
-        const glyph=l.lettering.glyphs.find(g=>g.index===gesture.index);
-        if(glyph){glyph.dx=gesture.before.dx+dx;glyph.dy=gesture.before.dy+dy;glyph.manual.position=true;drawPage(p);}
-      }
-      return;
-    }
+    const letter=selected(p),mode=activeGlyphEdit(p,letter);
+    if(mode&&moveLetteringGesture(p,letter,mode,event,localPoint(letter,...Object.values(coords(event,p))),{checkpoint:()=>checkpoint(p),render:()=>drawPage(p)}))return;
     if(p.cropDraft){
       if(editLocked())return;
       const pointer=p.cropPointer,pos=previewCoords(event,p);
@@ -1714,22 +1755,14 @@ function connectCanvas(p) {
     const target=selected(p);
     if(drag.mode==='move'){
       const targets=selectedLayers(p);targets.forEach((layer,index)=>{const start=drag.starts[index];layer.x=start.x+updates.x-drag.start.x;layer.y=start.y+updates.y-drag.start.y;layer.presetId=null;});
-    }else{Object.assign(target, updates);target.presetId=null;}
+    }else{if(drag.mode==='resize'&&target.lettering?.enabled)scaleLetteringData(target,updates.w/target.w,updates.h/target.h);Object.assign(target, updates);target.presetId=null;}
     dirty(); p.done = false;p.edited=true;scheduleThumbnailRefresh(p);
     if(firstCopy)renderCards(p);
     drawPage(p); updateControls(p); updateGlobal();
   });
   const end = event => {
-    if(p.glyphDrag?.id===event.pointerId){
-      const gesture=p.glyphDrag;p.glyphDrag=null;
-      if(event.type!=='pointerup'&&gesture.changed){
-        const g=selected(p)?.lettering?.glyphs.find(g=>g.index===gesture.index);
-        if(g){g.dx=gesture.before.dx;g.dy=gesture.before.dy;g.manual.position=false;}
-        p.undo.length=gesture.savedUndo;p.redo=gesture.oldRedo;
-      }else if(gesture.changed){markChanged(p);}
-      if(p.canvas.hasPointerCapture(event.pointerId))p.canvas.releasePointerCapture(event.pointerId);
-      renderCards(p);drawPage(p);return;
-    }
+    const letter=selected(p),mode=activeGlyphEdit(p,letter);
+    if(mode&&endLetteringGesture(p,letter,mode,event,{commit:()=>markChanged(p),render:()=>{renderCards(p);drawPage(p);}}))return;
     if(p.cropPointer?.id===event.pointerId){
       if(event.type!=='pointerup')p.cropDraft=p.cropPointer.before;
       p.cropPointer=null;if(p.canvas.hasPointerCapture(event.pointerId))p.canvas.releasePointerCapture(event.pointerId);
@@ -1780,19 +1813,27 @@ window.addEventListener('keydown', event => {
     event.preventDefault();applyLayerPreset(p,layer,preset);return;
   }
   const activeLetter=activeGlyphEdit(p,selected(p));
+  if(activeLetter&&command&&!event.altKey&&['c','v','d'].includes(key)){
+    event.preventDefault();const l=selected(p),scene=sceneFor(p,l);
+    if(key==='c'){sfxClipboard=copyLetteringSelection(l,activeLetter,scene);if(sfxClipboard)void navigator.clipboard?.writeText(sfxClipboard.text).catch(()=>{});}
+    if(key==='v'){
+      const currentId=projectId;
+      const fallback=()=>{if(projectId===currentId&&activeGlyphEdit(p,l)===activeLetter)pasteSfxClipboard(p,l,activeLetter,sfxClipboard);};
+      if(navigator.clipboard?.readText)void navigator.clipboard.readText().then(text=>{if(projectId===currentId&&activeGlyphEdit(p,l)===activeLetter)pasteSfxClipboard(p,l,activeLetter,text&&text!==sfxClipboard?.text?plainSfxClipboard(text):sfxClipboard);}).catch(fallback);else fallback();
+    }
+    if(key==='d'){const indices=glyphSelection(activeLetter);edit(p,()=>Object.assign(l,duplicateSelectedGlyphs(l,indices,scene)));activeLetter.indices=indices.sort((a,b)=>a-b).map((i,n)=>i+n+1);activeLetter.selected=activeLetter.indices[0];renderCards(p);drawPage(p);}
+    return;
+  }
   if(activeLetter&&!command&&!event.altKey){
     if(key==='escape'){event.preventDefault();p.glyphEdit=null;renderCards(p);drawPage(p);return;}
     if(key==='delete'||key==='backspace'){
       event.preventDefault();const l=selected(p);
-      edit(p,()=>Object.assign(l,removeLetteringGlyphs(l,[activeLetter.selected])));
-      activeLetter.selected=l.lettering.glyphs[0]?.index??null;renderCards(p);return;
+      deleteSfxSelection(p,l,activeLetter);return;
     }
     const vector={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[key];
     if(vector){
       event.preventDefault();const l=selected(p),step=event.shiftKey?10:1;
-      edit(p,()=>{const g=l.lettering.glyphs.find(g=>g.index===activeLetter.selected);
-        if(g){g.dx+=vector[0]*step;g.dy+=vector[1]*step;g.manual.position=true;}
-      });return;
+      edit(p,()=>transformGlyphSelection(l,glyphSelection(activeLetter),sceneFor(p,l),{dx:vector[0]*step,dy:vector[1]*step}));return;
     }
   }
   if(key==='delete'&&p.selectedMaskId&&!command&&!event.altKey&&!event.shiftKey){event.preventDefault();removeMaskEffect(p,p.selectedMaskId);status('選択中のマスク加工を削除した。');return;}
@@ -1863,14 +1904,14 @@ async function addFiles(entries,task) {
   if(entries.length>=4)imagePool.resize(4);task.stage('画像準備と表示反映',entries.length);
   try{for(let start=0;start<entries.length;start+=20){
     const batch=entries.slice(start,start+20),ready=[];
-    for await(const result of boundedResults(batch,async entry=>{const file=entry.file||await entry.handle.getFile();return {...entry,file,expectedSize:await imageDimensions(file)};},{signal:task.signal,concurrency:2})){
+    for await(const result of boundedResults(batch,async entry=>{task.metrics.metadataRequested=(task.metrics.metadataRequested||0)+1;const file=entry.file||await entry.handle.getFile();const expectedSize=await imageDimensions(file);task.metrics.metadataCompleted=(task.metrics.metadataCompleted||0)+1;return {...entry,file,expectedSize};},{signal:task.signal,concurrency:2})){
       ready.push(result.error?{...batch[result.index],metadataError:result.error}:result.value);
     }
     for await(const result of boundedResults(ready,async entry=>{if(entry.metadataError)throw entry.metadataError;return {...entry,prepared:await prepareImage(entry.file,task,entry.expectedSize)};},queueOptions(task,true))){
       checkAbort(task.signal);const entry=ready[result.index],name=entry.file?.name||entry.handle?.name;
       if(result.error){failures++;task.result(name,false);(task.metrics.failures ||= []).push({name,reason:result.error.message});task.update({errorMessage:`${name}: ${result.error.message}`},true);continue;}
       const {file,directory=null,prepared}=result.value,p=createPage({name:file.name,src:URL.createObjectURL(file),file,directory,prepared});pages.push(p);first ||= p;count++;unflushed++;if(directory)sourceDirectory=directory;
-      task.result(name);if(unflushed>=20||performance.now()-lastFlush>=100){flush();await yieldToBrowser();}
+      task.result(name);if(unflushed>=10||(count===1&&pages.length===1)||performance.now()-lastFlush>=250){flush();await yieldToBrowser();}
     }
     flush();await yieldToBrowser();
   }}finally{flush();}
@@ -1887,6 +1928,7 @@ $('open').onclick = () => {
 };
 $('files').onclick = () => {if(!busy)$('fileInput').click();};
 function addImageFiles(files) {
+  if(readOnly){status('閲覧専用のプロジェクトには画像を追加できない。');return;}
   if (busy) return;
   const images = [...files].filter(file => /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name))
     .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
@@ -1933,7 +1975,8 @@ async function imageBlobFallback(p) {
 }
 async function imageBlob(p,task){
   const key=exportKey(p,fontVersion),cached=pngCache.get(key);if(cached)return cached;
-  const blob=await imagePool.run('render-png',{blob:await originalBlob(p),width:p.img.width,height:p.img.height,layers:p.layers,imageEdit:p.imageEdit,maskEffects:p.maskEffects,maskAssets:p.maskAssets},task,()=>imageBlobFallback(p));
+  const custom=p.layers.some(l=>[l.font,...(l.lettering?.glyphs||[]).map(g=>g.overrides.font)].some(hasSessionFont));
+  const blob=custom?await imageBlobFallback(p):await imagePool.run('render-png',{blob:await originalBlob(p),width:p.img.width,height:p.img.height,layers:p.layers,imageEdit:p.imageEdit,maskEffects:p.maskEffects,maskAssets:p.maskAssets},task,()=>imageBlobFallback(p));
   checkAbort(task?.signal);pngCache.put(key,blob,p.id);return blob;
 }
 async function saveImage(p,task) {
@@ -1975,11 +2018,45 @@ $('textSave').onclick = () => guard(async task => {
   download(new Blob(['\ufeff',text],{type:'text/plain;charset=utf-8'}),`serifu-${target}.txt`);task.result(`serifu-${target}.txt`);status(`${$('textTarget').selectedOptions[0].textContent}のテキストのダウンロードを開始した`);
 },'本文テキスト出力',3);
 $('projectSave').onclick = () => guard(async task => {
-  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)},format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
+  if(!pages.length){task.stage('対象なし',0);return;}task.stage('メタ情報準備',pages.length);const snapshot=snapshotPages(),prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates),sfxStrokePresets:structuredClone(strokePresets)},format=$('projectFormat').value,folderName=sourceFolderName,startedAt=new Date(),name=projectFileName(format,startedAt,folderName);task.update({processed:snapshot.length,succeeded:snapshot.length});const blob=await projectBlob(snapshot,prefs,{format,task,sourceFolderName:folderName,projectId});checkAbort(task.signal);task.stage('ダウンロード準備',1);download(blob,name);task.result(name,true,blob.size);status(`編集データ「${name}」のダウンロードを開始した`);
 },'編集データ保存',3);
+async function resolveMissingFonts(layers){
+  const missing=[...new Set(layers.flatMap(missingLayerFonts))];if(!missing.length)return true;
+  const modal=element('dialog','missing-font-dialog');modal.setAttribute('aria-label','不足フォントの解決');modal.append(element('h2','','必要な書体が見つからない'),element('p','',missing.join('、')));
+  const select=element('select');select.dataset.fontFallback='true';for(const [key,font] of Object.entries(FONT_CATALOG))select.add(new Option(font.label,key));select.value='comic';modal.append(select);
+  const note=element('p','','アップロードした書体はこのタブで使用。編集データに書体ファイルは含まれず、再度開く際は再アップロードが必要。使用権を確認したファイルを選ぶ。');modal.append(note);
+  const upload=element('input');upload.type='file';upload.accept='.ttf,.otf,.woff,.woff2';upload.dataset.fontUpload='true';modal.append(upload);
+  const result=await new Promise(resolve=>{
+    const apply=element('button','','代替書体を使用');apply.onclick=()=>{for(const layer of layers){if(missing.includes(layer.font)){layer.originalFont=layer.font;layer.font=select.value;layer.fontResolvedNow=true;}for(const g of layer.lettering?.glyphs||[])if(missing.includes(g.overrides.font)){g.overrides.originalFont=g.overrides.font;g.overrides.font=select.value;layer.fontResolvedNow=true;}}resolve(true);modal.close();};
+    upload.onchange=async()=>{const file=upload.files?.[0];if(!file)return;try{for(const key of missing)await registerSessionFont(key,file);for(const select of [...document.querySelectorAll('[data-field=font]'),...$('pageTemplate').content.querySelectorAll('[data-field=font]')])for(const key of missing)if(![...select.options].some(o=>o.value===key))select.add(new Option(key+'（アップロード）',key));clearGlyphCache();pngCache.clear();resolve(true);modal.close();}catch(error){note.textContent=error.message;}};
+    const cancel=element('button','','中止');cancel.onclick=()=>{resolve(false);modal.close();};modal.oncancel=()=>resolve(false);modal.append(apply,cancel);document.body.append(modal);modal.showModal();
+  });modal.remove();return result;
+}
+async function openStoredProject(identity,task,{snapshotId=null,restoreHistory=false}={}){
+  const bundle=await readProjectBundle(identity,{snapshotId});if(!bundle)throw new Error('正常保存済みのプロジェクトがない');
+  const meta=bundle.snapshot.meta,byImage=new Map(bundle.images.map(x=>[x.id,x.blob])),byMask=new Map(meta.pages.map(p=>[p.id,{}]));
+  for(const record of bundle.masks)byMask.get(record.pageId)[record.id]=record.asset;
+  const importedStrokes=validateStrokePresets(meta.preferences?.sfxStrokePresets??[]);
+  const templates=Array.isArray(meta.preferences?.sfxTemplates)?mergeSfxTemplates(sfxTemplates,meta.preferences.sfxTemplates,{conflict:'skip'}):sfxTemplates;
+  const loaded=await prepareProjectPages(meta.pages.map(p=>({...p,blob:byImage.get(p.id),maskAssets:byMask.get(p.id)})),meta.version,task,{restoreIds:true});
+  let claim;
+  try{
+    checkAbort(task.signal);await signalProjectActivity(identity,tabIdentity,{interaction:true});claim=await claimProjectLease(identity,tabIdentity);
+    const fence=claim.held?{owner:tabIdentity,token:claim.token}:null;
+    if(restoreHistory){if(!claim.held)throw new Error('別タブが編集中のため履歴を復元できない');await restoreProjectHistory(identity,snapshotId,{fence});}
+    else await activateStoredProject(identity,{fence});
+  }catch(error){loaded.forEach(releasePage);if(claim?.held&&identity!==projectId)await releaseProjectLease(identity,tabIdentity);throw error;}
+  const oldId=projectId;if(oldId!==identity)await releaseProjectLease(oldId,tabIdentity);
+  projectId=identity;projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
+  loaded.forEach(p=>p.imageSaved=true);pages.forEach(releasePage);pages=loaded;$('deck').replaceChildren();activeId=loaded[0]?.id||null;batchStart=0;drag=null;pngCache.clear();
+  sourceFolderName=meta.sourceFolderName||null;mergePresets(meta.preferences);sfxTemplates=templates;saveSfxTemplates();mergeStrokePresets(importedStrokes);
+  revision++;lastSavedRevision=loaded.some(p=>p.fontsChanged)?-1:revision;changed=loaded.some(p=>p.fontsChanged);draftMeta=meta;needLeaseReload=false;rememberProject();configureAutosave();refreshJump();if(active())activate(active());updateDraftUI();updateLeaseAccess();void refreshProjectHistories();
+  status(restoreHistory?'選択世代を復元した。既存履歴は維持。':'保存済みプロジェクトを開いた。');
+}
 async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
+  if(!await resolveMissingFonts(records.flatMap(p=>p.layers)))throw new DOMException('フォント選択を中止','AbortError');
   task.stage('検証',records.length);const validated=[];
-  for(const p of records){checkAbort(task.signal);try{const normalized=normalizeLayers(p.layers,version);validated.push({...p,layers:restoreIds?normalized:normalized.map(layer=>({...layer,id:crypto.randomUUID()}))});task.result(p.name);}catch(error){task.result(p.name,false);throw new Error(`${p.name}: ${error.message}`);}if(validated.length%20===0)await yieldToBrowser();}
+  for(const p of records){checkAbort(task.signal);try{const normalized=normalizeLayers(p.layers,version);validated.push({...p,fontsChanged:p.layers.some(l=>l.fontResolvedNow),layers:restoreIds?normalized:normalized.map(layer=>({...layer,id:crypto.randomUUID()}))});task.result(p.name);}catch(error){task.result(p.name,false);throw new Error(`${p.name}: ${error.message}`);}if(validated.length%20===0)await yieldToBrowser();}
   const loaded=[],sources=new Map();if(records.length>=4)imagePool.resize(4);task.stage('画像準備',records.length);
   try{for(let start=0;start<validated.length;start+=20){
     const batch=validated.slice(start,start+20),ready=[];
@@ -1991,7 +2068,8 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
       if(p.expectedSize&&(p.expectedSize.width!==prepared.width||p.expectedSize.height!==prepared.height))throw new Error(`画像寸法が不正: ${p.name}`);
       const imageEdit=normalizeImageEdit(p.imageEdit,prepared.width,prepared.height),maskAssets=p.maskAssets??{};
       const maskEffects=version>=12?normalizeMaskEffects(p.maskEffects??[],prepared.width,prepared.height,new Set(Object.keys(maskAssets)),version):[];
-      const page=createPage({id:restoreIds?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,imageEdit,maskEffects,maskAssets,selectedMaskId:p.selectedMaskId,src:URL.createObjectURL(p.blob),file:p.blob,prepared});loaded.push(page);
+      const page=createPage({id:restoreIds&&validProjectId(p.id)?p.id:undefined,name:p.name,layers:p.layers,done:p.done===true,imageEdit,maskEffects,maskAssets,selectedMaskId:p.selectedMaskId,src:URL.createObjectURL(p.blob),file:p.blob,prepared});loaded.push(page);
+      page.fontsChanged=p.fontsChanged===true;
       if(hasEdits(page)){requestPageFonts(page);await renderPageThumbnail(page,task.signal);}
       task.result(p.name);
     }
@@ -2001,7 +2079,7 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
     checkAbort(task.signal);return loaded;
   }catch(error){loaded.forEach(releasePage);throw error;}
 }
-$('projectLoad').onclick = () => {if(!busy)$('projectInput').click();};
+$('projectLoad').onclick = () => {if(!busy&&!readOnly)$('projectInput').click();};
 $('projectManage').onclick=async()=>{
   if(busy)return;
   const modal=element('dialog','stored-project-dialog');
@@ -2030,19 +2108,10 @@ $('projectManage').onclick=async()=>{
         (p.reclaimableBytes/1048576).toFixed(1)+' MiB'));
       const open=element('button','','このプロジェクトを開く');
       open.disabled=!p.latest||p.projectId===projectId;
-      open.onclick=async()=>{
+      open.onclick=()=>guard(async task=>{
         if(changed&&pages.length&&!confirm('現在の保存前の変更は失われます。プロジェクトを切り替える？'))return;
-        try{
-          const oldId=projectId;
-          if(oldId!==p.projectId)await releaseProjectLease(oldId,tabIdentity);
-          projectId=p.projectId;
-          await signalProjectActivity(projectId,tabIdentity,{interaction:true});
-          const claim=await claimProjectLease(projectId,tabIdentity);
-          projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
-          await activateStoredProject(projectId,{fence:projectLease});
-          modal.close();needLeaseReload=true;$('restoreDraft').click();
-        }catch(error){status('プロジェクトを開けない: '+error.message);}
-      };
+        await openStoredProject(p.projectId,task);modal.close();
+      },'保存プロジェクトを開く',5);
       const remove=element('button','danger','プロジェクトを削除');
       remove.onclick=async()=>{
         if(!confirm('プロジェクト「'+p.name+'」と復元履歴'+p.history.length+'世代を削除する？ 元に戻せません。共有素材は維持します。'))return;
@@ -2058,7 +2127,9 @@ $('projectManage').onclick=async()=>{
           await refresh();status('保存済みプロジェクトを削除した。共有素材は保護した。');
         }catch(error){status('プロジェクト削除に失敗: '+error.message);}
       };
-      item.append(open,remove);list.append(item);
+      item.append(open,remove);
+      const histories=element('details','stored-history');histories.append(element('summary','','復元履歴 '+p.history.length+'世代'));
+      for(const history of p.history){const row=element('p','',new Date(history.createdAt).toLocaleString('ja-JP')+' · 論理 '+(history.logicalBytes/1048576).toFixed(2)+' MiB / 回収可能（概算） '+(history.reclaimableBytes/1048576).toFixed(2)+' MiB');const restoreGeneration=element('button','','この世代を復元');restoreGeneration.onclick=()=>guard(async task=>{if(!confirm('現在の編集をこの世代へ置き換える？ 現在の状態は自動退避されない。'))return;await openStoredProject(p.projectId,task,{snapshotId:history.snapshotId,restoreHistory:true});modal.close();},'履歴を復元',5);row.append(restoreGeneration);const removeHistory=element('button','danger','この1世代を削除');removeHistory.onclick=async()=>{if(!confirm('この日時の復元履歴1世代を削除する？'))return;try{await deleteProjectHistory(p.projectId,history.historyId,{fence:p.projectId===projectId?projectLease:null});await collectUnusedProjectAssets();await refresh();}catch(error){status(error.message);}};row.append(removeHistory);histories.append(row);}item.append(histories);list.append(item);
     }
   };
   try{await refresh();modal.showModal();}
@@ -2090,27 +2161,28 @@ $('projectOpenInput').onchange=event=>{
       for(const item of masks)byMask.get(item.pageId)[item.id]=item.asset;
       data={version:snapshot.meta.version,projectId:identity,pages:snapshot.meta.pages.map(page=>({...page,blob:byId.get(page.id),maskAssets:byMask.get(page.id)})),preferences:snapshot.meta.preferences,sourceFolderName:snapshot.meta.sourceFolderName};
     }
+    const importedStrokes=validateStrokePresets(data.preferences?.sfxStrokePresets??[]);
+    const templates=Array.isArray(data.preferences?.sfxTemplates)?mergeSfxTemplates(sfxTemplates,data.preferences.sfxTemplates,{conflict:'skip'}):sfxTemplates;
     const loaded=await prepareProjectPages(data.pages,data.version,task,{restoreIds:true});
     checkAbort(task.signal);
     const oldId=projectId;
+    let claimed;try{await signalProjectActivity(identity,tabIdentity,{interaction:true});claimed=await claimProjectLease(identity,tabIdentity);}catch(error){loaded.forEach(releasePage);throw error;}
     if(oldId!==identity)await releaseProjectLease(oldId,tabIdentity);
     projectId=identity;
-    await signalProjectActivity(projectId,tabIdentity,{interaction:true});
-    const claimed=await claimProjectLease(projectId,tabIdentity);
     projectLease=claimed.held?{owner:tabIdentity,token:claimed.token}:null;readOnly=!claimed.held;
     pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;
     activeId=loaded[0]?.id||null;drag=null;pngCache.clear();batchStart=0;
     sourceFolderName=data.sourceFolderName||projectFolderName(file.name)||sourceFolderName;
     const presetNotice=mergePresets(data.preferences);
     if(Array.isArray(data.preferences?.sfxTemplates)){
-      sfxTemplates=mergeSfxTemplates(sfxTemplates,data.preferences.sfxTemplates,{conflict:'skip'});saveSfxTemplates();
+      sfxTemplates=templates;saveSfxTemplates();mergeStrokePresets(importedStrokes);
     }
     task.stage('プロジェクト切替',loaded.length);
     refreshJump();if(active())activate(active());
     dirty();
-    if(option==='autosave'){lastSavedRevision=revision;changed=false;draftMeta=snapshot.meta;}
+    if(option==='autosave'){lastSavedRevision=loaded.some(p=>p.fontsChanged)?-1:revision;changed=loaded.some(p=>p.fontsChanged);draftMeta=snapshot.meta;}
     else {lastSavedRevision=-1;draftMeta=null;}
-    needLeaseReload=false;
+    rememberProject();needLeaseReload=false;
     updateDraftUI();updateLeaseAccess();void refreshProjectHistories();
     task.update({processed:loaded.length,succeeded:loaded.length},true);
     status(option==='copy'?'別プロジェクトとして開いた。旧プロジェクトの自動保存と履歴はそのまま保持した。':
@@ -2119,12 +2191,14 @@ $('projectOpenInput').onchange=event=>{
   },'プロジェクトを開く',6);
 };
 $('projectInput').onchange = event => {
+  if(readOnly){event.target.value='';status('閲覧専用のプロジェクトには追加できない。');return;}
   const file=event.target.files[0];event.target.value='';if(!file)return;
-  guard(async task=>{task.stage('ファイル解析',1);let data;try{data=await readProject(file,{signal:task.signal});task.result(file.name);}catch(error){if(error.name!=='AbortError')task.result(file.name,false);throw error;}const loaded=await prepareProjectPages(data.pages,data.version,task);checkAbort(task.signal);
+  guard(async task=>{task.stage('ファイル解析',1);let data;try{data=await readProject(file,{signal:task.signal});task.result(file.name);}catch(error){if(error.name!=='AbortError')task.result(file.name,false);throw error;}const importedStrokes=validateStrokePresets(data.preferences?.sfxStrokePresets??[]);
+    const templates=Array.isArray(data.preferences?.sfxTemplates)?mergeSfxTemplates(sfxTemplates,data.preferences.sfxTemplates,{conflict:'skip'}):sfxTemplates;const loaded=await prepareProjectPages(data.pages,data.version,task);checkAbort(task.signal);
     sourceFolderName=data.sourceFolderName||projectFolderName(file.name)||sourceFolderName;
     pages.push(...loaded);const presetNotice=mergePresets(data.preferences);
     if(Array.isArray(data.preferences?.sfxTemplates)){
-      sfxTemplates=mergeSfxTemplates(sfxTemplates,data.preferences.sfxTemplates,{conflict:'skip'});saveSfxTemplates();
+      sfxTemplates=templates;saveSfxTemplates();mergeStrokePresets(importedStrokes);
     }
     dirty();task.stage('一覧反映',loaded.length);refreshJump();activate(loaded[0],loaded[0].selectedId,true);task.update({processed:loaded.length,succeeded:loaded.length},true);
     status((data.version===1?'旧データを追加。吹き出しは白縁の男性セリフへ変換した。':'編集データを追加。元ファイルとの接続がないため元画像削除は無効。')+presetNotice);
@@ -2272,13 +2346,17 @@ function recordProjectActivity(){
 }
 document.addEventListener('pointerdown',recordProjectActivity,{capture:true});
 document.addEventListener('keydown',recordProjectActivity,{capture:true});
+let pollingLease=false;
 async function pollProjectLease(){
+  if(pollingLease||busy)return;
+  pollingLease=true;const identity=projectId;
   try{
-    await signalProjectActivity(projectId,tabIdentity);
-    const claim=await claimProjectLease(projectId,tabIdentity);
+    await signalProjectActivity(identity,tabIdentity);
+    const claim=await claimProjectLease(identity,tabIdentity);
+    if(projectId!==identity)return;
     if(!claim.held){
       projectLease=null;
-      if(!readOnly){readOnly=true;updateLeaseAccess();}
+      if(!readOnly){readOnly=true;clearTimeout(latestSaveTimer);clearInterval(autosaveTimer);activeDraftTask?.cancel();updateLeaseAccess();}
       return;
     }
     projectLease={owner:tabIdentity,token:claim.token};
@@ -2287,13 +2365,14 @@ async function pollProjectLease(){
       if(!needLeaseReload&&!busy){needLeaseReload=true;void activateStoredProject(projectId,{fence:projectLease}).then(()=>{$('restoreDraft').click();}).catch(error=>{needLeaseReload=false;status('編集権の引継ぎに失敗: '+error.message);});}
       return;
     }
-    if(readOnly){readOnly=false;updateLeaseAccess();}
+    if(readOnly){readOnly=false;configureAutosave();updateLeaseAccess();}
   }catch(error){
     if(!readOnly){readOnly=true;updateLeaseAccess();}
     $('draftStatus').textContent='編集権の検証に失敗: '+error.message;
-  }
+  }finally{pollingLease=false;}
 }
-window.addEventListener('pagehide',()=>{clearTimeout(latestSaveTimer);activeDraftTask?.cancel();void releaseProjectLease(projectId,tabIdentity).catch(()=>{});});
+window.addEventListener('pagehide',()=>{try{sessionStorage.setItem('serifu.reload-owner',tabIdentity);}catch{}clearTimeout(latestSaveTimer);activeDraftTask?.cancel();void releaseProjectLease(projectId,tabIdentity).catch(()=>{});});
+window.addEventListener('pageshow',event=>{try{sessionStorage.removeItem('serifu.reload-owner');}catch{}if(event.persisted){readOnly=true;clearTimeout(latestSaveTimer);clearInterval(autosaveTimer);clearInterval(historyTimer);updateLeaseAccess();void pollProjectLease();}});
 setInterval(()=>{void pollProjectLease();},4000);
 void pollProjectLease();
 
@@ -2301,7 +2380,7 @@ function savedTime(timestamp) {return new Date(timestamp).toLocaleTimeString('ja
 function updateDraftUI() {
   $('draftNotice').hidden=!draftMeta;
   if(draftMeta)$('draftSummary').textContent=`一時保存：${new Date(draftMeta.savedAt).toLocaleString('ja-JP')} · ${draftMeta.pages.length} 枚`;
-  $('restoreDraft').disabled=busy||!!draftTask;$('clearDraft').disabled=busy||!!draftTask;
+  $('restoreDraft').disabled=busy||!!draftTask;$('clearDraft').disabled=readOnly||busy||!!draftTask;
   if(draftTask){if(!$('draftStatus').textContent.startsWith('自動保存'))$('draftStatus').textContent='一時保存中…';return;}
   if($('draftStatus').dataset.error)return;
   $('draftStatus').textContent=draftMeta?`${savedTime(draftMeta.savedAt)} 保存済${revision!==lastSavedRevision&&pages.length?' · 保存後の変更あり':''}`:'まだ一時保存なし';
@@ -2310,15 +2389,16 @@ const storageReady=(async()=>{
   try {
     try{await migrateLegacyDraft();}
     catch(error){$('draftStatus').dataset.error='true';$('draftStatus').textContent='旧保存の移行を完了できない: '+error.message;}
-    draftMeta=await getDraftMeta();updateDraftUI();
+    const identity=rememberedProject(),own=validProjectId(identity)?await latestProjectSnapshot(identity):null;
+    draftMeta=own?.meta||await getDraftMeta();updateDraftUI();
   }
   catch(error){$('draftStatus').dataset.error='true';$('draftStatus').textContent=`一時保存を利用できない: ${error.message}`;}
 })();
 async function temporarySave(manual=false) {
-  if(!pages.length||busy||readOnly||pages.some(p=>p.glyphDrag))return;
+  if(!pages.length||busy||readOnly||(!manual&&autosaveQuotaPaused)||pages.some(p=>p.glyphDrag))return;
   if(draftTask){if(!manual)return;await draftTask.catch(()=>{});return temporarySave(true);}
-  if(!manual&&revision===lastSavedRevision)return;
-  const snapshot=snapshotPages(),captured=revision,savingId=projectId,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)};
+  if(!manual&&revision===lastSavedRevision){const history=await listProjectHistories(projectId);if(history[0]&&Date.now()-history[0].createdAt<300000)return;}
+  const snapshot=snapshotPages(),captured=revision,savingId=projectId,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates),sfxStrokePresets:structuredClone(strokePresets)};
   const meta={version:PROJECT_VERSION,projectId:savingId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
   const masks=snapshot.flatMap(page=>[...new Set(page.maskEffects.map(effect=>effect.assetId))].map(id=>{
     const asset=page.maskAssets?.[id];if(!asset)throw new Error(`「${page.name}」のマスク素材がない`);
@@ -2332,7 +2412,7 @@ async function temporarySave(manual=false) {
     if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
     const savingFence={owner:tabIdentity,token:claim.token};
     projectLease=savingFence;
-    const ids=await projectImageIds(savingId),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
+    const ids=await projectImageIds(savingId),missing=snapshot.filter(p=>!ids.has(p.id)||!pages.find(original=>original.id===p.id)?.imageSaved),images=[];task.stage('画像差分準備',missing.length);
     for(const p of missing){checkAbort(task.signal);const blob=await originalBlob(p),original=pages.find(page=>page.id===p.id);if(original)original.assetBlob=blob;images.push({id:p.id,blob});task.result(p.name);if(images.length%20===0)await yieldToBrowser();}
     task.metrics.newImages=images.length;task.stage('DB要求',images.length);if(!images.length)task.stage('コミット',1);
     // Asset encoding may be slower than one lease interval. Renew immediately before
@@ -2340,54 +2420,61 @@ async function temporarySave(manual=false) {
     checkAbort(task.signal);
     if(projectId!==savingId)return;
     const renewed=await claimProjectLease(savingId,tabIdentity);
-    if(!renewed.held)throw new Error('他のタブが編集権を取得したため保存できない');
+    if(!renewed.held||renewed.token!==savingFence.token)throw new Error('保存準備中に編集権が失効したため保存できない');
     const fence={owner:tabIdentity,token:renewed.token};
     projectLease=fence;
     await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence});
     task.stage('コミット',1);
     task.result('一時保存');
     if(projectId!==savingId)return;
-    draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;
+    for(const saved of snapshot){const original=pages.find(p=>p.id===saved.id);if(original&&original.src===saved.src)original.imageSaved=true;}
+    autosaveQuotaPaused=false;rememberProject();draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;
     void refreshProjectHistories();
     void collectUnusedProjectAssets().catch(error=>status('不要素材の整理を延期: '+error.message));
   })();updateDraftUI();let failure;
   try{await draftTask;if(manual)status('画像・文字・位置・設定をこのブラウザに一時保存した。');}
-  catch(error){failure=error;if(error.name!=='AbortError')task.result('一時保存',false);$('draftStatus').dataset.error='true';$('draftStatus').textContent=error.name==='AbortError'?'一時保存を中断。前回の保存を維持。':error.name==='QuotaExceededError'?'保存容量不足。編集データを書き出して保管。':`一時保存に失敗: ${error.message}`;if(manual)status($('draftStatus').textContent);}
-  finally{const metrics=task.finish(failure);if(currentTask===task){currentTask=null;window.serifuDraftMetrics=metrics;}if(activeDraftTask===task)activeDraftTask=null;draftTask=null;updateDraftUI();updateGlobal();}
+  catch(error){failure=error;if(error.name==='QuotaExceededError'){autosaveQuotaPaused=true;clearTimeout(latestSaveTimer);clearInterval(autosaveTimer);clearInterval(historyTimer);}if(error.name!=='AbortError')task.result('一時保存',false);$('draftStatus').dataset.error='true';$('draftStatus').textContent=error.name==='AbortError'?'一時保存を中断。前回の保存を維持。':error.name==='QuotaExceededError'?'保存容量不足。編集データを書き出して保管。':`一時保存に失敗: ${error.message}`;if(manual)status($('draftStatus').textContent);}
+  finally{const metrics=task.finish(failure);if(currentTask===task){currentTask=null;window.serifuDraftMetrics=metrics;}if(activeDraftTask===task)activeDraftTask=null;draftTask=null;if(!failure&&manual&&preferences.autosave.enabled)configureAutosave();updateDraftUI();updateGlobal();}
 }
 $('temporarySave').onclick=()=>temporarySave(true);
 function configureAutosave() {
-  if(autosaveTimer)clearInterval(autosaveTimer);
-  autosaveTimer=preferences.autosave.enabled?setInterval(()=>{void temporarySave(false).catch(error=>status('自動保存を開始できない: '+error.message));},preferences.autosave.minutes*60000):null;
+  if(autosaveTimer)clearInterval(autosaveTimer);if(historyTimer)clearInterval(historyTimer);
+  historyTimer=preferences.autosave.enabled&&!readOnly&&!autosaveQuotaPaused?setInterval(()=>{void temporarySave(false).catch(error=>status(error.message));},300000):null;
+  autosaveTimer=preferences.autosave.enabled&&!readOnly&&!autosaveQuotaPaused?setInterval(()=>{void temporarySave(false).catch(error=>status('自動保存を開始できない: '+error.message));},preferences.autosave.minutes*60000):null;
   $('autosaveEnabled').checked=preferences.autosave.enabled;$('autosaveMinutes').value=String(preferences.autosave.minutes);
 }
-$('autosaveEnabled').onchange=()=>{preferences.autosave.enabled=$('autosaveEnabled').checked;persistPreferences();configureAutosave();dirty();updateGlobal();};
+$('autosaveEnabled').onchange=()=>{preferences.autosave.enabled=$('autosaveEnabled').checked;autosaveQuotaPaused=false;persistPreferences();configureAutosave();dirty();updateGlobal();};
 $('autosaveMinutes').onchange=()=>{
   const value=Number($('autosaveMinutes').value);
   if(!Number.isFinite(value)||value<.1||value>1440){$('autosaveMinutes').setCustomValidity('0.1〜1440分で指定');$('autosaveMinutes').reportValidity();return;}
   $('autosaveMinutes').setCustomValidity('');preferences.autosave.minutes=value;persistPreferences();configureAutosave();dirty();updateGlobal();
 };
 $('restoreDraft').onclick=()=>guard(async task=>{
-  await storageReady;task.stage('メタ情報');const meta=await getDraftMeta();if(!meta)return;
+  await storageReady;task.stage('メタ情報');const versioned=await latestProjectSnapshot(needLeaseReload?projectId:draftMeta?.projectId||rememberedProject()||projectId)||await activeProjectSnapshot();const meta=versioned?.meta||await getDraftMeta();if(!meta)return;
   if(pages.length&&!needLeaseReload&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
   if(!Number.isInteger(meta.version)||meta.version<3||meta.version>PROJECT_VERSION||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
-  task.stage('画像取得',meta.pages.length);const ids=meta.pages.map(p=>p.id),[images,storedMasks]=await Promise.all([getDraftImages(ids),getDraftMasks(ids)]);checkAbort(task.signal);
+  task.stage('画像取得',meta.pages.length);const ids=meta.pages.map(p=>p.id),bundle=versioned?await readProjectBundle(versioned.projectId,{snapshotId:versioned.id}):null,[images,storedMasks]=bundle?[bundle.images,bundle.masks]:await Promise.all([getDraftImages(ids),getDraftMasks(ids)]);checkAbort(task.signal);
   const masksByPage=new Map(meta.pages.map(p=>[p.id,{}]));for(const {pageId,id,asset} of storedMasks)masksByPage.get(pageId)[id]=asset;
+  const importedStrokes=validateStrokePresets(meta.preferences?.sfxStrokePresets??[]);
+  const templates=Array.isArray(meta.preferences?.sfxTemplates)?mergeSfxTemplates(sfxTemplates,meta.preferences.sfxTemplates,{conflict:'skip'}):sfxTemplates;
   const loaded=await prepareProjectPages(meta.pages.map((p,i)=>({...p,maskAssets:masksByPage.get(p.id),blob:images[i].blob})),meta.version,task,{restoreIds:true});checkAbort(task.signal);
-  projectId=validProjectId(meta.projectId)?meta.projectId:crypto.randomUUID();
-  const claim=await claimProjectLease(projectId,tabIdentity);projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
-  pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
+  const nextId=validProjectId(meta.projectId)?meta.projectId:crypto.randomUUID(),oldId=projectId;
+  await signalProjectActivity(nextId,tabIdentity,{interaction:true});
+  const claim=await claimProjectLease(nextId,tabIdentity);
+  if(oldId!==nextId)await releaseProjectLease(oldId,tabIdentity);
+  projectId=nextId;projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
+  loaded.forEach(p=>p.imageSaved=true);pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
   sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
   batchStart=0;const presetNotice=mergePresets(meta.preferences);
   if(Array.isArray(meta.preferences?.sfxTemplates)){
-    sfxTemplates=mergeSfxTemplates(sfxTemplates,meta.preferences.sfxTemplates,{conflict:'skip'});saveSfxTemplates();
+    sfxTemplates=templates;saveSfxTemplates();mergeStrokePresets(importedStrokes);
   }
   task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
-  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;needLeaseReload=false;updateDraftUI();updateLeaseAccess();void refreshProjectHistories();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
+  dirty();lastSavedRevision=loaded.some(p=>p.fontsChanged)?-1:revision;changed=loaded.some(p=>p.fontsChanged);draftMeta=meta;rememberProject();needLeaseReload=false;configureAutosave();updateDraftUI();updateLeaseAccess();void refreshProjectHistories();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
 },'一時保存復元',5);
 $('clearDraft').onclick=()=>guard(async()=>{
   if(!confirm('このブラウザの一時保存を消去する？ 編集中の画像は残る。'))return;
-  await forgetDraft();draftMeta=null;lastSavedRevision=-1;delete $('draftStatus').dataset.error;updateDraftUI();
+  const target=draftMeta?.projectId||projectId,claim=await claimProjectLease(target,tabIdentity);if(!claim.held)throw new Error('別タブが編集中のため一時保存を消去できない');await forgetDraft({projectId:target,fence:{owner:tabIdentity,token:claim.token}});draftMeta=null;lastSavedRevision=-1;delete $('draftStatus').dataset.error;updateDraftUI();
   status('一時保存を消去した。自動保存がONなら次の周期で再保存する。');
 });
 
@@ -2400,11 +2487,7 @@ $('restoreHistory').onclick=async()=>{
   if(!h||readOnly||busy)return;
   if(!confirm('選択した日時の編集状態へ上書きする？ 現在の状態は自動退避されません。履歴5世代は維持します。'))return;
   try{
-    const saved=await getStoredSnapshot(h.snapshotId);
-    await Promise.all([projectSnapshotImages(saved,saved.meta.pages.map(x=>x.id)),projectSnapshotMasks(saved,saved.meta.pages.map(x=>x.id))]);
-    await restoreProjectHistory(h.projectId,h.snapshotId,{fence:projectLease});
-    needLeaseReload=true;
-    $('restoreDraft').click();
+    await guard(task=>openStoredProject(h.projectId,task,{snapshotId:h.snapshotId,restoreHistory:true}),'履歴を復元',5);
   }catch(error){status('履歴の復元に失敗: '+error.message);}
 };
 $('deleteHistory').onclick=async()=>{
