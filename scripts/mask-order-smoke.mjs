@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {readFile,mkdir} from 'node:fs/promises';
@@ -86,7 +87,7 @@ try{
   });
   for(const result of rotations){assert.deepEqual(result.opaque,[30,80,140,255],`original pixels above text at ${result.rotation}°`);assert.deepEqual(result.hole,[255,0,0,255]);assert.deepEqual(result.transparent,[0,0,0,0]);assert.ok(result.workerMatches&&result.previewMatches,`rotated Worker and full preview match: ${JSON.stringify(result)}`);}
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');
-  await page.waitForFunction(async version=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.version===version;},PROJECT_VERSION);
+  await waitForAsync(page,async version=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.version===version;},PROJECT_VERSION);
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===1&&!document.querySelector('#projectLoad').disabled);
   const final=['caption','dialogue','A','B'];assert.deepEqual(await order(),final);assert.deepEqual(await pixel(),[255,255,255,255]);
   await page.reload();await load(json);assert.deepEqual(await order(),final);assert.deepEqual(await pixel(),[255,255,255,255]);

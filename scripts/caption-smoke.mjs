@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {PROJECT_VERSION} from '../src/model.js';
 import {spawn} from 'node:child_process';
@@ -73,7 +74,7 @@ try {
   saving=page.waitForEvent('download');await page.click('#projectSave');const jsonDownload=await saving,project=JSON.parse(await readFile(await jsonDownload.path(),'utf8'));assert.equal(project.version,PROJECT_VERSION);
   const saved=project.pages[0].layers.find(layer=>layer.kind==='caption');assert.equal(saved.autoFit,true);assert.equal(saved.font,'hand');assert.equal(saved.textColor,'#8c1950');assert.equal(saved.borderColor,'#3366cc');assert.equal(saved.text,body);assert.equal(saved.size,32);assert.equal(saved.alignX,'left');assert.equal(saved.alignY,'bottom');
   const fitted=await page.evaluate(async layer=>{const {captionLayout}=await import('./src/captions.js');const canvas=document.createElement('canvas');return captionLayout(canvas.getContext('2d'),layer);},saved);assert.equal(fitted.fits,true);
-  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].layers.some(layer=>layer.kind==='caption'&&layer.autoFit);});
+  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].layers.some(layer=>layer.kind==='caption'&&layer.autoFit);});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await source.locator('[data-kind=caption] textarea').inputValue(),body);assert.equal(await source.locator('[data-kind=caption] [data-field=autoFit]').isChecked(),true);assert.equal(await source.locator('[data-kind=caption] [data-field=borderColor]').inputValue(),'#3366cc');
   await untouched.locator('canvas.preview').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await canvas.evaluate(canvas=>canvas.toDataURL()),preview,'draft restoration must recover exact caption geometry, font and fitting');

@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {PROJECT_VERSION} from '../src/model.js';
 import { spawn } from 'node:child_process';
@@ -362,10 +363,10 @@ try {
   await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済'));
   await (await selectCard(first,0)).locator('textarea').first().fill('自動保存テスト');
   await page.clock.fastForward(121000);
-  await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='自動保存テスト';});
+  await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='自動保存テスト';});
   await page.locator('#autosaveMinutes').fill('0.1');await page.locator('#autosaveMinutes').blur();
   await (await selectCard(first,0)).locator('textarea').first().fill('短周期の保存');await page.clock.fastForward(6000);
-  await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='短周期の保存';});
+  await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[0].text==='短周期の保存';});
   await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済')&&!document.querySelector('#draftStatus').textContent.includes('変更あり'));
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');
   assert.equal(await page.locator('.image-row').count(),0);
