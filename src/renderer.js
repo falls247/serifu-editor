@@ -1,5 +1,6 @@
 import { sfxVisibleIndices } from './sfx-lettering-model.js';
-import { strokeGeometry, strokePolygon } from './sfx-stroke-geometry.js';
+import { strokeGeometry, strokePolygon, strokeBounds } from './sfx-stroke-geometry.js';
+import {unionOuterContour,glyphGroupBounds} from './sfx-outline-groups.js';
 import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { glyphFontDescription, clearFontCache } from './fonts.js';
 import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
@@ -227,14 +228,89 @@ function paintText(ctx, l) {
 }
 
 
+function paintSfxStroke(ctx,item,positions,layer,{withoutOutline=false}={}){
+  const s=item.stroke,polygon=strokePolygon(strokeGeometry(s,positions,{vertical:layer.vertical,size:layer.size}));
+  if(polygon.length<3)return;
+  const style=s.lookOverride||{},outline=withoutOutline?0:style.outlineWidth??layer.outline;
+  ctx.save();ctx.beginPath();ctx.moveTo(polygon[0].x,polygon[0].y);
+  for(const point of polygon.slice(1))ctx.lineTo(point.x,point.y);
+  ctx.closePath();ctx.lineJoin='round';
+  if(outline>0){ctx.strokeStyle=style.outlineColor??layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.stroke();}
+  ctx.fillStyle=style.fill??layer.color;ctx.fill();ctx.restore();
+}
+function renderSfxGlyph(ctx,layer,item,{withoutOutline=false}={}){
+  const {glyph:g,letter}=item,{char,size,angle}=letter;
+  const styled={...layer,size,font:g.overrides.font??layer.font,
+    color:g.overrides.fill??layer.color,textOutlineColor:g.overrides.outlineColor??layer.textOutlineColor,
+    outline:withoutOutline?0:g.overrides.outlineWidth??layer.outline,textureSeed:g.inkVariantSeed};
+  const img=warpedGlyph(ctx,styled,char,angle,0);
+  ctx.save();ctx.translate(item.x,item.y);
+  ctx.rotate(g.rotation*Math.PI/180);
+  ctx.transform(g.scaleX,0,g.shear,g.scaleY,0,0);
+  if(layer.effect==='rumble'){
+    ctx.translate(Math.sin(item.index*2.3)*layer.size*.06,Math.cos(item.index*1.9)*layer.size*.04);
+    ctx.rotate((item.index%2?1:-1)*.07);
+  }
+  const matrix=ctx.getTransform(),pixelScale=Math.min(Math.hypot(matrix.a,matrix.b),Math.hypot(matrix.c,matrix.d));
+  if(layer.blur>0)ctx.filter=`blur(${layer.blur*pixelScale}px)`;
+  if(layer.motionBlur>0){
+    const angle=layer.blurAngle*Math.PI/180,steps=Math.min(160,Math.max(12,Math.ceil(layer.motionBlur/2)));
+    for(let i=steps;i>0;i--){
+      const distance=layer.motionBlur*i/steps;
+      ctx.globalAlpha=(.2+(1-i/steps)*.8)/Math.sqrt(steps);
+      ctx.drawImage(img.surface,-img.drawWidth/2-Math.cos(angle)*distance,-img.drawHeight/2-Math.sin(angle)*distance,img.drawWidth,img.drawHeight);
+    }
+  }
+  ctx.globalAlpha=1;
+  ctx.drawImage(img.surface,-img.drawWidth/2,-img.drawHeight/2,img.drawWidth,img.drawHeight);
+  ctx.restore();
+}
+function drawSharedSfxContour(ctx,layer,group,ordered,positions){
+  const width=Math.ceil(group.styleOverride?.width??layer.outline);
+  if(width<=0)return null;
+  const memberSet=new Set(group.members);
+  const selected=ordered.filter(item=>item.type==='stroke'
+    ?Array.from({length:item.stroke.runLength},(_,i)=>item.stroke.runStart+i).some(i=>memberSet.has(i))
+    :memberSet.has(item.index));
+  if(!selected.length)return null;
+  const areas=[];
+  for(const item of selected){
+    if(item.type==='stroke'){
+      const polygon=strokePolygon(strokeGeometry(item.stroke,positions,{vertical:layer.vertical,size:layer.size}));
+      const bounds=strokeBounds(polygon);
+      if(bounds)areas.push({x:(bounds.minX+bounds.maxX)/2,y:(bounds.minY+bounds.maxY)/2,
+        extent:Math.max(bounds.maxX-bounds.minX,bounds.maxY-bounds.minY)/2+4});
+    }else{
+      const {glyph:g,letter}=item;
+      const style={...layer,size:letter.size,font:g.overrides.font??layer.font,outline:0};
+      const glyph=warpedGlyph(ctx,style,letter.char,letter.angle,0);
+      const extent=Math.hypot(glyph.drawWidth,glyph.drawHeight)*.5*(Math.max(g.scaleX,g.scaleY)+Math.abs(g.shear)+1);
+      areas.push({x:item.x,y:item.y,extent});
+    }
+  }
+  if(!areas.length)return null;
+  const bounds=glyphGroupBounds(areas,Math.ceil(width+layer.blur+layer.motionBlur+5));
+  if(!bounds)return null;
+  const mask=createSurface(ctx,bounds.width,bounds.height),m=mask.getContext('2d',{willReadFrequently:true});
+  m.translate(-bounds.minX,-bounds.minY);
+  for(const item of selected){
+    if(item.type==='stroke')paintSfxStroke(m,item,positions,layer,{withoutOutline:true});
+    else renderSfxGlyph(m,layer,item,{withoutOutline:true});
+  }
+  const data=m.getImageData(0,0,bounds.width,bounds.height).data,alpha=new Uint8ClampedArray(bounds.width*bounds.height);
+  for(let i=0;i<alpha.length;i++)alpha[i]=data[i*4+3];
+  const outside=unionOuterContour(alpha,bounds.width,bounds.height,Math.min(80,width));
+  const color=group.styleOverride?.color??layer.textOutlineColor??'#ffffff';
+  ctx.drawImage(tintedMask(ctx,outside,bounds.width,bounds.height,color),bounds.minX,bounds.minY);
+  mask.width=mask.height=1;
+  return selected;
+}
 function paintEditedSfx(ctx,layer){
-  // Only layers explicitly upgraded to lettering use this branch.
-  // base textGlyphs remains the legacy auto-layout provider for unedited fields.
-  const base=textGlyphs(ctx,layer);
-  const indices=sfxVisibleIndices(layer.text);
+  const base=textGlyphs(ctx,layer),indices=sfxVisibleIndices(layer.text);
+  const glyphMap=new Map(layer.lettering.glyphs.map(g=>[g.index,g]));
   const positions=new Map(),items=[];
   for(let i=0;i<base.length;i++){
-    const index=indices[i],glyph=layer.lettering.glyphs.find(g=>g.index===index);
+    const index=indices[i],glyph=glyphMap.get(index);
     if(index===undefined||!glyph)continue;
     const letter=base[i],x=letter.x+glyph.dx+(letter.shift??0)*letter.baseSize*(layer.stretchX/100),y=letter.y+glyph.dy;
     positions.set(index,{x,y,size:letter.size});
@@ -242,32 +318,19 @@ function paintEditedSfx(ctx,layer){
   }
   const omitted=new Set();
   for(const stroke of layer.lettering.strokes)if(stroke.mode==='continuous')for(let k=0;k<stroke.runLength;k++)omitted.add(stroke.runStart+k);
-  const strokes=layer.lettering.strokes.filter(s=>s.mode==='continuous').map(s=>({stroke:s,z:layer.lettering.glyphs.find(g=>g.index===s.runStart)?.z??s.runStart}));
+  const strokes=layer.lettering.strokes.filter(s=>s.mode==='continuous').map(s=>({stroke:s,z:glyphMap.get(s.runStart)?.z??s.runStart}));
   const ordered=[
     ...items.filter(g=>!omitted.has(g.index)).map(item=>({...item,type:'glyph'})),
     ...strokes.map(s=>({...s,type:'stroke',index:s.stroke.runStart}))
   ].sort((a,b)=>a.z-b.z||a.index-b.index);
+  const joined=new Set();
+  for(const group of layer.lettering.outlineGroups){
+    const eligible=drawSharedSfxContour(ctx,layer,group,ordered,positions);
+    if(eligible)for(const item of eligible)joined.add(item);
+  }
   for(const item of ordered){
-    if(item.type==='stroke'){
-      const s=item.stroke,polygon=strokePolygon(strokeGeometry(s,positions,{vertical:layer.vertical,size:layer.size}));
-      if(polygon.length<3)continue;
-      const style=s.lookOverride||{},outline=style.outlineWidth??layer.outline;
-      ctx.save();ctx.beginPath();ctx.moveTo(polygon[0].x,polygon[0].y);
-      for(const point of polygon.slice(1))ctx.lineTo(point.x,point.y);
-      ctx.closePath();ctx.lineJoin='round';
-      if(outline>0){ctx.strokeStyle=style.outlineColor??layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.stroke();}
-      ctx.fillStyle=style.fill??layer.color;ctx.fill();ctx.restore();continue;
-    }
-    const {glyph:g,letter}=item,{char,size,angle}=letter;
-    const styled={...layer,size,font:g.overrides.font??layer.font,
-      color:g.overrides.fill??layer.color,textOutlineColor:g.overrides.outlineColor??layer.textOutlineColor,
-      outline:g.overrides.outlineWidth??layer.outline,textureSeed:g.inkVariantSeed};
-    const img=warpedGlyph(ctx,styled,char,angle,0);
-    ctx.save();ctx.translate(item.x,item.y);
-    ctx.rotate(g.rotation*Math.PI/180);
-    ctx.transform(g.scaleX,0,g.shear,g.scaleY,0,0);
-    ctx.drawImage(img.surface,-img.drawWidth/2,-img.drawHeight/2,img.drawWidth,img.drawHeight);
-    ctx.restore();
+    if(item.type==='stroke')paintSfxStroke(ctx,item,positions,layer,{withoutOutline:joined.has(item)});
+    else renderSfxGlyph(ctx,layer,item,{withoutOutline:joined.has(item)});
   }
 }
 
