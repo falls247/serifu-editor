@@ -12,9 +12,19 @@ jobs:
       - run: npm test
       - run: npm run fonts
       - run: npm run build
-      - run: npm install --no-save playwright
-      - run: npx playwright install chromium --with-deps
+      - run: npm install --no-save playwright@1.56.1
+      - run: npx playwright install chromium webkit --with-deps
+      - run: sudo apt-get install -y fonts-noto-cjk
       - run: npm run test:sfx-lettering-browser
+      - run: npm run test:sfx-selection
+      - run: npm run test:sfx-stroke
+      - run: npm run test:sfx-outline
+      - run: npm run test:sfx-template
+      - run: npm run test:sfx-render
+      - run: npm run test:sfx-export
+      - run: npm run test:sfx-touch
+      - run: npm run test:project-open
+      - run: npm run test:project-tabs
       - run: npm run test:project-history
       - run: npm run test:bulk
       - run: npm run test:mask-render
@@ -25,11 +35,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: manga-ink-balloon-previews
+          name: serifu-regression
           path: |
-            artifacts/grunge-ink-preview.png
-            artifacts/spiky-balloon-preview.png
+            artifacts/*.png
+            artifacts/*results.json
+            artifacts/sfx-validation.json
           if-no-files-found: ignore
+          retention-days: 7
 
   backend:
     runs-on: ubuntu-latest
