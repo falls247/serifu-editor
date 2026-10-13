@@ -157,7 +157,7 @@ try{
     }finally{Date.now=realNow;}
   });
   console.log('Vault contracts PASS:',contracts);
-  // Crash the page with an actual IDB transaction open after its snapshot write.
+  // Terminate the tab with an actual IDB transaction open after its snapshot write.
   const beforeCrash=await migrationPage.evaluate(async()=>{
     const h=await import('/src/project-history.js'),s=await h.activeProjectSnapshot();
     return {projectId:s.projectId,snapshotId:s.id,history:await h.listProjectHistories(s.projectId)};
@@ -178,14 +178,17 @@ try{
   },beforeCrash.projectId);
   await migrationPage.waitForFunction(()=>window.crashTransactionReady===true);
   const cdp=await migrationContext.newCDPSession(migrationPage);
-  const crashed=once(migrationPage,'crash');void cdp.send('Page.crash').catch(()=>{});await crashed;
+  const {targetInfo}=await cdp.send('Target.getTargetInfo'),closed=once(migrationPage,'close');
+  let closeTimeout;
+  void cdp.send('Target.closeTarget',{targetId:targetInfo.targetId}).catch(()=>{});
+  try{await Promise.race([closed,new Promise((_,reject)=>{closeTimeout=setTimeout(()=>reject(new Error('Uncommitted tab did not close')),10000);})]);}finally{clearTimeout(closeTimeout);}
   const observer=await migrationContext.newPage();await observer.goto(`http://127.0.0.1:${port}/src/project-history.js`);
   const afterCrash=await observer.evaluate(async projectId=>{
     const h=await import('/src/project-history.js'),bundle=await h.readProjectBundle(projectId);
     return {projectId,snapshotId:bundle.snapshot.id,history:await h.listProjectHistories(projectId),name:bundle.snapshot.meta.pages[0].name};
   },beforeCrash.projectId);
   assert.equal(afterCrash.snapshotId,beforeCrash.snapshotId);assert.deepEqual(afterCrash.history,beforeCrash.history);assert.notEqual(afterCrash.name,'UNCOMMITTED CRASH');
-  console.log('Page crash during native IDB save: latest/history/asset bundle retained PASS');
+  console.log('Tab termination during native IDB save: latest/history/asset bundle retained PASS');
   await migrationContext.close();
   console.log('Project vault browser PASS:',JSON.stringify({initial,history:result.histories,locks:'token fenced',restored:'old bytes',failedSave:'atomic'}));
   await context.close();
