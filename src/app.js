@@ -2084,7 +2084,7 @@ $('projectManage').onclick=async()=>{
   if(busy)return;
   const modal=element('dialog','stored-project-dialog');
   const header=element('h2','','プロジェクトと復元履歴の管理'),description=element('p','',
-    '論理サイズは全世代の重複を含む。削除時の回収可能容量は他プロジェクトと共有する素材を除く概算です。');
+    '論理サイズは最新と履歴の共有素材を重複せず合計する。回収可能容量は他プロジェクトに必要な素材を除く概算です。');
   modal.append(header,description);
   const list=element('section','stored-project-list');modal.append(list);
   const quota=element('p','storage-estimate');
