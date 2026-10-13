@@ -18,7 +18,7 @@ import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
 import { getDraftMeta, getDraftImages, getDraftMasks, clearDraft as forgetDraft } from './storage.js';
-import {saveProjectSnapshot,projectImageIds,activateStoredProject,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets} from './project-history.js';
+import {saveProjectSnapshot,projectImageIds,activateStoredProject,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets,projectStorageReport,deleteStoredProject} from './project-history.js';
 import {claimProjectLease,releaseProjectLease,signalProjectActivity,tabIdentity} from './project-lock.js';
 import { BulkTask, boundedResults, checkAbort, awaitWithAbort, yieldToBrowser, prepareLayers } from './bulk-task.js';
 import { ZipArchive } from './zip.js';
@@ -2002,6 +2002,69 @@ async function prepareProjectPages(records,version,task,{restoreIds=false}={}){
   }catch(error){loaded.forEach(releasePage);throw error;}
 }
 $('projectLoad').onclick = () => {if(!busy)$('projectInput').click();};
+$('projectManage').onclick=async()=>{
+  if(busy)return;
+  const modal=element('dialog','stored-project-dialog');
+  const header=element('h2','','プロジェクトと復元履歴の管理'),description=element('p','',
+    '論理サイズは全世代の重複を含む。削除時の回収可能容量は他プロジェクトと共有する素材を除く概算です。');
+  modal.append(header,description);
+  const list=element('section','stored-project-list');modal.append(list);
+  const quota=element('p','storage-estimate');
+  try{
+    const estimate=await navigator.storage?.estimate?.();
+    if(estimate)quota.textContent='サイト全体の使用量（推定）: '+(estimate.usage/(1024*1024)).toFixed(1)+' MiB / '+(estimate.quota/(1024*1024)).toFixed(1)+' MiB';
+  }catch{}
+  modal.append(quota);
+  const close=element('button','','閉じる');close.onclick=()=>modal.close();modal.append(close);
+  document.body.append(modal);
+  const refresh=async()=>{
+    const projects=await projectStorageReport();
+    list.replaceChildren();
+    if(!projects.length)list.append(element('p','','保存済みのプロジェクトはありません。'));
+    for(const p of projects){
+      const item=element('article','stored-project-item');
+      item.append(element('strong','',p.name+'  '+p.projectId.slice(0,8)));
+      item.append(element('p','', '最終保存 '+(p.latest?new Date(p.latest.savedAt).toLocaleString('ja-JP'):'なし')
+        +' · 履歴 '+p.history.length+'世代'));
+      item.append(element('p','', '論理 '+(p.logicalBytes/1048576).toFixed(1)+' MiB / 素材の回収可能容量（概算） '+
+        (p.reclaimableBytes/1048576).toFixed(1)+' MiB'));
+      const open=element('button','','このプロジェクトを開く');
+      open.disabled=!p.latest||p.projectId===projectId;
+      open.onclick=async()=>{
+        if(changed&&pages.length&&!confirm('現在の保存前の変更は失われます。プロジェクトを切り替える？'))return;
+        try{
+          const oldId=projectId;
+          if(oldId!==p.projectId)await releaseProjectLease(oldId,tabIdentity);
+          projectId=p.projectId;
+          await signalProjectActivity(projectId,tabIdentity,{interaction:true});
+          const claim=await claimProjectLease(projectId,tabIdentity);
+          projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
+          await activateStoredProject(projectId,{fence:projectLease});
+          modal.close();needLeaseReload=true;$('restoreDraft').click();
+        }catch(error){status('プロジェクトを開けない: '+error.message);}
+      };
+      const remove=element('button','danger','プロジェクトを削除');
+      remove.onclick=async()=>{
+        if(!confirm('プロジェクト「'+p.name+'」と復元履歴'+p.history.length+'世代を削除する？ 元に戻せません。共有素材は維持します。'))return;
+        try{
+          await deleteStoredProject(p.projectId,{fence:p.projectId===projectId?projectLease:null});
+          await collectUnusedProjectAssets();
+          if(p.projectId===projectId){
+            clearTimeout(latestSaveTimer);
+            pages.forEach(releasePage);pages=[];activeId=null;drag=null;pngCache.clear();$('deck').replaceChildren();
+            projectId=crypto.randomUUID();projectLease=null;readOnly=false;draftMeta=null;
+            changed=false;lastSavedRevision=-1;refreshJump();syncVisiblePages();updateDraftUI();updateLeaseAccess();
+          }
+          await refresh();status('保存済みプロジェクトを削除した。共有素材は保護した。');
+        }catch(error){status('プロジェクト削除に失敗: '+error.message);}
+      };
+      item.append(open,remove);list.append(item);
+    }
+  };
+  try{await refresh();modal.showModal();}
+  catch(error){modal.remove();status('保存プロジェクト一覧を読めない: '+error.message);return;}
+  modal.addEventListener('close',()=>modal.remove(),{once:true});
+};
 $('projectOpen').onclick=()=>{if(!busy)$('projectOpenInput').click();};
 $('projectOpenInput').onchange=event=>{
   const file=event.target.files[0];event.target.value='';if(!file)return;
