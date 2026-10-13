@@ -18,7 +18,7 @@ import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
 import { getDraftMeta, getDraftImages, getDraftMasks, clearDraft as forgetDraft } from './storage.js';
-import {saveProjectSnapshot,projectImageIds,activateStoredProject,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets,projectStorageReport,deleteStoredProject} from './project-history.js';
+import {saveProjectSnapshot,projectImageIds,activateStoredProject,listProjectHistories,listStoredProjects,getStoredSnapshot,projectSnapshotImages,projectSnapshotMasks,restoreProjectHistory,deleteProjectHistory,collectUnusedProjectAssets,projectStorageReport,deleteStoredProject,migrateLegacyDraft} from './project-history.js';
 import {claimProjectLease,releaseProjectLease,signalProjectActivity,tabIdentity} from './project-lock.js';
 import { BulkTask, boundedResults, checkAbort, awaitWithAbort, yieldToBrowser, prepareLayers } from './bulk-task.js';
 import { ZipArchive } from './zip.js';
@@ -2307,7 +2307,11 @@ function updateDraftUI() {
   $('draftStatus').textContent=draftMeta?`${savedTime(draftMeta.savedAt)} 保存済${revision!==lastSavedRevision&&pages.length?' · 保存後の変更あり':''}`:'まだ一時保存なし';
 }
 const storageReady=(async()=>{
-  try {draftMeta=await getDraftMeta();updateDraftUI();}
+  try {
+    try{await migrateLegacyDraft();}
+    catch(error){$('draftStatus').dataset.error='true';$('draftStatus').textContent='旧保存の移行を完了できない: '+error.message;}
+    draftMeta=await getDraftMeta();updateDraftUI();
+  }
   catch(error){$('draftStatus').dataset.error='true';$('draftStatus').textContent=`一時保存を利用できない: ${error.message}`;}
 })();
 async function temporarySave(manual=false) {
