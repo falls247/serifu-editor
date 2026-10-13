@@ -38,3 +38,5 @@
 - [ADR-0024: マスク加工と文字の重なり順を共通化する](0024-shared-mask-and-text-order.md)
 - [ADR-0025: 等倍拡大鏡とプレビュー描画の共有](0025-preview-magnifier-and-render-cache.md)
 - [ADR-0026: 原寸プレビュー操作中の背景描画を遅延する](0026-preview-interaction-priority.md)
+
+- [ADR-0027: SFX文字単位編集とプロジェクト別の永続化](0027-sfx-lettering-foundation.md)

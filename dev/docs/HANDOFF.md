@@ -262,4 +262,14 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 
 ## 2026-10-13 SFX/プロジェクト永続化の最新引継ぎ
 
-前掲の「SFXグリフ編集の引継ぎ（部分実装）」は**当初時点の状態**。現在はv14形式・合成外周・テンプレート・IndexedDB v3履歴・lease/fencing・同ID競合UI等のコードが追加されているが、**CIは赤、P0〜P8の受入完了はゼロ**。参照する最優先の作業台帳は [SOW冒頭§0](sow/SOW_20261013_serifu_sfx_glyph_editor.md) 。特に `balloon-smoke.mjs:166` と `sam3-browser-smoke.mjs:355` の既存回帰、保存データ互換/GC/他タブ排他を解消せずにマージしてはならない。実装先は `docs/sow-20261013-sfx-glyph-editor`、`main`へはユーザーの別途指示がない限りマージしない。
+前掲の部分実装・CI赤の記述は当初時点の履歴。H-01/H-02の復元・SAM3再検出を修正し、P1〜P7の残機能と専用回帰を追加した。最新状態は[SOW §0](sow/SOW_20261013_serifu_sfx_glyph_editor.md)、設計は[ADR-0027](adr/0027-sfx-lettering-foundation.md)、試験とUATの対応は[検証記録](sfx-validation.md)を参照する。実装先は `docs/sow-20261013-sfx-glyph-editor`。`main`へ別途指示なくpush・mergeしない。
+
+- `sfx-lettering-model.js` は原文index・本文継承・単独／連続長音・上限検証、`sfx-edit-operations.js` は複数文字の変形・複製・Clipboard・縦横変換、`sfx-editor.js` は選択・Canvasハンドル・タッチ・詳細設定。
+- `sfx-stroke-geometry.js` は実インク接続、de Casteljau分割、結合、点・幅・cap・固定距離。`sfx-outline-groups.js` は自動／手動ロックと合成外周。`renderer.js` は共通描画と変形後の質感・bounded cache。原文indexと描画順indexを混同しない。
+- `project-history.js` はv3の原子的保存・同一read transactionでの復元・履歴・移行・GC。最新と直前履歴の比較を分ける。同じページIDの画像差替では `imageSaved` をfalseにして素材を渡す。
+- `project-lock.js` はdocument別ownerとfencing。再読込のowner引継ぎは新tokenを発行する。タブのprojectIdをsessionStorageで固定し、DBのglobal activeを別タブの復元対象に流用しない。閲覧から編集への昇格は最新を再読込してから。
+- 旧 `drafts/images/masks` は保持。GCで参照破損を発見したら回収中止。Quotaで履歴を自動削除しない。Blob非対応環境は失敗transactionをabortしてからバイト列保存へ切り替える。
+- `bulk-pool.js` の起動・中断はgenerationを持つ。旧操作のcleanupが新Workerのhandlerを消さない。UI一括更新のcacheはページmount時に破棄し、文字サイズ設定もcache keyへ含める。
+- 新moduleを `server.mjs`・`scripts/build.mjs`・`scripts/bulk-smoke.mjs` の許可リストへ追加済み。Playwrightは1.56.1、ChromiumとWebKit、日本語端末書体をCIで準備する。
+
+実機iPhone／iPad SafariとPC主要ブラウザの正式受入は未確認。Chromium／Linux WebKitのモバイル寸法試験と実機合格を区別する。次は専用プロファイルと複製データでSOW UAT-16を確認し、検証記録へ端末・OS・ブラウザ版と結果を追記する。GPU試験は既存の適用条件を維持する。

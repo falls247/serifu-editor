@@ -10,93 +10,60 @@
 
 ## 0. 実装進捗・次の開発エージェント向け作業指示（2026-10-13 更新）
 
-> **この章から読むこと。** §1〜§14は第1〜113問で確定した**要件・受入基準（変更禁止）**、この§0は現行ブランチの**実装進捗と次の作業手順（随時更新）**である。「コードがある」ことと「動作検証済み・完了」は別。ここに完了の記録がないフェーズやUATを完了と扱わない。
+> §1〜§14の113決定と受入基準は変更していない。この章だけが実装・検証台帳。自動試験と実機の正式受入を分ける。
 
-### 0.1 現在の作業対象・判定
+### 0.1 作業対象・判定
 
-- **進捗の基準コードHEAD**: `bad0fe8c75ca7a578a61c8387ad754928adc67b3`（2026-10-13確認）。この章を記述した文書コミットとは別。**次回着手時は必ず最新HEAD/Actionsへ読み替え**、判定と証跡を更新する。
-- **唯一の実装先**: `docs/sow-20261013-sfx-glyph-editor`。ユーザーは「既存のこのブランチで残りを実装」と明示指示。§11.1の「新featブランチを作る」は**SOW作成当初の一般計画で、現行依頼には適用しない**。**`main`へ直接push・mergeしない**。他のローカル作業ツリーを触らず、変更を小さいコミットに分割する。
-- **総合判定**: **実装途中・受入未完了・CI赤・マージ不可**。新規実装は相当量あるが、データ損失防止・旧データ互換・描画品質・端末別のゲートが残る。機能実装が存在することを「完了」と表現しない。
-- **現時点の安全策**: 開発ブランチの自動保存/履歴を唯一のバックアップとしない。テストは複製データと専用ブラウザプロファイルで実施。既存の `drafts/images/masks` は検証終了まで消さない。編集データは `.serifu` を別途退避。
-- この記録の後にコードを変更したら**本章・ADR-0027・HANDOFFを同じ変更単位で更新**し、実行したCI run IDと結果を具体的に記録する。
+- 唯一の実装先: `docs/sow-20261013-sfx-glyph-editor`。ユーザー指定の既存ブランチを使用。`main`へpush・mergeせず、Pages公開もしない。
+- 着手基準: `63f37f6e51b7beeb16908477329684b489f07979`。旧記録の `bad0fe8c` は履歴であり今回の判定ではない。
+- H-01/H-02、D-01〜03、F-01〜04の製品実装・専用自動試験を追加。文書とUAT対応は[検証記録](../sfx-validation.md)を正本とする。
+- 最終コード: [`36801248`](https://github.com/falls247/serifu-editor/commit/36801248e39266e40cd8b26db67203714f49d9e4)。ローカル全検証合格。CI実行記録は[Checks 38392728754](https://github.com/falls247/serifu-editor/actions/runs/38392728754)、文書追加後は[本ブランチ最新Checks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照。全113要件の正式受入完了は宣言しない。iPhone／iPad SafariとPC主要ブラウザの実機試験が未確認。
 
-### 0.2 フェーズ別進捗台帳
+### 0.2 フェーズ別台帳
 
-凡例: **基礎実装あり/追加実装あり** = コードは存在するが、そのフェーズの§11.2完了ゲートは未達。**未確認** = 専用E2E/手動検証証跡が未収集。**完了**は要求されたテスト全件合格後のみ付ける。
+| フェーズ | 実装と自動検証 | 残る受入 |
+|---|---|---|
+| P0 基準固定 | 着手HEADのrendererをfixtureに固定。旧SFX24条件のRGBA差0、JSON 1〜13／コンテナ1・2、既存回帰を実行 | Checksの実行結果を参照 |
+| P1 モデル/移行 | 原文grapheme index、改行・絵文字・同字、継承3種、長音run分割結合、Undoと選択復元 | 実機IMEの確認 |
+| P2 文字描画 | 個別位置・共通中心変形・縦組み・変形後質感・外接範囲・原寸PNG。sourceIndex4条件、PNG共通draw一致 | 実機の書体・表示品質 |
+| P3 長音線 | Canvas曲線／幅ハンドル、点追加削除、3種補間、cap、実インクattach、固定位置／長さ、分割結合、部分コピー／プリセット | 実機タッチ操作 |
+| P4 輪郭/効果 | 実インク重なり自動編成、手動メンバーロック、外周合成、掠れ前シルエット、上限付きcache、PNG試験 | 実機の視覚確認 |
+| P5 UI/テンプレート | Shift／Alt／矩形／なげなわ、Clipboard、4案比較、数値一括、ドラフト／IME保護、異字数テンプレート、欠損書体の明示解決、Chromium／WebKitモバイル寸法 | 実機PC/iPhone/iPad（UAT-16） |
+| P6 ファイルI/O | v14／コンテナ2、ID維持／再発行、三択競合、同ID画像差替、原子的画面切替、旧全版読込試験 | Checksの実行結果を参照 |
+| P7 保存/排他 | v2非破壊・中断再試行、原子的latest／5分5世代、素材共有／参照検証GC、容量管理、document owner／fencing、3タブ引継ぎ、quota／abort／native IDB中のPage crash | 実SafariのIndexedDB・複数タブ |
+| P8 統合/文書 | 全回帰、旧描画比較、性能記録、README／ADR／HANDOFF／UAT対応を更新 | Checksの実行結果と実機の正式受入 |
 
-| フェーズ | 状態 | コード・テストに存在する実装 | 未達条件・残作業（作業IDは§0.4） |
-|---|---|---|---|
-| P0 基準固定 | **部分・未完了** | 従来の多数のテストとPNG/Worker共通描画経路は存続。CIに単体・ブラウザ回帰あり | 変更前後の旧SFX基準PNG、各旧ファイル形式、性能比較の固定証跡が不足。CI赤（H-01/H-02） |
-| P1 モデル/移行 | **基礎実装・未完了** | `src/sfx-lettering-model.js`、v14、文字index対応・本文書換え継承・旧SFX遅延移行、Undo基盤、単体テスト | 同字/改行/IME/複製/複数選択の網羅、個別編集indexとレイアウトの対応、種々のseed/lock整合性（F-01） |
-| P2 文字描画 | **基礎実装・未完了** | `src/renderer.js:paintEditedSfx` に文字別移動・変形・z・スタイルと共通drawへの統合。旧SFXは別経路 | 縦書き複数列・改行・光学カーニングのindex照合、PNG/Worker/プレビュー差分、変形後の粒子/blur一貫性（F-01/F-03） |
-| P3 長音線 | **部分実装・未完了** | `src/sfx-stroke-geometry.js`、2文字以上の連続`ー`を曲線にし、数値制御点・線幅・cap・detach等のUI基盤 | Canvas制御点D&D、幅点追加/削除、曲線分割/結合、実輪郭への精密attach、線/点の複数選択・コピー、専用E2E（F-02） |
-| P4 輪郭/効果 | **部分実装・未完了** | `src/sfx-outline-groups.js`で合成アルファから外側輪郭を算出。グループの追加/削除/所属/色・幅のUI、描画側`drawSharedSfxContour` | 自動重なり検出とロックされたmemberの意味論、変形/グランジ粒子と共有輪郭の一致、局所更新、PNG/Worker回帰（F-03） |
-| P5 UI/テンプレート | **部分実装・未完了** | グリフ選択・移動・数値欄・複製/削除、`src/sfx-lettering-templates.js`で本文非依存テンプレート・補間・JSON import/export、画面操作 | 複数選択/なげなわ/Altで背面選択、Ctrl/Cmd複製・外観を引継がない文字/線Clipboard、iPhone/iPadタッチハンドルとルーペ、フォント欠損UI、E2E（F-04） |
-| P6 ファイルI/O | **部分実装・未完了** | `src/project-io.js`/ `src/project-identity.js`でv14 `projectId`・page ID・lettering、`src/project-conflict.js`で同ID内容比較と三択UI、既存「追加」と「開く」のボタン分離 | 切替/読込のID再発行、ファイル優先時の履歴保持、照合対象の画像・マスク内容、複製時の既存履歴保護、v1〜v13+コンテナ1/2のテスト（D-02） |
-| P7 保存/排他 | **大きく追加・未完了** | `src/storage.js` IDB v3ストア、`src/project-history.js` 原子的snapshot/latest、5分・最大5世代、画像/マスク参照・GC・旧v2 migration・容量/手動管理、`src/project-lock.js` lease/fencing、UI | **CI回帰失敗中**。旧v2実データ/容量不足/別タブ/履歴復元/GCを十分検証していない。競合・失効・データ破損の可能性を排除できない（H-01/H-02/D-01/D-03） |
-| P8 統合/文書 | **未完了** | 一部ユニット・ブラウザ・既存テストを追加済み。CIで部分合格 | §11.3とUAT-01〜16全件、旧版PNG対比、実機PC/iPad/iPhone、性能、README/ADR/HANDOFF整備、CI完全緑（V-01/V-02） |
+### 0.3 回帰の原因と修正
 
-**重要:** P1〜P7の「実装済み」は**機能の存在**を示すだけ。P0〜P8のどれにも、現時点で全受入の「完了」判定は出していない。
+旧CI [38351463618](https://github.com/falls247/serifu-editor/actions/runs/38351463618)と[38351219194](https://github.com/falls247/serifu-editor/actions/runs/38351219194)は失敗した履歴。今回の合格証跡には使わない。
 
-### 0.3 CIの直近実測（推測と事実を分ける）
+H-01は保存／復元時にglobal activeを参照して別タブのprojectと混同し、復元用メタデータと素材を別々に取得する経路、再読込のlease引継ぎを修正した。タブのprojectIdを固定し、同一snapshotのbundleを読み、新document ownerへfenceを更新する。H-02はimage load後にSAM3のcontrolsを更新し、health完了が先行しても明示再検出を可能にした。
 
-**最新の確認対象（コードHEAD `bad0fe8c`）**: [Actions run 38351463618](https://github.com/falls247/serifu-editor/actions/runs/38351463618) — **failure**。
+追加で編集行のmount時UI cache破棄、文字サイズ設定のcache key、Worker起動中cancel／次操作のgenerationを修正した。既存ブラウザsmokeのassert・待機時間は変更していない。端末書体の基準を揃えるためCIでNoto CJKを準備する。dev launcher単体試験は `/proc` で観測するPIDをfixtureから報告し、仮想PIDとの不一致による誤判定を防ぐ。終了assertとtimeoutは維持した。
 
-- **成功したステップ**: backend、`npm run check`、`npm test`、`npm run fonts`、`npm run build`、`npm run test:sfx-lettering-browser`、`npm run test:project-history`、`npm run test:bulk`、`npm run test:mask-render`、`npm run test:mask-order`。
-- **失敗ステップ**: `npm run test:browser` 内 `scripts/balloon-smoke.mjs:166`。ページ再読込後、`#restoreDraft`をクリックして3行復元した後、`.image-row:first-child [data-kind=balloon] [data-field=transparency]` が見つからず `locator.inputValue` が**30秒でタイムアウト**。画像行の存在だけでは、吹き出しカードと復元データが揃った証明になっていない。**原因は未確定**。
-- **別の再現済み失敗**: [Actions run 38351219194](https://github.com/falls247/serifu-editor/actions/runs/38351219194) は `npm run test:browser` と `npm run test:mask-storage` まで成功し、`scripts/sam3-browser-smoke.mjs:355` で失敗。ヘルス状態 `MODEL_NOT_FOUND` 表示後、プロンプトを埋めても検出ボタンが disabled (`true`) のまま（期待 `false`）。**原因は未確定**。復元/画面制御と `src/sam3-ui.js:updateControls` の状態遷移を調査する。
-- テストは異なるコミット・実行で別の位置で失敗している。**偶発扱い・テスト省略・タイムアウト延長は禁止**。再現環境を固定し、失敗が消えるまで修正→同じ試験→全CIとする。
-- `npm run test:project-history` のブラウザスモークでは基本のv2→v3移行・原子的rollback・旧素材参照・fencingの基本ケースが通った。ただし**この合格は3タブ競合、quota、長時間放置/再開、実端末の保証ではない**。
-- 直近では`test:browser`で失敗すると後続`test:sam3-browser`を実行しない。**単一runで全項目合格を確認するまでCI緑を宣言しない**。
+### 0.4 作業IDと証跡
 
-### 0.4 次の作業バックログ（上から実行。チェックボックスは全て未完了）
+| ID | 対応 | 主な自動試験 |
+|---|---|---|
+| H-01 | 吹き出し復元・ページmount・再読込の編集権 | 元 `balloon-smoke.mjs`、22本の`test:browser`合格 |
+| H-02 | SAM3 image load後の再検出controls | 元 `test:sam3-browser`合格 |
+| D-01 | 保存・非破壊移行・冪等再試行・素材・GC・quota／crash | `test:project-history`、`test:mask-storage` |
+| D-02 | 追加／開く／新project／同ID三択・画像差替・失敗時維持 | `test:project-open`、`project-legacy-compat.test.mjs` |
+| D-03 | 3タブ閲覧・明示入力優先・終了／期限・旧writer拒否 | `test:project-tabs`、`test:project-history` |
+| F-01 | 原文index、複数選択、Clipboard、縦横往復、PNG | `test:sfx-render`、`test:sfx-selection`、`sfx-edit-operations.test.mjs` |
+| F-02 | 曲線／幅ハンドル、分割結合、精密接続 | `test:sfx-stroke`、長音線単体試験 |
+| F-03 | 自動重なり／手動ロック、合成外周、グランジ | `test:sfx-outline`、輪郭単体試験、`test:bulk` |
+| F-04 | テンプレート／書体、選択、タッチ・ルーペ・ズーム | `test:sfx-template`、`test:sfx-selection`、`test:sfx-touch` |
+| V-01 | 全回帰・旧版比較・性能・UAT対応を記録 | [検証記録](../sfx-validation.md)。実機分は未確認 |
+| V-02 | README／ADR-27／HANDOFF／本章を現実装へ更新 | 最終コードとCIを検証記録に記載 |
 
-**最優先：既存機能と保存の回帰修正。以下のHが解消するまで他の拡張を完了扱いにしない。**
+### 0.5 次の作業と制約
 
-- [ ] **H-01 [P0/P7, 最優先] 吹き出し復元の失敗を最小再現→修正。** `scripts/balloon-smoke.mjs:150-169`、`src/app.js:restoreDraft`、`src/storage.js:getDraftMeta/getDraftImages/getDraftMasks`、`src/project-history.js:activeProjectSnapshot/migrateLegacyDraft/activateStoredProject`、`src/project-lock.js` を追う。再読込直後のprojectId、ページ数/レイヤー配列、`readOnly`、`projectLease`、復元完了後のDOMをPlaywrightで記録し、どの段階でカードが消えるか切り分ける。旧v2ストアの残骸とv3 latestが混ざる場合も再現する。**合格条件:** 元の`balloon-smoke.mjs`を無改変で通し、吹き出し・透明度・tail・枠線色・PNGの一致が維持。復元後の本文/素材欠損ゼロ。
-- [ ] **H-02 [P0/P7, 最優先] SAM3再検出の失敗を再現→修正。** `scripts/sam3-browser-smoke.mjs:345-358`、`src/sam3-ui.js:updateControls/checkHealth`、復元/ページマウントのイベントを確認。health `MODEL_NOT_FOUND` でもユーザーが明示して再試行できる既存契約を保持。**合格条件:** 既存`npm run test:sam3-browser`を無改変で完走し、確定済みマスク・PNG・復元機能も維持。
-- [ ] **D-01 [P7, データ損失防止] 保存/移行/削除の契約をテストで固定。** `src/project-history.js`、`src/storage.js`、`src/app.js:temporarySave/restoreDraft`、`scripts/project-history-smoke.mjs`。画像A→B差替で旧5世代A復帰、マスク世代差替、quota/abort中は旧latestと履歴を保持、5分以内20回確定で歴史を乱造しない、6世代目のみ最古削除、同一内容は新履歴を作らない、GC後も全参照維持、旧v2の途中失敗→冪等再試行を検証する。`storage.js:clearDraft` は旧`drafts/images`ストア消去と`latest`の削除があり、SOWの「他プロジェクト/旧データを保護」と衝突し得るため**保存物を使う前に仕様を見直す**。データ構造を直接消す作業は必ずテスト用IndexedDBで行う。
-- [ ] **D-02 [P6, ID/競合] 「追加」「開く」「複製」「自動保存から再開」を独立E2Eで検証。** `src/app.js:prepareProjectPages/projectOpen/projectInput/projectManage/restoreDraft`、`src/project-identity.js`、`src/project-conflict.js`。特に旧版のID再発行/同一IDの一致判定/ファイル優先時既存5世代維持/別IDの履歴独立/元プロジェクトの自動保存継続、マスクと画像ハッシュ照合。別プロジェクトを開く途中で失敗したら旧画面/旧ロックを残す**原子的UI切替**を保証。復元前後でグリフindexとレイヤーIDが変わらないことを確認する。
-- [ ] **D-03 [P7/FR-08] 2〜3タブのlease/fencing/priority競合を実ブラウザで検証。** `src/project-lock.js:claimProjectLease/signalProjectActivity/releaseProjectLease`、`src/app.js:pollProjectLease`。タブAが編集、B/C閲覧、最後に**明示操作**した閲覧タブへ引継ぎ（心拍は優先に含めない）、旧Aのtokenで保存・削除拒否、眠ったタブ/クラッシュ復帰/同時保存/lease期限切れ/ページ再読込、引継ぎ時は最新を**再読込してから**編集可能。読み取り専用で変更操作/自動保存タイマーが確実に停止すること。専用`scripts/project-tabs-smoke.mjs`を新設する。
-- [ ] **F-01 [P1/P2] SFX index/画面選択/出力の一貫性を修正。** `src/renderer.js:paintEditedSfx` は `sfxVisibleIndices(text)[i]` と `textGlyphs()[i]` を対応付けるため、縦書き複数列・改行・折返し・光学カーニングで順番がずれる可能性。原文grapheme indexを各glyphへ貫通させ、複数選択/Undo、反復文字と結合文字の継承、同字複製時のseedを試験する。旧SFXは移行前のピクセル差ゼロが必須。
-- [ ] **F-02 [P3] 長音線の不足編集操作を完了。** 2本以上のrun、1本/0本、分割/結合、Canvasで曲線点と線幅点の追加/削除・ドラッグ、smooth/sharp/独立ハンドル、端点attach/detach・隣接字形に沿う精度・数値編集、コピー/プリセット、Undo/保存/PNG再現。`src/sfx-stroke-geometry.js` と `src/app.js` を責務分離し `scripts/sfx-stroke-smoke.mjs` を作成。
-- [ ] **F-03 [P4] グループ外周とインクの仕様を完成。** `src/sfx-outline-groups.js`、`src/renderer.js:drawSharedSfxContour`、`src/sfx-lettering-model.js:outlineGroups`。自動overlap判定・手動memberロック、隣接輪郭の内部線除去、Z順、幾何変形後の掠れ/飛沫seed再現と粒子寸法、輪郭色と透明抜き、Canvas/Worker同一品質・描画負荷の上限をテスト。`scripts/sfx-outline-smoke.mjs` を作成。
-- [ ] **F-04 [P5] UI・テンプレートの受入操作を完成。** 複数文字選択・範囲/なげなわ・背面Alt選択、Ctrl/Cmd+C/Vと本文挿入、外観継承規則、グリフ/線別コピー、タッチ長押し/2指パン/大型ハンドル/ルーペ、iPhone/iPadのパネル。テンプレートは `src/sfx-lettering-templates.js` の異字数・改行・`ー`有無・競合3方式・フォント欠損/代替/アップロードを検証。`scripts/sfx-template-smoke.mjs` とタッチ操作試験を追加。
-- [ ] **V-01 [P8] 完全回帰/描画/互換/性能。** `npm run check`、`npm test`、`npm run fonts`、`npm run build`、`npm run test:bulk`、`npm run test:browser`、`npm run test:mask-storage`、`npm run test:sam3-browser`、新SFX/DB/タブ系スモーク、backend `npm run test:backend` を同一HEADで実施。§11.3の旧PNG/出力/Worker一致、§11.4 **UAT-01〜UAT-16の1件ごとの結果と証跡**、§11.5の性能数値を記録。テストタイムアウトを延長して隠さない。
-- [ ] **V-02 [P8] 文書整備と完了宣言。** `README.md` の「一時保存は最新1件/別タブで上書き可能」は新版と不一致。 `dev/docs/HANDOFF.md` および `dev/docs/adr/0027-sfx-lettering-foundation.md` に古い「P4/P7未実装」記述があるため現状・危険な制約へ修正。SOWの本台帳/コミットSHA/CI run/UAT証跡を最終更新。**全チェック完了までPRをマージしない**。
-
-### 0.5 エージェントの作業手順と禁止事項
-
-1. **確認**: `git status --short --branch`、`git fetch origin`、`git switch docs/sow-20261013-sfx-glyph-editor`、`git pull --ff-only origin docs/sow-20261013-sfx-glyph-editor` を作業環境に応じて行い、**remote HEADと差分を確認**。未コミット変更を勝手に上書きしない。本文仕様は§3〜§13、本章の作業優先順位を使用する。
-2. **まずH-01→H-02**を再現し、失敗内容に対する**製品コード修正**を行う。テストのassert削除/待機延長を解決策にしない。まず`node scripts/balloon-smoke.mjs`・`node scripts/sam3-browser-smoke.mjs` 単体、次に`npm run test:browser`/CI全体を再実行。
-3. **次にD-01→D-02→D-03**。保存/ID/leaseはデータ消失の影響が大きいので、仕様を先にテスト化。v2実データを**コピーしてから**移行試験し、旧ストアと元データを保護する。`QuotaExceededError`時に履歴を自動削除しない。`main`やユーザーの本番ストレージでの破壊的試験は禁止。
-4. **次にF-01→F-04、最後にV-01→V-02**。作業IDごとに実装・ユニット/ブラウザの証跡・コミットを対応付ける。画面・保存・rendererの変更では新JSを `server.mjs` / `scripts/build.mjs` / `scripts/bulk-smoke.mjs` の配信/テスト許可リストへ漏れなく追加する。
-5. **各コミット後に本章へ記録**: 作業ID、状態（未着手/対応中/実装済・検証中/完了/ブロック）、関連ファイル、コミットSHA、成功した試験と失敗した試験のrun ID、残障害、次の操作。過去の赤いCIを今回の緑と混同しない。
-6. **完了判定**: 全113決定を変更せず、P0〜P8の各§11.2ゲート・§11.3・UAT-01〜16・重要ブラウザ実機検証の証跡を取得し、**最新HEADのCIが全成功**して初めて「完了」。満たせない項目は未完と明記し、曖昧に閉じない。**ユーザー指示なく`main`へのmergeをしない**。
-
-テスト準備（Node.js 22以上; Playwrightはテスト時の一時依存）：
-
-```bash
-npm run check
-npm test
-npm run fonts
-npm run build
-npm install --no-save --package-lock=false playwright
-npx playwright install chromium
-node scripts/balloon-smoke.mjs                 # H-01
-node scripts/sam3-browser-smoke.mjs             # H-02
-npm run test:project-history                  # D-01の既存スモーク
-npm run test:sfx-lettering-browser
-npm run test:bulk
-npm run test:browser
-npm run test:mask-storage
-npm run test:sam3-browser
-# CI: .github/workflows/ci.yml。Python/backendは環境に応じてnpm run test:backend
-```
-
-**採択済み要件の優先順位は§13.3が正本。** この§0の調査事項は「不具合・不足の候補」であり、根本原因を断定したものではない。再現で否定したら理由と証拠を記録して修正すること。
-
----
+1. 本ブランチ最新HEADとChecksを確認し、[検証記録](../sfx-validation.md)と照合する。未コミットの他者変更を上書きしない。
+2. 実機PC主要ブラウザとiPhone／iPad SafariでUAT-16とIME／ハンドル／書体／保存／編集権を確認し、端末・OS・ブラウザ版・手順・結果を記録する。Linux WebKitでのモバイル寸法合格を実Safari合格へ読み替えない。
+3. 旧ストア削除、quotaでの履歴自動削除、テストassertの撤去・timeout延長は禁止。データ試験は複製データと専用プロファイルを使う。
+4. 新module追加時はserver／build／bulk-smokeの許可リストを揃える。SAM3 GPU試験の既存適用条件を維持する。
+5. 正式受入が未確認の項目を曖昧に閉じず、`main`へのmerge・Pages公開はユーザーの別途指示に従う。
 
 ## 1. 目的・成果物・完了条件
 
