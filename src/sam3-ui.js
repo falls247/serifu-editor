@@ -535,6 +535,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     resizeObserver?.disconnect(); events.abort(); panel.replaceChildren();
   }
 
+  image.addEventListener('load',()=>{updateControls();drawOverlay();},{signal});
   render(); void checkHealth();
   return { draft, discard, dispose, redraw: drawOverlay, checkHealth: () => checkHealth(true) };
 }

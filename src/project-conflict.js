@@ -29,7 +29,8 @@ export async function projectFileMatchesSnapshot(fileData,snapshot,{signal}={}){
     if(await imageKey(blob)!==imageRefs.get(page.id))return false;
     for(const [id,asset] of Object.entries(page.maskAssets||{})){
       const key=JSON.stringify([page.id,id]),ref=maskRefs.get(key);
-      if(!ref||!ref.includes('mask:'+asset.sha256+':'))return false;
+      const expected='mask:'+asset.sha256+':'+[asset.imageWidth,asset.imageHeight,asset.bbox.x,asset.bbox.y,asset.bbox.width,asset.bbox.height,asset.codec].join(':');
+      if(ref!==expected)return false;
       maskCount++;
     }
   }

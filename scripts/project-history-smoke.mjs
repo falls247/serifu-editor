@@ -102,6 +102,11 @@ try{
     tx.objectStore('masks').put({key:'current',records:[]});
     await new Promise(resolve=>tx.oncomplete=resolve);db.close();
     const h=await import('/src/project-history.js'),storage=await import('/src/storage.js');
+    const originalPut=IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put=function(...args){if(this.name==='latest')throw new DOMException('migration quota fixture','QuotaExceededError');return originalPut.apply(this,args);};
+    let rejected=false;
+    try{await h.migrateLegacyDraft();}catch{rejected=true;}finally{IDBObjectStore.prototype.put=originalPut;}
+    if(!rejected||await h.activeProjectSnapshot())throw Error('failed migration changed active data');
     if(await h.migrateLegacyDraft()!==true)throw Error('legacy migration did not begin');
     if(await h.migrateLegacyDraft()!==false)throw Error('legacy migration produced duplicate');
     const meta=await storage.getDraftMeta(),old=await(async()=>{
@@ -113,6 +118,74 @@ try{
     return {metaVersion:meta.version,legacyVersion:old.version,original:await restored.text(),history:history.length};
   });
   assert.deepEqual(migrated,{metaVersion:14,legacyVersion:13,original:'pixels-from-v2',history:1});
+  const contracts=await migrationPage.evaluate(async()=>{
+    const h=await import('/src/project-history.js'),s=await import('/src/storage.js'),{encodeMask}=await import('/src/mask-codec.js');
+    const projectId=crypto.randomUUID(),pageId=crypto.randomUUID(),maskId=crypto.randomUUID(),realNow=Date.now,start=realNow()+1000000;
+    const a=await encodeMask(Uint8Array.from([1,0,0,0,1,0,0,0,1]),3,3),b=await encodeMask(Uint8Array.from([0,1,0,1,0,1,0,1,0]),3,3);const maskA={...a,id:maskId},maskB={...b,id:maskId};
+    let latest,clock=start;
+    const meta=text=>({version:14,projectId,savedAt:clock,preferences:{},pages:[{id:pageId,name:'source',layers:[{text}],maskEffects:[{assetId:maskId}]}]});
+    Date.now=()=>clock;
+    try{
+      const first=await h.saveProjectSnapshot(meta('A'),[{id:pageId,blob:new Blob(['image A'])}],{masks:[{pageId,id:maskId,asset:maskA}]});
+      for(let i=0;i<20;i++){clock+=100;latest=await h.saveProjectSnapshot(meta('step '+i),[],{masks:[{pageId,id:maskId,asset:maskA}]});}
+      if((await h.listProjectHistories(projectId)).length!==1)throw Error('rapid confirmations created history');
+      clock=start+300001;latest=await h.saveProjectSnapshot(meta('B'),[{id:pageId,blob:new Blob(['image B'])}],{masks:[{pageId,id:maskId,asset:maskB}]});
+      for(let i=2;i<6;i++){clock+=300001;latest=await h.saveProjectSnapshot(meta('generation '+i),[],{masks:[{pageId,id:maskId,asset:maskB}]});}
+      const history=await h.listProjectHistories(projectId);if(history.length!==5)throw Error('rotation count');if(history.some(x=>x.snapshotId===first.snapshotId))throw Error('sixth did not drop oldest');
+      clock+=300001;const same=await h.saveProjectSnapshot(meta('generation 5'),[],{masks:[{pageId,id:maskId,asset:maskB}]});if(same.historyCreated)throw Error('same state created history');
+      const before=await h.latestProjectSnapshot(projectId),originalPut=IDBObjectStore.prototype.put;
+      for(const failure of ['quota','abort']){
+        const controller=new AbortController();
+        IDBObjectStore.prototype.put=function(...args){if(this.name==='latest'&&failure==='quota')throw new DOMException('simulated quota','QuotaExceededError');const result=originalPut.apply(this,args);if(this.name==='snapshots'&&failure==='abort')controller.abort(new DOMException('simulated shutdown','AbortError'));return result;};
+        let rejected=false;try{await h.saveProjectSnapshot(meta('BROKEN'),[{id:pageId,blob:new Blob(['broken'])}],{masks:[{pageId,id:maskId,asset:maskA}],signal:controller.signal});}catch{rejected=true;}finally{IDBObjectStore.prototype.put=originalPut;}
+        if(!rejected||(await h.latestProjectSnapshot(projectId)).id!==before.id||(await h.listProjectHistories(projectId)).length!==5)throw Error('failed atomic save changed latest/history');
+      }
+      // A second project shares immutable bytes, but owns its own logical generations.
+      const other=crypto.randomUUID();await h.saveProjectSnapshot({...meta('other'),projectId:other},[{id:pageId,blob:new Blob(['image B'])}],{masks:[{pageId,id:maskId,asset:maskB}]});
+      const capacity=(await h.projectStorageReport()).find(p=>p.projectId===projectId),snapshots=await Promise.all([...new Set([capacity.latest.snapshotId,...capacity.history.map(x=>x.snapshotId)])].map(id=>h.getStoredSnapshot(id)));
+      const metadataBytes=snapshots.reduce((n,snapshot)=>n+JSON.stringify(snapshot.meta).length*2,0);
+      if(capacity.logicalBytes!==metadataBytes+new Blob(['image B']).size+b.byteLength||capacity.reclaimableBytes!==0||capacity.history.some(x=>x.reclaimableBytes!==0))throw Error('capacity double-counted shared assets or offered bytes needed by another generation/project');
+      await s.clearDraft({projectId});await h.collectUnusedProjectAssets();if((await h.listProjectHistories(projectId)).length!==5||!await h.latestProjectSnapshot(other))throw Error('clear deleted histories/other project');
+      const oldest=history.at(-1),restored=await h.getStoredSnapshot(oldest.snapshotId);await h.restoreProjectHistory(projectId,oldest.snapshotId);
+      if(await (await h.projectSnapshotImages(restored,[pageId]))[0].blob.text()!=='image B')throw Error('old image references missing');
+      if((await h.projectSnapshotMasks(restored,[pageId]))[0].asset.sha256!==b.sha256)throw Error('historical mask missing');
+      await h.deleteProjectHistory(projectId,oldest.historyId);await h.collectUnusedProjectAssets();if(!await h.getStoredSnapshot(oldest.snapshotId))throw Error('GC deleted the active restored generation');
+      const db=await s.openDraftDatabase();let tx=db.transaction('latest','readwrite');tx.objectStore('latest').put({projectId:'broken-reference',snapshotId:'missing'});await new Promise(resolve=>tx.oncomplete=resolve);
+      let guarded=false;try{await h.collectUnusedProjectAssets();}catch{guarded=true;}if(!guarded)throw Error('GC did not guard corrupt reference');
+      tx=db.transaction('latest','readwrite');tx.objectStore('latest').delete('broken-reference');await new Promise(resolve=>tx.oncomplete=resolve);await h.collectUnusedProjectAssets();
+      return {rapidSaves:20,history:5,quota:'rollback',abort:'rollback',masks:'retained',clear:'scoped',gc:'guarded'};
+    }finally{Date.now=realNow;}
+  });
+  console.log('Vault contracts PASS:',contracts);
+  // Crash the page with an actual IDB transaction open after its snapshot write.
+  const beforeCrash=await migrationPage.evaluate(async()=>{
+    const h=await import('/src/project-history.js'),s=await h.activeProjectSnapshot();
+    return {projectId:s.projectId,snapshotId:s.id,history:await h.listProjectHistories(s.projectId)};
+  });
+  await migrationPage.evaluate(async projectId=>{
+    const h=await import('/src/project-history.js'),bundle=await h.readProjectBundle(projectId),meta=structuredClone(bundle.snapshot.meta);
+    meta.pages[0].name='UNCOMMITTED CRASH';
+    const originalPut=IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put=function(...args){
+      if(this.name==='latest'){
+        window.crashTransactionReady=true;
+        const store=this,keepOpen=()=>{const request=store.get(projectId);request.onsuccess=keepOpen;};keepOpen();
+        return;
+      }
+      return originalPut.apply(this,args);
+    };
+    void h.saveProjectSnapshot(meta,[],{masks:bundle.masks}).catch(()=>{});
+  },beforeCrash.projectId);
+  await migrationPage.waitForFunction(()=>window.crashTransactionReady===true);
+  const cdp=await migrationContext.newCDPSession(migrationPage);
+  const crashed=once(migrationPage,'crash');void cdp.send('Page.crash').catch(()=>{});await crashed;
+  const observer=await migrationContext.newPage();await observer.goto(`http://127.0.0.1:${port}/src/project-history.js`);
+  const afterCrash=await observer.evaluate(async projectId=>{
+    const h=await import('/src/project-history.js'),bundle=await h.readProjectBundle(projectId);
+    return {projectId,snapshotId:bundle.snapshot.id,history:await h.listProjectHistories(projectId),name:bundle.snapshot.meta.pages[0].name};
+  },beforeCrash.projectId);
+  assert.equal(afterCrash.snapshotId,beforeCrash.snapshotId);assert.deepEqual(afterCrash.history,beforeCrash.history);assert.notEqual(afterCrash.name,'UNCOMMITTED CRASH');
+  console.log('Page crash during native IDB save: latest/history/asset bundle retained PASS');
   await migrationContext.close();
   console.log('Project vault browser PASS:',JSON.stringify({initial,history:result.histories,locks:'token fenced',restored:'old bytes',failedSave:'atomic'}));
   await context.close();

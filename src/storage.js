@@ -32,7 +32,7 @@ async function database() {
   return connection;
 }
 export const openDraftDatabase=()=>database();
-export async function getDraftMeta() {const versioned=await activeProjectSnapshot();if(versioned)return versioned.meta;const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const data=await requestResult(tx.objectStore('drafts').get('current'));await done;return data||null;}
+export async function getDraftMeta() {const versioned=await activeProjectSnapshot();if(versioned)return versioned.meta;const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const [data,cleared]=await Promise.all([requestResult(tx.objectStore('drafts').get('current')),requestResult(tx.objectStore('drafts').get('legacy-cleared'))]);await done;return cleared?null:data||null;}
 export async function getImageIds() {const versioned=await activeProjectSnapshot();if(versioned)return new Set(versioned.images.map(x=>x.pageId));const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);const ids=await requestResult(tx.objectStore('images').getAllKeys());await done;return new Set(ids);}
 export async function saveDraft(meta,newImages,{signal,onProgress=()=>{},masks=[]}={}) {
   checkAbort(signal);
@@ -58,7 +58,7 @@ export async function saveDraft(meta,newImages,{signal,onProgress=()=>{},masks=[
   let prepared=0;for(const image of newImages){const request=images.put(image);request.onsuccess=()=>onProgress(++prepared,newImages.length);}
   const keys=images.getAllKeys();keys.onsuccess=()=>{const present=new Set(keys.result);if(meta.pages.some(p=>!present.has(p.id)))abort();};
   const cursor=images.openCursor();cursor.onsuccess=()=>{const value=cursor.result;if(value){if(!keep.has(value.key))value.delete();value.continue();}};
-  tx.objectStore('drafts').put({...meta,key:'current'});try{await done;}catch(error){if(signal?.aborted)throw signal.reason;throw error;}finally{signal?.removeEventListener('abort',abort);}
+  tx.objectStore('drafts').delete('legacy-cleared');tx.objectStore('drafts').put({...meta,key:'current'});try{await done;}catch(error){if(signal?.aborted)throw signal.reason;throw error;}finally{signal?.removeEventListener('abort',abort);}
 }
 export async function getDraftImages(ids) {
   const versioned=await activeProjectSnapshot();if(versioned)return projectSnapshotImages(versioned,ids);
@@ -82,9 +82,20 @@ export async function getDraftMasks(pageIds) {
   }
   return result;
 }
-export async function clearDraft() {
-  const db=await database(),tx=db.transaction(['drafts','images','masks','latest'],'readwrite'),done=completed(tx);
-  const active=await requestResult(tx.objectStore('drafts').get('active'));
-  if(active?.projectId)tx.objectStore('latest').delete(active.projectId);
-  tx.objectStore('drafts').clear();tx.objectStore('images').clear();tx.objectStore('masks').put({key:'current',records:[]});await done;
+// Clear only the selected latest pointer. History, other projects and v2 sources survive.
+export async function clearDraft({projectId=null,fence=null}={}) {
+  const db=await database(),tx=db.transaction(['drafts','latest','locks'],'readwrite'),done=completed(tx);
+  try {
+    const active=await requestResult(tx.objectStore('drafts').get('active'));
+    const target=projectId||active?.projectId;
+    if(target){
+      const lock=await requestResult(tx.objectStore('locks').get(target));
+      if(fence?(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<=Date.now()):lock?.owner&&lock.until>Date.now())throw new Error('編集権がないため消去できない');
+      tx.objectStore('latest').delete(target);
+      if(active?.projectId===target)tx.objectStore('drafts').delete('active');
+    }
+    // Tombstone prevents a cleared v2 draft from being resurrected by fallback/migration.
+    tx.objectStore('drafts').put({key:'legacy-cleared'});
+    await done;
+  } catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
 }
