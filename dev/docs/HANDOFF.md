@@ -279,3 +279,5 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 保存の追従補正: 進行中の保存を履歴照会前に確保し、成功後の追加編集を即時に次の保存へ渡す。画像hash・WebKitバイト変換後の`beforeCommit`でleaseを更新する。`ownerEpoch`は同documentの期限切れで維持し、writer交代・解放後の取得・reloadで変わる。古いtokenは常に拒否し、準備中に他writerが確定したlatestを上書きしない。編集権の再読込は進行中の保存が終わってから開始する。`test:autosave-catchup`で1秒／121秒保留中の追加編集、旧token、writer交代、latest再読込を検証する。
 
 保存開始前にも最後のlease照会からのownerEpoch変更を検査する。別writerが次の心拍前に保存・解放した場合も、保存を拒否してlatestを再読込する。4ケースのautosave専用試験と既存回帰をChecksで実行する。最終コードとCIの照合先は[検証記録](sfx-validation.md)。
+
+Clipboardのguardは`waitForDraft:false`で、同project内のコピー・カット・貼付け・次画像への複製を保存中も適用する。project切替・復元・消去等は保存を待つ。元`paged-smoke.mjs`の500ページ確認を保持し、autosave専用試験で画像hash保留中もClipboard操作が完了することを確認する。

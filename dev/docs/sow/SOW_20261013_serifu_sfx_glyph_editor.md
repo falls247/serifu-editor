@@ -17,7 +17,7 @@
 - 唯一の実装先: `docs/sow-20261013-sfx-glyph-editor`。ユーザー指定の既存ブランチを使用。`main`へpush・mergeせず、Pages公開もしない。
 - 着手基準: `63f37f6e51b7beeb16908477329684b489f07979`。旧記録の `bad0fe8c` は履歴であり今回の判定ではない。
 - H-01/H-02、D-01〜03、F-01〜04の製品実装・専用自動試験を追加。文書とUAT対応は[検証記録](../sfx-validation.md)を正本とする。
-- 最終コード: [`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)。ローカル検証は検証記録を参照。保存追従補正の基準`f68164b5`のCI実行記録は[Checks 38457135604](https://github.com/falls247/serifu-editor/actions/runs/38457135604)、文書追加後は[本ブランチ最新Checks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照。全113要件の正式受入完了は宣言しない。iPhone／iPad SafariとPC主要ブラウザの実機試験が未確認。
+- 最終コード: [`76e160d0`](https://github.com/falls247/serifu-editor/commit/76e160d0e6f5f42222c71280d0d746aacd152e94)。ローカル検証と過去CIの失敗・補正は検証記録を参照。文書追加後の最新判定は[本ブランチ最新Checks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照。全113要件の正式受入完了は宣言しない。iPhone／iPad SafariとPC主要ブラウザの実機試験が未確認。
 
 ### 0.2 フェーズ別台帳
 
@@ -42,6 +42,8 @@ H-01は保存／復元時にglobal activeを参照して別タブのprojectと�
 追加で編集行のmount時UI cache破棄、文字サイズ設定のcache key、Worker起動中cancel／次操作のgenerationを修正した。既存ブラウザsmokeのassert・期待値・30秒の待機上限は維持し、Promiseを返す保存確認の述語だけを`browser-wait.mjs`で正しくawaitしてpollする。端末書体の基準を揃えるためCIでNoto CJKを準備する。dev launcher単体試験は `/proc` で観測するPIDをfixtureから報告し、仮想PIDとの不一致による誤判定を防ぐ。終了assertとtimeoutは維持した。
 
 保存中に追加された確定済み変更は、成功後に次の保存へ即時に引き継ぐ。画像hash・WebKitバイト変換の後、write transaction直前にleaseを更新する。ownerEpochで同documentの期限切れと別writerの介入を区別し、他writerが途中に保存した内容を古い準備で上書きしない。保存開始時にも最後の心拍からのwriter交代を確認し、latest再読込前の保存を拒否する。1秒／121秒保留・旧token拒否・writer交代とlatest再読込を`test:autosave-catchup`で確認する。
+
+同project内のコピー・カット・貼付け・次画像へのコピーは進行中の保存を待たずに適用する。切替・復元等の待機は維持し、元500ページ試験の範囲切替・全出力・保存復元と、hash保留中のClipboard操作で確認する。
 
 ### 0.4 作業IDと証跡
 

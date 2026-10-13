@@ -2,7 +2,7 @@
 
 対象ブランチ: `docs/sow-20261013-sfx-glyph-editor`。着手HEAD: `63f37f6e51b7beeb16908477329684b489f07979`。SOW §1〜14の113決定は変更していない。
 
-コードHEAD: [`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)。保存追従補正の基準[`f68164b5`](https://github.com/falls247/serifu-editor/commit/f68164b53777e9c7db61db47010b2ebfad77e7aa)のChecks実行記録: [run 38457135604](https://github.com/falls247/serifu-editor/actions/runs/38457135604)。文書追加後の最新HEADの判定は[本ブランチのChecks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照する。本記録の自動試験合格と、実機の正式受入は別。
+コードHEAD: [`76e160d0`](https://github.com/falls247/serifu-editor/commit/76e160d0e6f5f42222c71280d0d746aacd152e94)。文書追加後の最新HEADのCI判定は[本ブランチのChecks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照する。本記録の自動試験合格と、実機の正式受入は別。
 
 ## 実行環境
 
@@ -29,7 +29,7 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | ファイルID | `test:project-open`。三択、追加／別projectのID、同ID画像差替と旧履歴、無効ファイルの原子的UI維持 |
 | 保存 | `test:project-history`。v2中断／同ID冪等再試行、旧ストア保持、20回短期確定、5分判定、6→5世代、同内容で履歴追加なし、画像／マスク旧世代、quota／abort rollback、参照検証GC、対象latestだけの消去、共有素材を重複計上しない容量／解放可能量 |
 | タブ終了中の保存 | 同history試験でsnapshot書込後のnative IDB transactionを維持し、CDP `Target.closeTarget`でタブを終了。再オープン後も直前のlatest、全history、読める素材bundleを確認 |
-| 自動保存の追従・所有権 | `test:autosave-catchup`。画像hashを保留中に追加編集し、1秒／121秒のclock advance後に最新へ追従。期限切れ後も旧tokenは拒否。別writerの確定が保存準備中または次の心拍前に入れば古い保存を拒否し、latestを再読込 |
+| 自動保存の追従・所有権 | `test:autosave-catchup`。画像hashを保留中にClipboard操作と追加編集を行い、1秒／121秒のclock advance後に最新へ追従。期限切れ後も旧tokenは拒否。別writerの確定が保存準備中または次の心拍前に入れば古い保存を拒否し、latestを再読込 |
 | 3タブ | `test:project-tabs`。他2タブ閲覧、最後の明示操作優先、終了／期限切れ後の引継ぎ、latest再読込、旧token保存／削除拒否 |
 | モバイル寸法 | `test:sfx-touch`。Chromium／WebKit各2寸法でタップ・数値・保存復元・横はみ出しなし。Chromiumはnative touchによる長押しルーペ／2指pinchも確認。WebKitの多点ジェスチャは実機未確認 |
 
@@ -78,6 +78,7 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | 専用E2E・旧描画fixture・全版互換・CI | [`36801248`](https://github.com/falls247/serifu-editor/commit/36801248e39266e40cd8b26db67203714f49d9e4) |
 | 保存中追加編集・準備後lease更新・所有権継続の検証・非同期待機上限 | [`f68164b5`](https://github.com/falls247/serifu-editor/commit/f68164b53777e9c7db61db47010b2ebfad77e7aa) |
 | 次の心拍前にwriterが交代した場合の保存拒否・再読込 | [`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4) |
+| 保存中のClipboard待機を解消・500ページ回帰の修正 | [`76e160d0`](https://github.com/falls247/serifu-editor/commit/76e160d0e6f5f42222c71280d0d746aacd152e94) |
 
 ## CIで追加確認した待機条件
 
@@ -88,3 +89,5 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 Checks [38451564581](https://github.com/falls247/serifu-editor/actions/runs/38451564581)では、正しい非同期待機によって既存browser試験の自動保存待機が失敗した。保存中の追加編集を次の保存へ即時に引き継ぎ、履歴判定のawait前に進行中の保存を確保する。保存ごとのPromiseだけを解除する。さらに素材hash／WebKitバイト変換後・write transaction直前にleaseを更新する。同じdocumentの期限切れではownerEpochを保ち、別writer取得・解放・reloadでは変えるため、他writerが途中に入った古い保存を拒否できる。transactionのowner／token／期限照合は維持した。新設autosave試験の1秒／121秒・writer交代と再読込、3タブ、history、元browser-smokeがローカルで合格。非同期待機helperは未解決のpage.evaluateも30秒の上限で終了し、単体2件でfalseのpollと期限を検証する。
 
 保存開始時にも、最後のlease照会以降にownerEpochが変わっていれば保存を拒否する。次の心拍前にwriter交代・保存・解放が完了したケースを追加し、別writerのlatestを保持して再読込することを確認した（[`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)）。
+
+Checks [38457135604](https://github.com/falls247/serifu-editor/actions/runs/38457135604)は既存paged-smokeの83行目で、次画像への複製後の表示範囲が更新前のままとなり失敗した。自動保存を待つ共通guardが、同project内のClipboard操作まで保留していたため。Clipboardのguardは進行中の保存を待たずに適用し、project切替・復元・消去等の待機は保持する。元500ページ試験のassertとtimeoutは変更せず、50／100／全表示、範囲境界の複製・移動、500枚出力、保存復元までローカルで合格。autosave専用試験は画像hashを保留したままClipboard操作が3秒以内に完了することも確認する（[`76e160d0`](https://github.com/falls247/serifu-editor/commit/76e160d0e6f5f42222c71280d0d746aacd152e94)）。
