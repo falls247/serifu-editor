@@ -2318,8 +2318,8 @@ async function temporarySave(manual=false) {
   if(!pages.length||busy||readOnly||pages.some(p=>p.glyphDrag))return;
   if(draftTask){if(!manual)return;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
-  const snapshot=snapshotPages(),captured=revision,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)};
-  const meta={version:PROJECT_VERSION,projectId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
+  const snapshot=snapshotPages(),captured=revision,savingId=projectId,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)};
+  const meta={version:PROJECT_VERSION,projectId:savingId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
   const masks=snapshot.flatMap(page=>[...new Set(page.maskEffects.map(effect=>effect.assetId))].map(id=>{
     const asset=page.maskAssets?.[id];if(!asset)throw new Error(`「${page.name}」のマスク素材がない`);
     return {pageId:page.id,id,asset};
@@ -2327,20 +2327,29 @@ async function temporarySave(manual=false) {
   const task=new BulkTask(manual?'一時保存':'自動保存',{stageCount:3,onProgress:data=>{if(manual&&currentTask?.data.operationId===data.operationId)displayTask(data);else if(!manual)$('draftStatus').textContent=`自動保存 · ${data.stage} ${data.processed}/${data.total??'未確定'}`;}});
   if(manual){currentTask=task;task.emit(true);}activeDraftTask=task;delete $('draftStatus').dataset.error;
   draftTask=(async()=>{await storageReady;checkAbort(task.signal);
-    const claim=await claimProjectLease(projectId,tabIdentity);if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
-    projectLease={owner:tabIdentity,token:claim.token};
-    const ids=await projectImageIds(projectId),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
+    if(projectId!==savingId)return;
+    const claim=await claimProjectLease(savingId,tabIdentity);
+    if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
+    const savingFence={owner:tabIdentity,token:claim.token};
+    projectLease=savingFence;
+    const ids=await projectImageIds(savingId),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
     for(const p of missing){checkAbort(task.signal);const blob=await originalBlob(p),original=pages.find(page=>page.id===p.id);if(original)original.assetBlob=blob;images.push({id:p.id,blob});task.result(p.name);if(images.length%20===0)await yieldToBrowser();}
     task.metrics.newImages=images.length;task.stage('DB要求',images.length);if(!images.length)task.stage('コミット',1);
     // Asset encoding may be slower than one lease interval. Renew immediately before
     // the atomic latest flip; do not accept a token reclaimed by another tab.
     checkAbort(task.signal);
-    const renewed=await claimProjectLease(projectId,tabIdentity);
+    if(projectId!==savingId)return;
+    const renewed=await claimProjectLease(savingId,tabIdentity);
     if(!renewed.held)throw new Error('他のタブが編集権を取得したため保存できない');
-    projectLease={owner:tabIdentity,token:renewed.token};
-    await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence:projectLease});
+    const fence={owner:tabIdentity,token:renewed.token};
+    projectLease=fence;
+    await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence});
     task.stage('コミット',1);
-    task.result('一時保存');draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;void refreshProjectHistories();
+    task.result('一時保存');
+    if(projectId!==savingId)return;
+    draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;
+    void refreshProjectHistories();
+    void collectUnusedProjectAssets().catch(error=>status('不要素材の整理を延期: '+error.message));
   })();updateDraftUI();let failure;
   try{await draftTask;if(manual)status('画像・文字・位置・設定をこのブラウザに一時保存した。');}
   catch(error){failure=error;if(error.name!=='AbortError')task.result('一時保存',false);$('draftStatus').dataset.error='true';$('draftStatus').textContent=error.name==='AbortError'?'一時保存を中断。前回の保存を維持。':error.name==='QuotaExceededError'?'保存容量不足。編集データを書き出して保管。':`一時保存に失敗: ${error.message}`;if(manual)status($('draftStatus').textContent);}
