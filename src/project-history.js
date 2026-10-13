@@ -240,6 +240,8 @@ export async function deleteStoredProject(projectId,{fence=null}={}){
 export async function migrateLegacyDraft(){
   const db=await openDraftDatabase();
   const idTx=db.transaction(['drafts'],'readwrite'),idDone=finished(idTx),draftStore=idTx.objectStore('drafts');
+  const active=await read(draftStore.get('active'));
+  if(active){await idDone;return false;}
   const old=await read(draftStore.get('current'));
   if(!old?.pages?.length){await idDone;return false;}
   let migration=await read(draftStore.get('v3-migration'));
