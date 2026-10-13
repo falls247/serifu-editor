@@ -1339,7 +1339,7 @@ $('deck').addEventListener('input', event => {
 });
 $('deck').addEventListener('change',event=>{
   const input=event.target;
-  if(input.matches('[data-glyph-inherit],[data-glyph-field],[data-glyph-stroke-mode],[data-glyph-stroke-width],[data-glyph-stroke-shape],[data-glyph-stroke-run],[data-glyph-stroke-cap],[data-glyph-stroke-detach],[data-glyph-stroke-point],[data-glyph-stroke-point-axis]')){
+  if(input.matches('[data-glyph-inherit],[data-glyph-field],[data-glyph-stroke-mode],[data-glyph-stroke-width],[data-glyph-stroke-shape],[data-glyph-stroke-run],[data-glyph-stroke-cap],[data-glyph-stroke-detach],[data-glyph-stroke-point],[data-glyph-stroke-point-axis],[data-sfx-outline-group-select],[data-sfx-group-width],[data-sfx-group-color]')){
     const p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
     const mode=activeGlyphEdit(p,l);if(!mode)return;
     if(input.matches('[data-sfx-outline-group-select]')){
@@ -1367,7 +1367,7 @@ $('deck').addEventListener('change',event=>{
     }
     const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];if(!run)return;
     if(input.matches('[data-glyph-stroke-point]')){mode.strokePoint=Number(input.value);renderCards(p);return;}
-    if(input.matches('[data-glyph-stroke-point-axis]','[data-sfx-outline-group-select]','[data-sfx-group-width]','[data-sfx-group-color]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
+    if(input.matches('[data-glyph-stroke-point-axis]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
     if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500))return;
     edit(p,()=>{
       if(input.matches('[data-glyph-stroke-cap]'))run[input.dataset.glyphStrokeCap].cap=input.value;
