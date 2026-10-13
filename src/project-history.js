@@ -236,3 +236,61 @@ export async function deleteStoredProject(projectId,{fence=null}={}){
     await done;return {histories:refs.length,snapshots:owned.length};
   }catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
 }
+
+export async function migrateLegacyDraft(){
+  const db=await openDraftDatabase();
+  const idTx=db.transaction(['drafts'],'readwrite'),idDone=finished(idTx),draftStore=idTx.objectStore('drafts');
+  const old=await read(draftStore.get('current'));
+  if(!old?.pages?.length){await idDone;return false;}
+  let migration=await read(draftStore.get('v3-migration'));
+  if(!migration){
+    migration={key:'v3-migration',projectId:validProjectId(old.projectId)?old.projectId:crypto.randomUUID()};
+    draftStore.put(migration);
+  }
+  await idDone;
+  const current=await (async()=>{
+    const tx=db.transaction('latest','readonly'),done=finished(tx),value=await read(tx.objectStore('latest').get(migration.projectId));await done;return value;
+  })();
+  if(current)return false;
+  const {claimProjectLease,releaseProjectLease,tabIdentity}=await import('./project-lock.js');
+  const claim=await claimProjectLease(migration.projectId,tabIdentity);
+  if(!claim.held)return false;
+  try{
+    const check=db.transaction(['latest','drafts','images','masks'],'readonly'),checkDone=finished(check);
+    const [saved,meta,images,maskRecord]=await Promise.all([
+      read(check.objectStore('latest').get(migration.projectId)),
+      read(check.objectStore('drafts').get('current')),
+      read(check.objectStore('images').getAll()),
+      read(check.objectStore('masks').get('current'))
+    ]);
+    await checkDone;
+    if(saved||!meta?.pages?.length)return false;
+    const byId=new Map(images.map(image=>[image.id,image])),idMap=new Map();
+    const pages=meta.pages.map(p=>{
+      if(!p||!Array.isArray(p.layers))throw new Error('v2データのページが不正');
+      const id=validProjectId(p.id)?p.id:crypto.randomUUID();
+      if(idMap.has(p.id))throw new Error('v2データに重複ページIDがある');
+      idMap.set(p.id,id);return {...p,id};
+    });
+    const convertedImages=[];
+    for(const page of meta.pages){
+      const item=byId.get(page.id);
+      if(!(item?.blob instanceof Blob))throw new Error('旧一時保存の画像が不足: '+page.name);
+      convertedImages.push({id:idMap.get(page.id),blob:item.blob});
+    }
+    const masks=[];
+    for(const record of maskRecord?.records||[]){
+      const mapped=idMap.get(record.pageId);
+      if(!mapped)continue;
+      if(!(record.blob instanceof Blob)||record.blob.size!==record.metadata?.byteLength)throw new Error('v2マスク素材が壊れている');
+      const asset=await assetFromEncoded({...record.metadata,data:new Uint8Array(await record.blob.arrayBuffer())});
+      masks.push({pageId:mapped,id:record.id,asset});
+    }
+    // Keep v2 records untouched. A failed transaction may be retried with the same migration ID.
+    const {key,...rest}=meta;
+    const fresh={...rest,version:14,projectId:migration.projectId,pages,
+      revision:Number.isInteger(meta.revision)?meta.revision:0,savedAt:Number.isFinite(meta.savedAt)?meta.savedAt:Date.now()};
+    await saveProjectSnapshot(fresh,convertedImages,{masks,fence:{owner:tabIdentity,token:claim.token}});
+    return true;
+  }finally{await releaseProjectLease(migration.projectId,tabIdentity).catch(()=>{});}
+}
