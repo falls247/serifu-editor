@@ -2031,6 +2031,56 @@ $('deck').addEventListener('change',event=>{
   applyLayerPreset(p,layer,preset);
 });
 
+async function refreshProjectHistories(){
+  const selector=$('historySelect');if(!selector)return;
+  const previous=selector.value;
+  try{
+    const histories=await listProjectHistories(draftMeta?.projectId||projectId);
+    selector.replaceChildren(new Option('復元履歴を選択', ''));
+    for(const h of histories)selector.add(new Option(new Date(h.createdAt).toLocaleString('ja-JP'),h.historyId));
+    if(histories.some(h=>h.historyId===previous))selector.value=previous;
+    $('restoreHistory').disabled=!selector.value||readOnly;
+    $('deleteHistory').disabled=!selector.value||readOnly;
+    $('projectHistory').hidden=!histories.length;
+  }catch(error){selector.replaceChildren(new Option('履歴の読込に失敗', ''));$('projectHistory').hidden=true;status(error.message);}
+}
+function updateLeaseAccess(){
+  const banner=$('projectAccess');
+  if(banner){banner.textContent=readOnly?'閲覧専用：別タブに編集権があります。編集権の解放・期限切れ後に最新保存データを読み直します。':'編集可能';banner.dataset.readonly=String(readOnly);}
+  updateGlobal();
+}
+let activitySent=0;
+function recordProjectActivity(){
+  const now=Date.now();if(now-activitySent<500)return;activitySent=now;
+  void signalProjectActivity(projectId,tabIdentity,{interaction:true}).catch(()=>{});
+}
+document.addEventListener('pointerdown',recordProjectActivity,{capture:true});
+document.addEventListener('keydown',recordProjectActivity,{capture:true});
+async function pollProjectLease(){
+  try{
+    await signalProjectActivity(projectId,tabIdentity);
+    const claim=await claimProjectLease(projectId,tabIdentity);
+    if(!claim.held){
+      projectLease=null;
+      if(!readOnly){readOnly=true;updateLeaseAccess();}
+      return;
+    }
+    projectLease={owner:tabIdentity,token:claim.token};
+    if(readOnly&&pages.length){
+      // A former viewer MUST reload the committed latest before it may edit.
+      if(!needLeaseReload&&!busy){needLeaseReload=true;$('restoreDraft').click();}
+      return;
+    }
+    if(readOnly){readOnly=false;updateLeaseAccess();}
+  }catch(error){
+    if(!readOnly){readOnly=true;updateLeaseAccess();}
+    $('draftStatus').textContent='編集権の検証に失敗: '+error.message;
+  }
+}
+window.addEventListener('pagehide',()=>{void releaseProjectLease(projectId,tabIdentity).catch(()=>{});});
+setInterval(()=>{void pollProjectLease();},4000);
+void pollProjectLease();
+
 function savedTime(timestamp) {return new Date(timestamp).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'});}
 function updateDraftUI() {
   $('draftNotice').hidden=!draftMeta;
@@ -2084,7 +2134,7 @@ $('autosaveMinutes').onchange=()=>{
 };
 $('restoreDraft').onclick=()=>guard(async task=>{
   await storageReady;task.stage('メタ情報');const meta=await getDraftMeta();if(!meta)return;
-  if(pages.length&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
+  if(pages.length&&!needLeaseReload&&!confirm('現在の一覧を一時保存の内容に置き換える？ 保存後の変更は失われる。'))return;
   if(!Number.isInteger(meta.version)||meta.version<3||meta.version>PROJECT_VERSION||!Array.isArray(meta.pages))throw new Error('未対応の一時保存データ');
   task.stage('画像取得',meta.pages.length);const ids=meta.pages.map(p=>p.id),[images,storedMasks]=await Promise.all([getDraftImages(ids),getDraftMasks(ids)]);checkAbort(task.signal);
   const masksByPage=new Map(meta.pages.map(p=>[p.id,{}]));for(const {pageId,id,asset} of storedMasks)masksByPage.get(pageId)[id]=asset;
@@ -2094,13 +2144,39 @@ $('restoreDraft').onclick=()=>guard(async task=>{
   pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
   sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
   batchStart=0;const presetNotice=mergePresets(meta.preferences);task.stage('一覧置換',loaded.length);refreshJump();if(active())activate(active());task.update({processed:loaded.length,succeeded:loaded.length},true);
-  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;updateDraftUI();updateGlobal();void refreshProjectHistories();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
+  dirty();lastSavedRevision=revision;changed=false;draftMeta=meta;needLeaseReload=false;updateDraftUI();updateLeaseAccess();void refreshProjectHistories();status('一時保存を復元した。元ファイルへの接続はないため、元画像削除は無効。'+presetNotice);
 },'一時保存復元',5);
 $('clearDraft').onclick=()=>guard(async()=>{
   if(!confirm('このブラウザの一時保存を消去する？ 編集中の画像は残る。'))return;
   await forgetDraft();draftMeta=null;lastSavedRevision=-1;delete $('draftStatus').dataset.error;updateDraftUI();
   status('一時保存を消去した。自動保存がONなら次の周期で再保存する。');
 });
+
+$('historySelect').onchange=()=>{
+  const disabled=!$('historySelect').value||readOnly;
+  $('restoreHistory').disabled=disabled;$('deleteHistory').disabled=disabled;
+};
+$('restoreHistory').onclick=async()=>{
+  const histories=await listProjectHistories(draftMeta?.projectId||projectId),h=histories.find(h=>h.historyId===$('historySelect').value);
+  if(!h||readOnly||busy)return;
+  if(!confirm('選択した日時の編集状態へ上書きする？ 現在の状態は自動退避されません。履歴5世代は維持します。'))return;
+  try{
+    const saved=await getStoredSnapshot(h.snapshotId);
+    await Promise.all([projectSnapshotImages(saved,saved.meta.pages.map(x=>x.id)),projectSnapshotMasks(saved,saved.meta.pages.map(x=>x.id))]);
+    await restoreProjectHistory(h.projectId,h.snapshotId,{fence:projectLease});
+    needLeaseReload=true;
+    $('restoreDraft').click();
+  }catch(error){status('履歴の復元に失敗: '+error.message);}
+};
+$('deleteHistory').onclick=async()=>{
+  const histories=await listProjectHistories(draftMeta?.projectId||projectId),h=histories.find(h=>h.historyId===$('historySelect').value);
+  if(!h||readOnly||busy||!confirm('この復元履歴1世代を削除する？ 他の世代と共有する画像・マスクは残します。'))return;
+  try{
+    await deleteProjectHistory(h.projectId,h.historyId,{fence:projectLease});
+    await collectUnusedProjectAssets();await refreshProjectHistories();
+    status('選択した履歴を削除した。共有素材は参照がある限り保持。');
+  }catch(error){status('履歴削除に失敗: '+error.message);}
+};
 applyViewSettings();refreshPresetMenus();configureAutosave();updateGlobal();
 if(document.fonts){
   const redrawFonts=()=>{fontVersion++;pngCache.clear();clearGlyphCache();pages.forEach(drawPage);pages.forEach(p=>scheduleThumbnailRefresh(p,true));};

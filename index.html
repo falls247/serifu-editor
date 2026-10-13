@@ -35,7 +35,7 @@
     <button id="savePreset">選択中の設定を記憶</button>
     <div class="draft-controls"><button id="temporarySave">一時保存</button><label class="autosave-toggle"><input id="autosaveEnabled" type="checkbox" checked>自動保存</label><label class="interval-label"><input id="autosaveMinutes" type="number" min="0.1" max="1440" step="0.1" value="2" aria-label="自動保存の周期（分）">分ごと</label><span id="draftStatus" role="status">まだ一時保存なし</span></div>
   </div>
-  <div id="draftNotice" class="draft-notice" hidden><span id="draftSummary"></span><button id="restoreDraft">保存した編集を復元</button><button id="clearDraft">一時保存を消去</button></div>
+  <div id="draftNotice" class="draft-notice" hidden><span id="draftSummary"></span><button id="restoreDraft">保存した編集を復元</button><button id="clearDraft">一時保存を消去</button><div id="projectHistory" hidden><label>復元履歴 <select id="historySelect"><option value="">復元履歴を選択</option></select></label><button id="restoreHistory" disabled>選択した履歴を復元</button><button id="deleteHistory" disabled>履歴を削除</button></div></div><span id="projectAccess" role="status">編集可能</span>
   <div class="view-bar">
     <button id="toggleThumbnails" aria-expanded="true" aria-controls="thumbnailSidebar">サムネイルを非表示</button>
     <label>表示件数<select id="pageSize"><option value="50" selected>50件ずつ</option><option value="100">100件ずつ</option><option value="all">全表示</option></select></label>
