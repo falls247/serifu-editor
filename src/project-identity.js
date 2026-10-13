@@ -3,8 +3,8 @@ export const validProjectId=value=>typeof value==='string'&&UUID.test(value);
 export const newProjectId=()=>crypto.randomUUID();
 export function projectIdentity(record,version){
   const id=record?.projectId;
-  if(id===undefined||id===null)return null;
-  if(!validProjectId(id)||version<14)throw new Error('編集データのプロジェクトIDが不正');
+  if(version<14||id===undefined||id===null)return null;
+  if(!validProjectId(id))throw new Error('編集データのプロジェクトIDが不正');
   return id;
 }
 export function pageIdentity(record,version){

@@ -8,5 +8,7 @@ test('UUIDの値検証と旧ファイル互換',()=>{
   assert.equal(projectIdentity({},13),null);assert.equal(pageIdentity({},13),null);
   assert.throws(()=>projectIdentity({projectId:'../../x'},14),/ID/);
   assert.throws(()=>pageIdentity({id:'../../x'},14),/ID/);
-  assert.throws(()=>projectIdentity({projectId:id},13),/ID/);
+  assert.equal(projectIdentity({projectId:id},13),null);
+  assert.equal(pageIdentity({id},4),null);
+  assert.equal(projectIdentity({projectId:'../../x'},4),null);
 });
