@@ -37,6 +37,7 @@
     "test:mask-render": "node scripts/mask-render-smoke.mjs",
     "test:mask-order": "node scripts/mask-order-smoke.mjs",
     "test:sam3-real-browser": "node scripts/sam3-real-browser-smoke.mjs",
-    "test:sam3-gpu-lifecycle": "python3 scripts/sam3-gpu-lifecycle.py"
+    "test:sam3-gpu-lifecycle": "python3 scripts/sam3-gpu-lifecycle.py",
+    "test:project-history": "node scripts/project-history-smoke.mjs"
   }
 }
