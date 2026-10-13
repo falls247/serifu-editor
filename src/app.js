@@ -1,5 +1,6 @@
 import { graphemes } from './typography.js';
 import { sfxVisibleIndices } from './sfx-lettering-model.js';
+import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY} from './sfx-lettering-templates.js';
 import { textGlyphs } from './renderer.js';
 import { startLettering, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
@@ -109,6 +110,13 @@ let pageClipboard=null;
 const clipboardPastes=new Map();
 let preferences;
 try { preferences=normalizePreferences(JSON.parse(localStorage.getItem(PREFS_KEY))); } catch { preferences=defaultPreferences(); }
+let sfxTemplates=[];
+try{sfxTemplates=decodeSfxTemplates(localStorage.getItem(SFX_TEMPLATE_KEY)||'{"format":"serifu-sfx-templates","version":1,"templates":[]}');}
+catch{sfxTemplates=[];}
+function saveSfxTemplates(){
+  try{localStorage.setItem(SFX_TEMPLATE_KEY,encodeSfxTemplates(sfxTemplates));return true;}
+  catch(error){status('テンプレートの保存に失敗: '+error.message);return false;}
+}
 let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null, autosaveTimer=null,latestSaveTimer=null;
 function dirty() {
   changed=true;revision++;
@@ -902,6 +910,19 @@ function sfxLetteringPanel(p,l){
     b.setAttribute('aria-pressed',String(mode.selected===g.index));buttons.append(b);
   }
   panel.append(buttons);
+  const templateControls=element('details','sfx-template-panel');
+  templateControls.append(element('summary','','SFXデザインテンプレート'));
+  const templateLabel=element('label','','テンプレート'),templateSelect=element('select');
+  templateSelect.dataset.sfxTemplateSelect='true';
+  templateSelect.append(new Option('テンプレートを選択',''));
+  for(const template of sfxTemplates)templateSelect.append(new Option(template.name,template.id));
+  templateLabel.append(templateSelect);templateControls.append(templateLabel);
+  const applyLabel=element('label','','適用する範囲'),applyMode=element('select');
+  applyMode.dataset.sfxTemplateApplyMode='true';
+  for(const [value,title] of [['all','すべて'],['style','スタイルのみ'],['layout','レイアウトのみ']])applyMode.append(new Option(title,value));
+  applyLabel.append(applyMode);templateControls.append(applyLabel);
+  templateControls.append(button('sfx-template-save','デザインを登録'),button('sfx-template-apply','適用'),button('sfx-template-export','JSON出力'),button('sfx-template-import','JSON読込'));
+  panel.append(templateControls);
   const glyph=l.lettering.glyphs.find(g=>g.index===mode.selected);
   if(glyph){
     const fields=element('div','effect-grid');
@@ -1359,6 +1380,31 @@ $('deck').addEventListener('click', event => {
   if(action==='sfx-glyph-exit'){p.glyphEdit=null;renderCards(p);drawPage(p);return;}
   const glyphMode=activeGlyphEdit(p,l);
   if(glyphMode){
+    if(action==='sfx-template-save'){
+      const name=prompt('テンプレート名','新しいSFXデザイン');if(!name)return;
+      try{sfxTemplates=mergeSfxTemplates(sfxTemplates,[createSfxTemplate(l,name)],{conflict:'rename'});saveSfxTemplates();renderCards(p);status('SFXデザインテンプレートを登録した。');}
+      catch(error){status('テンプレート登録失敗: '+error.message);}return;
+    }
+    if(action==='sfx-template-apply'){
+      const template=sfxTemplates.find(x=>x.id===card?.querySelector('[data-sfx-template-select]')?.value);
+      if(!template){status('テンプレートを選択してください。');return;}
+      try{const mode=card.querySelector('[data-sfx-template-apply-mode]')?.value||'all';
+        edit(p,()=>Object.assign(l,applySfxTemplate(l,template,{mode})));status('原文とページ座標を保持して適用した。');}
+      catch(error){status('テンプレート適用失敗: '+error.message);}return;
+    }
+    if(action==='sfx-template-export'){
+      try{download(new Blob([encodeSfxTemplates(sfxTemplates)],{type:'application/json'}),'serifu-sfx-templates.json');}
+      catch(error){status('テンプレート書出しに失敗: '+error.message);}return;
+    }
+    if(action==='sfx-template-import'){
+      const input=document.createElement('input');input.type='file';input.accept='application/json,.json';
+      input.onchange=async()=>{const file=input.files?.[0];if(!file)return;
+        try{const incoming=decodeSfxTemplates(await file.text());
+          const policy=prompt('ID/名前競合: skip（スキップ）/ overwrite（上書き）/ rename（名前変更）','skip')||'skip';
+          sfxTemplates=mergeSfxTemplates(sfxTemplates,incoming,{conflict:policy});saveSfxTemplates();renderCards(p);}
+        catch(error){status('テンプレート読込失敗: '+error.message);}};
+      input.click();return;
+    }
     if(action==='sfx-glyph-select'){
       glyphMode.selected=Number(event.target.closest('[data-glyph-index]').dataset.glyphIndex);
       renderCards(p);drawPage(p);return;
