@@ -934,6 +934,26 @@ function sfxLetteringPanel(p,l){
     }
     panel.append(fields,button('sfx-glyph-duplicate','文字を複製'),button('sfx-glyph-delete','文字を削除'),button('sfx-glyph-reset','位置・変形をリセット'));
   }
+  const groups=element('details','sfx-outline-group-panel');
+  groups.append(element('summary','','外側輪郭の結合'));
+  const groupSelect=element('select');groupSelect.dataset.sfxOutlineGroupSelect='true';
+  groupSelect.append(new Option('輪郭グループなし',''));
+  for(let i=0;i<l.lettering.outlineGroups.length;i++){
+    const g=l.lettering.outlineGroups[i];groupSelect.append(new Option('グループ '+(i+1)+' · '+g.members.length+'字',String(i)));
+  }
+  mode.outlineGroup=Math.min(mode.outlineGroup??0,Math.max(0,l.lettering.outlineGroups.length-1));
+  if(l.lettering.outlineGroups.length)groupSelect.value=String(mode.outlineGroup);
+  groups.append(groupSelect,button('sfx-outline-group-all','全文字を結合'),button('sfx-outline-group-new','選択文字から作成'));
+  const currentGroup=l.lettering.outlineGroups[mode.outlineGroup];
+  if(currentGroup){
+    groups.append(button('sfx-outline-group-toggle','選択文字を追加／除外'),button('sfx-outline-group-remove','グループ削除'));
+    const width=element('input');width.type='number';width.min='0';width.max='80';width.step='0.5';
+    width.dataset.sfxGroupWidth='true';width.value=String(currentGroup.styleOverride?.width??l.outline);
+    const color=element('input');color.type='color';color.dataset.sfxGroupColor='true';color.value=currentGroup.styleOverride?.color??l.textOutlineColor??'#ffffff';
+    const widthLabel=element('label','','輪郭の太さ'),colorLabel=element('label','','輪郭の色');
+    widthLabel.append(width);colorLabel.append(color);groups.append(widthLabel,colorLabel);
+  }
+  panel.append(groups);
   if(l.lettering.strokes.length){
     const fieldset=element('details','sfx-stroke-panel');fieldset.append(element('summary','','連続「ー」の調整'));
     const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];
@@ -1322,6 +1342,17 @@ $('deck').addEventListener('change',event=>{
   if(input.matches('[data-glyph-inherit],[data-glyph-field],[data-glyph-stroke-mode],[data-glyph-stroke-width],[data-glyph-stroke-shape],[data-glyph-stroke-run],[data-glyph-stroke-cap],[data-glyph-stroke-detach],[data-glyph-stroke-point],[data-glyph-stroke-point-axis]')){
     const p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
     const mode=activeGlyphEdit(p,l);if(!mode)return;
+    if(input.matches('[data-sfx-outline-group-select]')){
+      mode.outlineGroup=Math.max(0,Number(input.value)||0);renderCards(p);return;
+    }
+    if(input.matches('[data-sfx-group-width],[data-sfx-group-color]')){
+      const group=l.lettering.outlineGroups[mode.outlineGroup];if(!group)return;
+      const numeric=Number(input.value);
+      if(input.matches('[data-sfx-group-width]')&&(!input.value||!Number.isFinite(numeric)||numeric<0||numeric>80))return;
+      edit(p,()=>{group.styleOverride={...group.styleOverride,color:group.styleOverride?.color??l.textOutlineColor??'#ffffff',
+        width:group.styleOverride?.width??l.outline,
+        ...(input.matches('[data-sfx-group-color]')?{color:input.value}:{width:numeric})};});return;
+    }
     if(input.matches('[data-glyph-inherit]')){mode.inherit=input.value;return;}
     if(input.matches('[data-glyph-field]')){
       const field=input.dataset.glyphField,limit=letteringFields[field],value=Number(input.value);
@@ -1336,7 +1367,7 @@ $('deck').addEventListener('change',event=>{
     }
     const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];if(!run)return;
     if(input.matches('[data-glyph-stroke-point]')){mode.strokePoint=Number(input.value);renderCards(p);return;}
-    if(input.matches('[data-glyph-stroke-point-axis]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
+    if(input.matches('[data-glyph-stroke-point-axis]','[data-sfx-outline-group-select]','[data-sfx-group-width]','[data-sfx-group-color]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
     if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500))return;
     edit(p,()=>{
       if(input.matches('[data-glyph-stroke-cap]'))run[input.dataset.glyphStrokeCap].cap=input.value;
@@ -1381,6 +1412,23 @@ $('deck').addEventListener('click', event => {
   if(action==='sfx-glyph-exit'){p.glyphEdit=null;renderCards(p);drawPage(p);return;}
   const glyphMode=activeGlyphEdit(p,l);
   if(glyphMode){
+    if(action==='sfx-outline-group-all'||action==='sfx-outline-group-new'){
+      const members=action==='sfx-outline-group-all'?l.lettering.glyphs.map(g=>g.index):[glyphMode.selected].filter(x=>x!==null);
+      if(members.length)edit(p,()=>{l.lettering.outlineGroups.push({members,mode:action==='sfx-outline-group-all'?'auto':'manual',
+        locked:false,styleOverride:null});glyphMode.outlineGroup=l.lettering.outlineGroups.length-1;});return;
+    }
+    if(action==='sfx-outline-group-toggle'){
+      const group=l.lettering.outlineGroups[glyphMode.outlineGroup];if(!group)return;
+      const next=new Set(group.members);
+      if(next.has(glyphMode.selected)){if(next.size===1)return;next.delete(glyphMode.selected);}
+      else next.add(glyphMode.selected);
+      edit(p,()=>{group.members=[...next].sort((a,b)=>a-b);group.mode='manual';});return;
+    }
+    if(action==='sfx-outline-group-remove'){
+      if(!l.lettering.outlineGroups[glyphMode.outlineGroup])return;
+      edit(p,()=>{l.lettering.outlineGroups.splice(glyphMode.outlineGroup,1);
+        glyphMode.outlineGroup=Math.max(0,Math.min(glyphMode.outlineGroup,l.lettering.outlineGroups.length-1));});return;
+    }
     if(action==='sfx-template-save'){
       const name=prompt('テンプレート名','新しいSFXデザイン');if(!name)return;
       try{sfxTemplates=mergeSfxTemplates(sfxTemplates,[createSfxTemplate(l,name)],{conflict:'rename'});saveSfxTemplates();renderCards(p);status('SFXデザインテンプレートを登録した。');}
