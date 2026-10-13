@@ -119,12 +119,12 @@ function saveSfxTemplates(){
   try{localStorage.setItem(SFX_TEMPLATE_KEY,encodeSfxTemplates(sfxTemplates));return true;}
   catch(error){status('テンプレートの保存に失敗: '+error.message);return false;}
 }
-let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null, autosaveTimer=null,latestSaveTimer=null;
+let revision=0, lastSavedRevision=-1, draftMeta=null, draftTask=null,activeDraftTask=null, autosaveTimer=null,latestSaveTimer=null;
 function dirty() {
   changed=true;revision++;
   if(preferences?.autosave?.enabled){
     clearTimeout(latestSaveTimer);
-    latestSaveTimer=setTimeout(()=>{if(!readOnly&&!busy&&!pages.some(p=>p.glyphDrag))void temporarySave(false);},750);
+    latestSaveTimer=setTimeout(()=>{if(!readOnly&&!busy&&!pages.some(p=>p.glyphDrag))void temporarySave(false).catch(error=>status('自動保存を開始できない: '+error.message));},750);
   }
 }
 const editing = new WeakSet();
@@ -2293,7 +2293,7 @@ async function pollProjectLease(){
     $('draftStatus').textContent='編集権の検証に失敗: '+error.message;
   }
 }
-window.addEventListener('pagehide',()=>{void releaseProjectLease(projectId,tabIdentity).catch(()=>{});});
+window.addEventListener('pagehide',()=>{clearTimeout(latestSaveTimer);activeDraftTask?.cancel();void releaseProjectLease(projectId,tabIdentity).catch(()=>{});});
 setInterval(()=>{void pollProjectLease();},4000);
 void pollProjectLease();
 
@@ -2316,7 +2316,7 @@ const storageReady=(async()=>{
 })();
 async function temporarySave(manual=false) {
   if(!pages.length||busy||readOnly||pages.some(p=>p.glyphDrag))return;
-  if(draftTask){if(!manual)return draftTask;await draftTask.catch(()=>{});return temporarySave(true);}
+  if(draftTask){if(!manual)return;await draftTask.catch(()=>{});return temporarySave(true);}
   if(!manual&&revision===lastSavedRevision)return;
   const snapshot=snapshotPages(),captured=revision,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates)};
   const meta={version:PROJECT_VERSION,projectId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
@@ -2325,25 +2325,31 @@ async function temporarySave(manual=false) {
     return {pageId:page.id,id,asset};
   }));
   const task=new BulkTask(manual?'一時保存':'自動保存',{stageCount:3,onProgress:data=>{if(manual&&currentTask?.data.operationId===data.operationId)displayTask(data);else if(!manual)$('draftStatus').textContent=`自動保存 · ${data.stage} ${data.processed}/${data.total??'未確定'}`;}});
-  if(manual){currentTask=task;task.emit(true);}delete $('draftStatus').dataset.error;
+  if(manual){currentTask=task;task.emit(true);}activeDraftTask=task;delete $('draftStatus').dataset.error;
   draftTask=(async()=>{await storageReady;checkAbort(task.signal);
     const claim=await claimProjectLease(projectId,tabIdentity);if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
     projectLease={owner:tabIdentity,token:claim.token};
     const ids=await projectImageIds(projectId),missing=snapshot.filter(p=>!ids.has(p.id)),images=[];task.stage('画像差分準備',missing.length);
     for(const p of missing){checkAbort(task.signal);const blob=await originalBlob(p),original=pages.find(page=>page.id===p.id);if(original)original.assetBlob=blob;images.push({id:p.id,blob});task.result(p.name);if(images.length%20===0)await yieldToBrowser();}
     task.metrics.newImages=images.length;task.stage('DB要求',images.length);if(!images.length)task.stage('コミット',1);
+    // Asset encoding may be slower than one lease interval. Renew immediately before
+    // the atomic latest flip; do not accept a token reclaimed by another tab.
+    checkAbort(task.signal);
+    const renewed=await claimProjectLease(projectId,tabIdentity);
+    if(!renewed.held)throw new Error('他のタブが編集権を取得したため保存できない');
+    projectLease={owner:tabIdentity,token:renewed.token};
     await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence:projectLease});
     task.stage('コミット',1);
     task.result('一時保存');draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;void refreshProjectHistories();
   })();updateDraftUI();let failure;
   try{await draftTask;if(manual)status('画像・文字・位置・設定をこのブラウザに一時保存した。');}
   catch(error){failure=error;if(error.name!=='AbortError')task.result('一時保存',false);$('draftStatus').dataset.error='true';$('draftStatus').textContent=error.name==='AbortError'?'一時保存を中断。前回の保存を維持。':error.name==='QuotaExceededError'?'保存容量不足。編集データを書き出して保管。':`一時保存に失敗: ${error.message}`;if(manual)status($('draftStatus').textContent);}
-  finally{const metrics=task.finish(failure);if(currentTask===task){currentTask=null;window.serifuDraftMetrics=metrics;}draftTask=null;updateDraftUI();updateGlobal();}
+  finally{const metrics=task.finish(failure);if(currentTask===task){currentTask=null;window.serifuDraftMetrics=metrics;}if(activeDraftTask===task)activeDraftTask=null;draftTask=null;updateDraftUI();updateGlobal();}
 }
 $('temporarySave').onclick=()=>temporarySave(true);
 function configureAutosave() {
   if(autosaveTimer)clearInterval(autosaveTimer);
-  autosaveTimer=preferences.autosave.enabled?setInterval(()=>temporarySave(false),preferences.autosave.minutes*60000):null;
+  autosaveTimer=preferences.autosave.enabled?setInterval(()=>{void temporarySave(false).catch(error=>status('自動保存を開始できない: '+error.message));},preferences.autosave.minutes*60000):null;
   $('autosaveEnabled').checked=preferences.autosave.enabled;$('autosaveMinutes').value=String(preferences.autosave.minutes);
 }
 $('autosaveEnabled').onchange=()=>{preferences.autosave.enabled=$('autosaveEnabled').checked;persistPreferences();configureAutosave();dirty();updateGlobal();};
