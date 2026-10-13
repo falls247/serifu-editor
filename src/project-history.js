@@ -83,7 +83,7 @@ export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=
     const key=JSON.stringify([record.pageId,record.id]);if(maskPages.has(key))throw new Error('マスク参照の重複');maskPages.add(key);
     const asset=await assetFromEncoded(record.asset),metadata=maskAssetMetadata(asset);
     const blob=new Blob([asset.data],{type:'application/octet-stream'});
-    const assetId='mask:'+metadata.sha256+':'+metadata.bbox.width+':'+metadata.bbox.height;
+    const assetId='mask:'+metadata.sha256+':'+[metadata.imageWidth,metadata.imageHeight,metadata.bbox.x,metadata.bbox.y,metadata.bbox.width,metadata.bbox.height,metadata.codec].join(':');
     maskInputs.set(assetId,{assetId,blob,metadata,byteLength:blob.size});
     maskRefs.push({pageId:record.pageId,id:record.id,assetId});
   }
@@ -109,13 +109,20 @@ export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=
       if(!assetId)throw new Error('保存対象の原画像が不足: '+page.name);
       return {pageId:page.id,assetId};
     });
+    for(const record of imageRefs){
+      const asset=imageInputs.get(record.pageId);
+      if(!asset&&!await read(tx.objectStore('imageAssets').get(record.assetId)))throw new Error('最新スナップショットの画像参照が破損');
+    }
     for(const input of imageInputs.values())tx.objectStore('imageAssets').put(input);
     for(const input of maskInputs.values())tx.objectStore('maskAssetsV2').put(input);
     const id=snapshotId(),createdAt=Date.now();
     const snapshot={id,projectId:meta.projectId,createdAt,meta:cleanMeta(meta),images:imageRefs,masks:maskRefs};
     const own=entries.filter(x=>x.projectId===meta.projectId).sort((a,b)=>b.createdAt-a.createdAt);
     const prior=own[0];
-    const shouldHistory=history&&(!prior||createdAt-prior.createdAt>=300000)&&(!prevSnapshot||JSON.stringify(prevSnapshot.meta.pages)!==JSON.stringify(meta.pages));
+    const changed=!prevSnapshot||JSON.stringify({
+      pages:prevSnapshot.meta.pages,preferences:prevSnapshot.meta.preferences,images:prevSnapshot.images,masks:prevSnapshot.masks
+    })!==JSON.stringify({pages:meta.pages,preferences:meta.preferences,images:imageRefs,masks:maskRefs});
+    const shouldHistory=history&&(!prior||createdAt-prior.createdAt>=300000)&&changed;
     tx.objectStore('snapshots').put(snapshot);
     tx.objectStore('projects').put({projectId:meta.projectId,name:meta.sourceFolderName||'名称未設定',updatedAt:createdAt,createdAt:project?.createdAt||createdAt});
     tx.objectStore('latest').put({projectId:meta.projectId,snapshotId:id,revision:meta.revision??0,savedAt:meta.savedAt});
@@ -127,6 +134,16 @@ export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=
     return {snapshotId:id,historyCreated:shouldHistory};
   }catch(error){abort();await done.catch(()=>{});throw error;}
   finally{signal?.removeEventListener('abort',abort);}
+}
+export async function activateStoredProject(projectId,{fence=null}={}){
+  const db=await openDraftDatabase(),tx=db.transaction(['latest','locks','drafts'],'readwrite'),complete=finished(tx);
+  try{
+    const [latest,lock]=await Promise.all([read(tx.objectStore('latest').get(projectId)),read(tx.objectStore('locks').get(projectId))]);
+    if(!latest)throw new Error('指定プロジェクトには最新の保存内容がない');
+    if(fence&&(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<Date.now()))throw new Error('編集権を失っている');
+    tx.objectStore('drafts').put({key:'active',projectId});await complete;
+    return latest;
+  }catch(error){try{tx.abort();}catch{}await complete.catch(()=>{});throw error;}
 }
 export async function restoreProjectHistory(projectId,snapshotKey,{fence=null}={}){
   const snapshot=await getStoredSnapshot(snapshotKey);
@@ -169,5 +186,5 @@ export async function collectUnusedProjectAssets(){
   for(const key of images)if(!liveImage.has(key))tx.objectStore('imageAssets').delete(key);
   for(const key of masks)if(!liveMask.has(key))tx.objectStore('maskAssetsV2').delete(key);
   await done;
-  return {snapshotsRemoved:snapshots.length-kept.size,imageAssetsRemoved:images.filter(x=>!liveImage.has(x)).length,maskAssetsRemoved:masks.filter(x=>!liveMask.has(x)).length};
+  return {snapshotsRemoved:snapshots.filter(x=>!kept.has(x.id)).length,imageAssetsRemoved:images.filter(x=>!liveImage.has(x)).length,maskAssetsRemoved:masks.filter(x=>!liveMask.has(x)).length};
 }
