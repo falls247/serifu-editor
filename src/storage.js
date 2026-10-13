@@ -24,7 +24,7 @@ async function database() {
       if(!db.objectStoreNames.contains('drafts'))db.createObjectStore('drafts',{keyPath:'key'});
       if(!db.objectStoreNames.contains('images'))db.createObjectStore('images',{keyPath:'id'});
       if(!db.objectStoreNames.contains('masks'))db.createObjectStore('masks',{keyPath:'key'});
-      for(const [name,keyPath] of [['projects','projectId'],['snapshots','id'],['latest','projectId'],['history','historyId'],['imageAssets','assetId'],['maskAssetsV2','assetId'],['locks','projectId']])if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath});
+      for(const [name,keyPath] of [['projects','projectId'],['snapshots','id'],['latest','projectId'],['history','historyId'],['imageAssets','assetId'],['maskAssetsV2','assetId'],['locks','projectId'],['projectViewers','key']])if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath});
     };
     request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>{db.close();connection=null;};resolve(db);};
     request.onerror=()=>{connection=null;reject(request.error);};request.onblocked=()=>{connection=null;reject(new Error('他のタブが一時保存を使用中'));};
