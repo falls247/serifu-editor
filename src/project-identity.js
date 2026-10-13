@@ -9,7 +9,7 @@ export function projectIdentity(record,version){
 }
 export function pageIdentity(record,version){
   const id=record?.id;
-  if(id===undefined||id===null)return null;
-  if(!validProjectId(id)||version<14)throw new Error('編集データのページIDが不正');
+  if(version<14||id===undefined||id===null)return null;
+  if(!validProjectId(id))throw new Error('編集データのページIDが不正');
   return id;
 }
