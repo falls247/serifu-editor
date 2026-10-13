@@ -2,7 +2,14 @@
 import {openDraftDatabase} from './storage.js';
 const ask=req=>new Promise((resolve,reject)=>{req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
 const done=tx=>new Promise((resolve,reject)=>{tx.oncomplete=resolve;tx.onabort=()=>reject(tx.error||new Error('編集権トランザクション中断'));});
-export const tabIdentity=crypto.randomUUID();
+export const tabIdentity=(()=>{
+  try{
+    const key='serifu.editor.tab-id';
+    const old=sessionStorage.getItem(key);
+    if(old&&/^[0-9a-f-]{36}$/i.test(old))return old;
+    const next=crypto.randomUUID();sessionStorage.setItem(key,next);return next;
+  }catch{return crypto.randomUUID();}
+})();
 const LEASE_MS=12000,ACTIVE_MS=30000;
 const viewerKey=(projectId,owner)=>JSON.stringify([projectId,owner]);
 async function transact(stores,mode,callback){
