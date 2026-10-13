@@ -2413,6 +2413,7 @@ async function temporarySave(manual=false) {
     if(!manual&&captured===lastSavedRevision){const history=await listProjectHistories(savingId);if(history[0]&&Date.now()-history[0].createdAt<300000)return;}
     const claim=await claimProjectLease(savingId,tabIdentity);
     if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
+    if(projectLease&&projectLease.ownerEpoch!==claim.ownerEpoch){readOnly=true;updateLeaseAccess();throw new Error('別のタブの保存内容を読み直してから保存してください');}
     const savingFence={owner:tabIdentity,token:claim.token,ownerEpoch:claim.ownerEpoch};
     projectLease=savingFence;
     const ids=await projectImageIds(savingId),missing=snapshot.filter(p=>!ids.has(p.id)||!pages.find(original=>original.id===p.id)?.imageSaved),images=[];task.stage('画像差分準備',missing.length);

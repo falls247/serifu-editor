@@ -17,6 +17,22 @@ async function holdImageHash(page) {
     };
   });
 }
+async function interveningWriter(page,project,{save=false}={}) {
+  await page.evaluate(async({project,save})=>{
+    const {openDraftDatabase}=await import('/src/storage.js');
+    const {claimProjectLease,releaseProjectLease}=await import('/src/project-lock.js');
+    const {saveProjectSnapshot}=await import('/src/project-history.js');
+    const db=await openDraftDatabase(),tx=db.transaction('locks','readwrite'),locks=tx.objectStore('locks'),request=locks.get(project.projectId);
+    request.onsuccess=()=>locks.put({...request.result,until:0});
+    await new Promise(resolve=>tx.oncomplete=resolve);
+    const other=crypto.randomUUID(),claim=await claimProjectLease(project.projectId,other);
+    if(!claim.held)throw Error('test owner could not acquire expired lease');
+    const p=project.pages[0],bytes=Uint8Array.from(atob(p.src.split(',')[1]),c=>c.charCodeAt(0)),layer={...p.layers[0],text:'OTHER'};delete layer.lettering;
+    await saveProjectSnapshot({version:14,projectId:project.projectId,savedAt:Date.now(),pages:[{...p,layers:[layer]}]},[{id:p.id,blob:new Blob([bytes],{type:'image/png'})}],{fence:{owner:other,token:claim.token}});
+    await releaseProjectLease(project.projectId,other);
+    if(save)document.querySelector('#temporarySave').click();
+  },{project,save});
+}
 for(const [index,pause] of [1000,121000].entries()) {
   await sfxTest(5299+index,async({page,card})=>{
     await page.clock.install();
@@ -61,20 +77,8 @@ await sfxTest(5301,async({page,card})=>{
   await holdImageHash(page);
   await page.click('#temporarySave');
   await page.waitForFunction(()=>window.saveHeld===true,undefined,{timeout:10000});
-  await page.evaluate(async project=>{
-    const {openDraftDatabase}=await import('/src/storage.js');
-    const {claimProjectLease,releaseProjectLease}=await import('/src/project-lock.js');
-    const {saveProjectSnapshot}=await import('/src/project-history.js');
-    const db=await openDraftDatabase(),tx=db.transaction('locks','readwrite'),locks=tx.objectStore('locks'),request=locks.get(project.projectId);
-    request.onsuccess=()=>locks.put({...request.result,until:0});
-    await new Promise(resolve=>tx.oncomplete=resolve);
-    const other=crypto.randomUUID(),claim=await claimProjectLease(project.projectId,other);
-    if(!claim.held)throw Error('test owner could not acquire expired lease');
-    const p=project.pages[0],bytes=Uint8Array.from(atob(p.src.split(',')[1]),c=>c.charCodeAt(0)),layer={...p.layers[0],text:'OTHER'};delete layer.lettering;
-    await saveProjectSnapshot({version:14,projectId:project.projectId,savedAt:Date.now(),pages:[{...p,layers:[layer]}]},[{id:p.id,blob:new Blob([bytes],{type:'image/png'})}],{fence:{owner:other,token:claim.token}});
-    await releaseProjectLease(project.projectId,other);
-    window.releaseSave();
-  },project);
+  await interveningWriter(page,project);
+  await page.evaluate(()=>window.releaseSave());
   await page.waitForFunction(()=>document.querySelector('#draftStatus').dataset.error==='true',undefined,{timeout:10000});
   const latest=await page.evaluate(async id=>{
     const {latestProjectSnapshot}=await import('/src/project-history.js');
@@ -85,4 +89,20 @@ await sfxTest(5301,async({page,card})=>{
   try{await page.waitForFunction(()=>document.querySelector('#projectAccess').dataset.readonly==='false',undefined,{timeout:10000});}catch(error){console.error(await page.evaluate(()=>({draft:document.querySelector('#draftStatus').textContent,status:document.querySelector('#status').textContent,progress:document.querySelector('#progress')?.textContent,restoreDisabled:document.querySelector('#restoreDraft').disabled,access:document.querySelector('#projectAccess').textContent})));throw error;}
   assert.equal(await card.locator('textarea').inputValue(),'OTHER');
   console.log('Autosave: ownership changed during hashing, stale preparation refused and latest reloaded PASS');
+});
+
+await sfxTest(5302,async({page,card})=>{
+  await page.click('#temporarySave');
+  await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済'),undefined,{timeout:10000});
+  const project=await exportJson(page);
+  await interveningWriter(page,project,{save:true});
+  await page.waitForFunction(()=>document.querySelector('#projectAccess').dataset.readonly==='true',undefined,{timeout:10000});
+  const latest=await page.evaluate(async id=>{
+    const {latestProjectSnapshot}=await import('/src/project-history.js');
+    return (await latestProjectSnapshot(id)).meta.pages[0].layers[0].text;
+  },project.projectId);
+  assert.equal(latest,'OTHER','a new save must notice ownership changed since its last lease poll');
+  await page.waitForFunction(()=>document.querySelector('#projectAccess').dataset.readonly==='false',undefined,{timeout:10000});
+  assert.equal(await card.locator('textarea').inputValue(),'OTHER');
+  console.log('Autosave: writer changed before the next lease poll, stale new save refused PASS');
 });
