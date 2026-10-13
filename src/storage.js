@@ -1,7 +1,8 @@
+import {activeProjectSnapshot,projectSnapshotImages,projectSnapshotMasks} from './project-history.js';
 import {checkAbort} from './bulk-task.js';
 import {assetFromEncoded,maskAssetMetadata,maxMaskPayloadBytes} from './mask-codec.js';
 import {MAX_PROJECT_MASK_DECODED_BYTES} from './project-io.js';
-const DB_NAME='serifu-editor-drafts', DB_VERSION=2;
+const DB_NAME='serifu-editor-drafts', DB_VERSION=3;
 let connection;
 function validateMaskBudget(metadata){
   let decoded=0,compressed=0;
@@ -23,14 +24,16 @@ async function database() {
       if(!db.objectStoreNames.contains('drafts'))db.createObjectStore('drafts',{keyPath:'key'});
       if(!db.objectStoreNames.contains('images'))db.createObjectStore('images',{keyPath:'id'});
       if(!db.objectStoreNames.contains('masks'))db.createObjectStore('masks',{keyPath:'key'});
+      for(const [name,keyPath] of [['projects','projectId'],['snapshots','id'],['latest','projectId'],['history','historyId'],['imageAssets','assetId'],['maskAssetsV2','assetId'],['locks','projectId']])if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath});
     };
     request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>{db.close();connection=null;};resolve(db);};
     request.onerror=()=>{connection=null;reject(request.error);};request.onblocked=()=>{connection=null;reject(new Error('他のタブが一時保存を使用中'));};
   });
   return connection;
 }
-export async function getDraftMeta() {const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const data=await requestResult(tx.objectStore('drafts').get('current'));await done;return data||null;}
-export async function getImageIds() {const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);const ids=await requestResult(tx.objectStore('images').getAllKeys());await done;return new Set(ids);}
+export const openDraftDatabase=()=>database();
+export async function getDraftMeta() {const versioned=await activeProjectSnapshot();if(versioned)return versioned.meta;const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const data=await requestResult(tx.objectStore('drafts').get('current'));await done;return data||null;}
+export async function getImageIds() {const versioned=await activeProjectSnapshot();if(versioned)return new Set(versioned.images.map(x=>x.pageId));const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);const ids=await requestResult(tx.objectStore('images').getAllKeys());await done;return new Set(ids);}
 export async function saveDraft(meta,newImages,{signal,onProgress=()=>{},masks=[]}={}) {
   checkAbort(signal);
   validateMaskBudget(masks.map(record=>record.asset));
@@ -58,11 +61,13 @@ export async function saveDraft(meta,newImages,{signal,onProgress=()=>{},masks=[
   tx.objectStore('drafts').put({...meta,key:'current'});try{await done;}catch(error){if(signal?.aborted)throw signal.reason;throw error;}finally{signal?.removeEventListener('abort',abort);}
 }
 export async function getDraftImages(ids) {
+  const versioned=await activeProjectSnapshot();if(versioned)return projectSnapshotImages(versioned,ids);
   const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);
   const values=await Promise.all(ids.map(id=>requestResult(tx.objectStore('images').get(id))));await done;
   if(values.some(v=>!v?.blob))throw new Error('一時保存の画像が不足');return values;
 }
 export async function getDraftMasks(pageIds) {
+  const versioned=await activeProjectSnapshot();if(versioned)return projectSnapshotMasks(versioned,pageIds);
   const db=await database(),tx=db.transaction('masks','readonly'),done=completed(tx);
   const snapshot=await requestResult(tx.objectStore('masks').get('current'));await done;
   const pages=new Set(pageIds),result=[],seen=new Set();
@@ -77,4 +82,9 @@ export async function getDraftMasks(pageIds) {
   }
   return result;
 }
-export async function clearDraft() {const db=await database(),tx=db.transaction(['drafts','images','masks'],'readwrite'),done=completed(tx);tx.objectStore('drafts').clear();tx.objectStore('images').clear();tx.objectStore('masks').put({key:'current',records:[]});await done;}
+export async function clearDraft() {
+  const db=await database(),tx=db.transaction(['drafts','images','masks','latest'],'readwrite'),done=completed(tx);
+  const active=await requestResult(tx.objectStore('drafts').get('active'));
+  if(active?.projectId)tx.objectStore('latest').delete(active.projectId);
+  tx.objectStore('drafts').clear();tx.objectStore('images').clear();tx.objectStore('masks').put({key:'current',records:[]});await done;
+}
