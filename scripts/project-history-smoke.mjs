@@ -83,6 +83,37 @@ try{
     return denied&&(await h.activeProjectSnapshot()).meta.pages[0].layers[0].text===before;
   },{projectId,pageId,owner:a.owner,token:a.token});
   assert.equal(fenced,true,'stale owner must never replace latest');
+  // A real v2 draft is migrated once, without deleting old sources.
+  const migrationContext=await browser.newContext(),migrationPage=await migrationContext.newPage();
+  await migrationPage.goto(`http://127.0.0.1:${port}/src/project-history.js`);
+  const migrated=await migrationPage.evaluate(async()=>{
+    const pageId='c5cc5773-b88e-4de0-b616-af946d7a24e1',original='pixels-from-v2';
+    const request=indexedDB.open('serifu-editor-drafts',2);
+    const db=await new Promise((resolve,reject)=>{
+      request.onupgradeneeded=()=>{
+        for(const [name,keyPath] of [['drafts','key'],['images','id'],['masks','key']])
+          if(!request.result.objectStoreNames.contains(name))request.result.createObjectStore(name,{keyPath});
+      };
+      request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);
+    });
+    let tx=db.transaction(['drafts','images','masks'],'readwrite');
+    tx.objectStore('drafts').put({key:'current',version:13,savedAt:Date.now(),preferences:{},pages:[{id:pageId,name:'v2 image',layers:[],maskEffects:[]}]});
+    tx.objectStore('images').put({id:pageId,blob:new Blob([original],{type:'image/png'})});
+    tx.objectStore('masks').put({key:'current',records:[]});
+    await new Promise(resolve=>tx.oncomplete=resolve);db.close();
+    const h=await import('/src/project-history.js'),storage=await import('/src/storage.js');
+    if(await h.migrateLegacyDraft()!==true)throw Error('legacy migration did not begin');
+    if(await h.migrateLegacyDraft()!==false)throw Error('legacy migration produced duplicate');
+    const meta=await storage.getDraftMeta(),old=await(async()=>{
+      const d=await storage.openDraftDatabase(),t=d.transaction('drafts','readonly');
+      return new Promise((resolve,reject)=>{const q=t.objectStore('drafts').get('current');q.onsuccess=()=>resolve(q.result);q.onerror=()=>reject(q.error);});
+    })();
+    const restored=(await storage.getDraftImages([pageId]))[0].blob;
+    const history=await h.listProjectHistories(meta.projectId);
+    return {metaVersion:meta.version,legacyVersion:old.version,original:await restored.text(),history:history.length};
+  });
+  assert.deepEqual(migrated,{metaVersion:14,legacyVersion:13,original:'pixels-from-v2',history:1});
+  await migrationContext.close();
   console.log('Project vault browser PASS:',JSON.stringify({initial,history:result.histories,locks:'token fenced',restored:'old bytes',failedSave:'atomic'}));
   await context.close();
 }finally{await browser?.close();server.kill('SIGTERM');}
