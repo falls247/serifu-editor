@@ -29,16 +29,20 @@ export async function claimProjectLease(projectId,owner=tabIdentity){
     const preferred=others[0]?.owner;
     if(owner===tabIdentity&&reloadPredecessor&&current?.owner===reloadPredecessor){
       viewers.delete(viewerKey(projectId,reloadPredecessor));reloadPredecessor=null;
-      const transferred={projectId,owner,token:current.token+1,until:now+LEASE_MS};locks.put(transferred);return {held:true,owner,token:transferred.token,until:transferred.until};
+      const transferred={projectId,owner,token:current.token+1,ownerEpoch:current.token+1,until:now+LEASE_MS};locks.put(transferred);return {held:true,...transferred};
     }
     if(current?.owner===owner&&current.until>now){
-      const updated={...current,until:now+LEASE_MS};locks.put(updated);
-      return {held:true,owner,token:current.token,until:updated.until};
+      const updated={...current,ownerEpoch:current.ownerEpoch??current.token,until:now+LEASE_MS};locks.put(updated);
+      return {held:true,...updated};
     }
     if(current?.owner&&current.until>now)return {held:false,owner:current.owner,token:current.token,until:current.until};
     if(preferred&&preferred!==owner)return {held:false,owner:preferred,token:current?.token||0,until:0};
-    const record={projectId,owner,token:(current?.token||0)+1,until:now+LEASE_MS};
-    locks.put(record);return {held:true,owner,token:record.token,until:record.until};
+    const token=(current?.token||0)+1;
+    // Same-document expiry may interrupt expensive hashing. Track uninterrupted
+    // ownership separately from the strict token required by every write.
+    const ownerEpoch=current?.owner===owner?(current.ownerEpoch??current.token):token;
+    const record={projectId,owner,token,ownerEpoch,until:now+LEASE_MS};
+    locks.put(record);return {held:true,...record};
   });
 }
 export async function inspectProjectLease(projectId){

@@ -2047,7 +2047,7 @@ async function openStoredProject(identity,task,{snapshotId=null,restoreHistory=f
     else await activateStoredProject(identity,{fence});
   }catch(error){loaded.forEach(releasePage);if(claim?.held&&identity!==projectId)await releaseProjectLease(identity,tabIdentity);throw error;}
   const oldId=projectId;if(oldId!==identity)await releaseProjectLease(oldId,tabIdentity);
-  projectId=identity;projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
+  projectId=identity;projectLease=claim.held?{owner:tabIdentity,token:claim.token,ownerEpoch:claim.ownerEpoch}:null;readOnly=!claim.held;
   loaded.forEach(p=>p.imageSaved=true);pages.forEach(releasePage);pages=loaded;$('deck').replaceChildren();activeId=loaded[0]?.id||null;batchStart=0;drag=null;pngCache.clear();
   sourceFolderName=meta.sourceFolderName||null;mergePresets(meta.preferences);sfxTemplates=templates;saveSfxTemplates();mergeStrokePresets(importedStrokes);
   revision++;lastSavedRevision=loaded.some(p=>p.fontsChanged)?-1:revision;changed=loaded.some(p=>p.fontsChanged);draftMeta=meta;needLeaseReload=false;rememberProject();configureAutosave();refreshJump();if(active())activate(active());updateDraftUI();updateLeaseAccess();void refreshProjectHistories();
@@ -2169,7 +2169,7 @@ $('projectOpenInput').onchange=event=>{
     let claimed;try{await signalProjectActivity(identity,tabIdentity,{interaction:true});claimed=await claimProjectLease(identity,tabIdentity);}catch(error){loaded.forEach(releasePage);throw error;}
     if(oldId!==identity)await releaseProjectLease(oldId,tabIdentity);
     projectId=identity;
-    projectLease=claimed.held?{owner:tabIdentity,token:claimed.token}:null;readOnly=!claimed.held;
+    projectLease=claimed.held?{owner:tabIdentity,token:claimed.token,ownerEpoch:claimed.ownerEpoch}:null;readOnly=!claimed.held;
     pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;
     activeId=loaded[0]?.id||null;drag=null;pngCache.clear();batchStart=0;
     sourceFolderName=data.sourceFolderName||projectFolderName(file.name)||sourceFolderName;
@@ -2359,10 +2359,13 @@ async function pollProjectLease(){
       if(!readOnly){readOnly=true;clearTimeout(latestSaveTimer);clearInterval(autosaveTimer);activeDraftTask?.cancel();updateLeaseAccess();}
       return;
     }
-    projectLease={owner:tabIdentity,token:claim.token};
+    if(projectLease&&projectLease.ownerEpoch!==claim.ownerEpoch&&!readOnly){
+      readOnly=true;clearTimeout(latestSaveTimer);clearInterval(autosaveTimer);activeDraftTask?.cancel();updateLeaseAccess();
+    }
+    projectLease={owner:tabIdentity,token:claim.token,ownerEpoch:claim.ownerEpoch};
     if(readOnly&&pages.length){
       // A former viewer MUST reload the committed latest before it may edit.
-      if(!needLeaseReload&&!busy){needLeaseReload=true;void activateStoredProject(projectId,{fence:projectLease}).then(()=>{$('restoreDraft').click();}).catch(error=>{needLeaseReload=false;status('編集権の引継ぎに失敗: '+error.message);});}
+      if(!needLeaseReload&&!busy&&!draftTask){needLeaseReload=true;void activateStoredProject(identity,{fence:projectLease}).then(()=>{if(projectId===identity&&!busy&&!draftTask)$('restoreDraft').click();else needLeaseReload=false;}).catch(error=>{needLeaseReload=false;status('編集権の引継ぎに失敗: '+error.message);});}
       return;
     }
     if(readOnly){readOnly=false;configureAutosave();updateLeaseAccess();}
@@ -2397,7 +2400,6 @@ const storageReady=(async()=>{
 async function temporarySave(manual=false) {
   if(!pages.length||busy||readOnly||(!manual&&autosaveQuotaPaused)||pages.some(p=>p.glyphDrag))return;
   if(draftTask){if(!manual)return;await draftTask.catch(()=>{});return temporarySave(true);}
-  if(!manual&&revision===lastSavedRevision){const history=await listProjectHistories(projectId);if(history[0]&&Date.now()-history[0].createdAt<300000)return;}
   const snapshot=snapshotPages(),captured=revision,savingId=projectId,prefs={...structuredClone(preferences),sfxTemplates:structuredClone(sfxTemplates),sfxStrokePresets:structuredClone(strokePresets)};
   const meta={version:PROJECT_VERSION,projectId:savingId,revision:captured,savedAt:Date.now(),preferences:prefs,...(sourceFolderName?{sourceFolderName}:{}),pages:snapshot.map(p=>({id:p.id,name:p.name,layers:p.layers,done:p.done,edited:p.edited===true,maskEffects:p.maskEffects,...(p.selectedMaskId?{selectedMaskId:p.selectedMaskId}:{}),...(p.imageEdit?{imageEdit:p.imageEdit}:{})}))};
   const masks=snapshot.flatMap(page=>[...new Set(page.maskEffects.map(effect=>effect.assetId))].map(id=>{
@@ -2406,24 +2408,25 @@ async function temporarySave(manual=false) {
   }));
   const task=new BulkTask(manual?'一時保存':'自動保存',{stageCount:3,onProgress:data=>{if(manual&&currentTask?.data.operationId===data.operationId)displayTask(data);else if(!manual)$('draftStatus').textContent=`自動保存 · ${data.stage} ${data.processed}/${data.total??'未確定'}`;}});
   if(manual){currentTask=task;task.emit(true);}activeDraftTask=task;delete $('draftStatus').dataset.error;
-  draftTask=(async()=>{await storageReady;checkAbort(task.signal);
+  const saving=(async()=>{await storageReady;checkAbort(task.signal);
     if(projectId!==savingId)return;
+    if(!manual&&captured===lastSavedRevision){const history=await listProjectHistories(savingId);if(history[0]&&Date.now()-history[0].createdAt<300000)return;}
     const claim=await claimProjectLease(savingId,tabIdentity);
     if(!claim.held){readOnly=true;updateGlobal();throw new Error('他のタブが編集権を保持しています');}
-    const savingFence={owner:tabIdentity,token:claim.token};
+    const savingFence={owner:tabIdentity,token:claim.token,ownerEpoch:claim.ownerEpoch};
     projectLease=savingFence;
     const ids=await projectImageIds(savingId),missing=snapshot.filter(p=>!ids.has(p.id)||!pages.find(original=>original.id===p.id)?.imageSaved),images=[];task.stage('画像差分準備',missing.length);
     for(const p of missing){checkAbort(task.signal);const blob=await originalBlob(p),original=pages.find(page=>page.id===p.id);if(original)original.assetBlob=blob;images.push({id:p.id,blob});task.result(p.name);if(images.length%20===0)await yieldToBrowser();}
     task.metrics.newImages=images.length;task.stage('DB要求',images.length);if(!images.length)task.stage('コミット',1);
-    // Asset encoding may be slower than one lease interval. Renew immediately before
-    // the atomic latest flip; do not accept a token reclaimed by another tab.
-    checkAbort(task.signal);
-    if(projectId!==savingId)return;
-    const renewed=await claimProjectLease(savingId,tabIdentity);
-    if(!renewed.held||renewed.token!==savingFence.token)throw new Error('保存準備中に編集権が失効したため保存できない');
-    const fence={owner:tabIdentity,token:renewed.token};
-    projectLease=fence;
-    await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence});
+    // Hashing and WebKit byte conversion can outlive the lease. Renew only after
+    // that preparation, preserving ownership lineage and strict transaction fencing.
+    await saveProjectSnapshot(meta,images,{signal:task.signal,masks,fence:savingFence,beforeCommit:async()=>{
+      checkAbort(task.signal);
+      if(projectId!==savingId)throw new DOMException('保存対象のプロジェクトが変わった','AbortError');
+      const renewed=await claimProjectLease(savingId,tabIdentity);
+      if(!renewed.held||renewed.ownerEpoch!==savingFence.ownerEpoch){readOnly=true;updateLeaseAccess();throw new Error('保存準備中に別のタブが編集権を取得したため保存できない');}
+      return projectLease={owner:tabIdentity,token:renewed.token,ownerEpoch:renewed.ownerEpoch};
+    }});
     task.stage('コミット',1);
     task.result('一時保存');
     if(projectId!==savingId)return;
@@ -2431,10 +2434,10 @@ async function temporarySave(manual=false) {
     autosaveQuotaPaused=false;rememberProject();draftMeta=meta;lastSavedRevision=captured;changed=revision!==captured;
     void refreshProjectHistories();
     void collectUnusedProjectAssets().catch(error=>status('不要素材の整理を延期: '+error.message));
-  })();updateDraftUI();let failure;
-  try{await draftTask;if(manual)status('画像・文字・位置・設定をこのブラウザに一時保存した。');}
+  })();draftTask=saving;updateDraftUI();let failure;
+  try{await saving;if(manual)status('画像・文字・位置・設定をこのブラウザに一時保存した。');}
   catch(error){failure=error;if(error.name==='QuotaExceededError'){autosaveQuotaPaused=true;clearTimeout(latestSaveTimer);clearInterval(autosaveTimer);clearInterval(historyTimer);}if(error.name!=='AbortError')task.result('一時保存',false);$('draftStatus').dataset.error='true';$('draftStatus').textContent=error.name==='AbortError'?'一時保存を中断。前回の保存を維持。':error.name==='QuotaExceededError'?'保存容量不足。編集データを書き出して保管。':`一時保存に失敗: ${error.message}`;if(manual)status($('draftStatus').textContent);}
-  finally{const metrics=task.finish(failure);if(currentTask===task){currentTask=null;window.serifuDraftMetrics=metrics;}if(activeDraftTask===task)activeDraftTask=null;draftTask=null;if(!failure&&manual&&preferences.autosave.enabled)configureAutosave();updateDraftUI();updateGlobal();}
+  finally{const metrics=task.finish(failure);if(currentTask===task){currentTask=null;window.serifuDraftMetrics=metrics;}if(activeDraftTask===task)activeDraftTask=null;if(draftTask===saving)draftTask=null;if(!failure&&manual&&preferences.autosave.enabled)configureAutosave();updateDraftUI();updateGlobal();if(!failure&&savingId===projectId&&preferences.autosave.enabled&&!readOnly&&!autosaveQuotaPaused&&revision!==lastSavedRevision)void temporarySave(false).catch(error=>status('追加編集の自動保存に失敗: '+error.message));}
 }
 $('temporarySave').onclick=()=>temporarySave(true);
 function configureAutosave() {
@@ -2462,7 +2465,7 @@ $('restoreDraft').onclick=()=>guard(async task=>{
   await signalProjectActivity(nextId,tabIdentity,{interaction:true});
   const claim=await claimProjectLease(nextId,tabIdentity);
   if(oldId!==nextId)await releaseProjectLease(oldId,tabIdentity);
-  projectId=nextId;projectLease=claim.held?{owner:tabIdentity,token:claim.token}:null;readOnly=!claim.held;
+  projectId=nextId;projectLease=claim.held?{owner:tabIdentity,token:claim.token,ownerEpoch:claim.ownerEpoch}:null;readOnly=!claim.held;
   loaded.forEach(p=>p.imageSaved=true);pages.forEach(releasePage);$('deck').replaceChildren();pages=loaded;activeId=loaded[0]?.id||null;drag=null;pngCache.clear();
   sourceFolderName=typeof meta.sourceFolderName==='string'&&meta.sourceFolderName?meta.sourceFolderName:sourceFolderName;
   batchStart=0;const presetNotice=mergePresets(meta.preferences);

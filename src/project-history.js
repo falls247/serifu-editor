@@ -81,7 +81,7 @@ export async function getStoredSnapshot(snapshotKey){
   if(!snapshot)throw new Error('指定した復元世代が見つからない');
   return snapshot;
 }
-export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=null,history=true,_byteAttempt=false}={}){
+export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=null,beforeCommit=null,history=true,_byteAttempt=false}={}){
   checkAbort(signal);
   if(!validProjectId(meta?.projectId)||!Array.isArray(meta.pages)||!Number.isFinite(meta.savedAt))throw new Error('プロジェクト保存メタデータが不正');
   const pageIds=new Set(meta.pages.map(x=>x.id));
@@ -107,7 +107,10 @@ export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=
   for(const p of meta.pages)for(const effect of p.maskEffects||[])if(!maskPages.has(JSON.stringify([p.id,effect.assetId])))throw new Error('マスク素材が不足');
   if(byteAssetFallback||_byteAttempt){for(const inputs of [imageInputs,maskInputs])for(const [key,item] of inputs){const {blob,...rest}=item;inputs.set(key,{...rest,mime:blob.type,bytes:new Uint8Array(await blob.arrayBuffer())});}}
   checkAbort(signal);
-  const db=await openDraftDatabase(),tx=db.transaction(['projects','latest','snapshots','history','imageAssets','maskAssetsV2','drafts','locks'],'readwrite'),done=finished(tx);
+  const db=await openDraftDatabase();
+  if(beforeCommit)fence=await beforeCommit();
+  checkAbort(signal);
+  const tx=db.transaction(['projects','latest','snapshots','history','imageAssets','maskAssetsV2','drafts','locks'],'readwrite'),done=finished(tx);
   const abort=()=>{try{tx.abort();}catch{}};
   signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
   try{
@@ -151,7 +154,7 @@ export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=
     for(const extra of own.slice(kept))tx.objectStore('history').delete(extra.historyId);
     await done;
     return {snapshotId:id,historyCreated:shouldHistory};
-  }catch(error){abort();await done.catch(()=>{});if(!_byteAttempt&&!signal?.aborted&&error.name!=='QuotaExceededError'&&/Blob|File/.test(error.message)){byteAssetFallback=true;return saveProjectSnapshot(meta,newImages,{signal,masks,fence,history,_byteAttempt:true});}throw signal?.aborted?signal.reason:error;}
+  }catch(error){abort();await done.catch(()=>{});if(!_byteAttempt&&!signal?.aborted&&error.name!=='QuotaExceededError'&&/Blob|File/.test(error.message)){byteAssetFallback=true;return saveProjectSnapshot(meta,newImages,{signal,masks,fence,beforeCommit,history,_byteAttempt:true});}throw signal?.aborted?signal.reason:error;}
   finally{signal?.removeEventListener('abort',abort);}
 }
 export async function activateStoredProject(projectId,{fence=null}={}){
