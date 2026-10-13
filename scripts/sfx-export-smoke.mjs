@@ -3,6 +3,7 @@ import {sfxTest,exportJson,exportPng,assertPng} from './sfx-test-support.mjs';
 await sfxTest(5296,async({page,row,card})=>{
  page.on('dialog',dialog=>dialog.accept());
  await card.locator('[data-glyph-index="0"]').click();await card.locator('[data-glyph-field=dx]').fill('1500');await card.locator('[data-glyph-field=dx]').press('Tab');
+ await card.locator('[data-glyph-index="5"]').click();await card.locator('.sfx-advanced-panel summary').click();await card.locator('[data-sfx-editor=font]').selectOption('hand');await page.evaluate(()=>document.fonts.ready);
  await card.locator('.sfx-overflow').waitFor({state:'visible'});
  const project=await exportJson(page),png=await exportPng(page,row),layer=project.pages[0].layers[0];
  assert.equal(layer.lettering.glyphs[0].dx,1500);await assertPng(page,project,png);
