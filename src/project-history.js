@@ -188,3 +188,51 @@ export async function collectUnusedProjectAssets(){
   await done;
   return {snapshotsRemoved:snapshots.filter(x=>!kept.has(x.id)).length,imageAssetsRemoved:images.filter(x=>!liveImage.has(x)).length,maskAssetsRemoved:masks.filter(x=>!liveMask.has(x)).length};
 }
+
+export async function projectStorageReport(){
+  const db=await openDraftDatabase(),tx=db.transaction(['projects','latest','history','snapshots','imageAssets','maskAssetsV2'],'readonly'),done=finished(tx);
+  const [projects,latest,history,snapshots,images,masks]=await Promise.all([
+    read(tx.objectStore('projects').getAll()),read(tx.objectStore('latest').getAll()),read(tx.objectStore('history').getAll()),
+    read(tx.objectStore('snapshots').getAll()),read(tx.objectStore('imageAssets').getAll()),read(tx.objectStore('maskAssetsV2').getAll())
+  ]);await done;
+  const bySnapshot=new Map(snapshots.map(s=>[s.id,s]));
+  const sizes=new Map([...images,...masks].map(a=>[a.assetId,a.byteLength??a.blob?.size??0]));
+  const relevant=new Map();
+  for(const pointer of [...latest,...history])if(bySnapshot.has(pointer.snapshotId))relevant.set(pointer.snapshotId,bySnapshot.get(pointer.snapshotId));
+  const owners=new Map();
+  const refs=s=>[...s.images.map(a=>a.assetId),...s.masks.map(a=>a.assetId)];
+  for(const snap of relevant.values())for(const key of new Set(refs(snap))){
+    if(!owners.has(key))owners.set(key,new Set());owners.get(key).add(snap.projectId);
+  }
+  return projects.map(p=>{
+    const versions=history.filter(h=>h.projectId===p.projectId).sort((a,b)=>b.createdAt-a.createdAt);
+    const latestPointer=latest.find(x=>x.projectId===p.projectId)||null,individual=new Set();
+    let logicalBytes=0;
+    const projectSnapshots=[...versions.map(x=>bySnapshot.get(x.snapshotId)),bySnapshot.get(latestPointer?.snapshotId)].filter(Boolean);
+    for(const snap of projectSnapshots){
+      logicalBytes+=JSON.stringify(snap.meta).length*2;
+      for(const key of refs(snap)){logicalBytes+=sizes.get(key)??0;individual.add(key);}
+    }
+    const reclaimableBytes=[...individual].reduce((total,key)=>total+((owners.get(key)?.size??0)===1?sizes.get(key)??0:0),0);
+    return {...p,latest:latestPointer,history:versions.map(h=>({historyId:h.historyId,createdAt:h.createdAt,snapshotId:h.snapshotId})),logicalBytes,reclaimableBytes};
+  });
+}
+export async function deleteStoredProject(projectId,{fence=null}={}){
+  const db=await openDraftDatabase(),tx=db.transaction(['projects','latest','history','snapshots','locks','drafts'],'readwrite'),done=finished(tx);
+  try{
+    const lock=await read(tx.objectStore('locks').get(projectId));
+    if(fence){
+      if(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<Date.now())throw new Error('編集権がない');
+    }else if(lock?.owner&&lock.until>Date.now())throw new Error('他のタブが編集中のため削除できない');
+    const [histories,snapshots,active]=await Promise.all([
+      read(tx.objectStore('history').getAll()),read(tx.objectStore('snapshots').getAll()),read(tx.objectStore('drafts').get('active'))
+    ]);
+    const refs=histories.filter(x=>x.projectId===projectId),owned=snapshots.filter(x=>x.projectId===projectId);
+    for(const record of refs)tx.objectStore('history').delete(record.historyId);
+    for(const record of owned)tx.objectStore('snapshots').delete(record.id);
+    tx.objectStore('projects').delete(projectId);tx.objectStore('latest').delete(projectId);
+    if(active?.projectId===projectId)tx.objectStore('drafts').delete('active');
+    if(lock)tx.objectStore('locks').put({...lock,owner:null,until:0});
+    await done;return {histories:refs.length,snapshots:owned.length};
+  }catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
+}
