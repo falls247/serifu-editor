@@ -256,3 +256,15 @@ canvas.preview.cropping{cursor:crosshair}
   .sfx-lettering-panel {flex-direction:column;align-items:stretch;}
   .sfx-lettering-panel .sfx-glyph-list button {min-width:48px;min-height:48px;}
 }
+
+/* Keep compact object selection clickable between the sticky toolbar and fixed footer. */
+.layer-summary,.mask-effect-summary{scroll-margin-top:120px;scroll-margin-bottom:110px}
+#projectAccess{display:block;padding:4px 30px;font-size:11px;color:var(--lime)}
+#projectAccess[data-readonly=true]{color:#f3b98d}
+#projectHistory{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+#projectHistory[hidden]{display:none}
+#projectHistory label{display:flex;align-items:center;gap:8px}
+#projectHistory select{width:215px;margin:0}
+.sfx-template-panel{margin-top:10px;border:1px solid var(--line);padding:8px;border-radius:8px}
+.sfx-template-panel select{width:100%}
+.sfx-template-panel button{font-size:11px;margin:5px 4px 0 0}
