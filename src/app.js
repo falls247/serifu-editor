@@ -1609,7 +1609,7 @@ $('deck').addEventListener('click', async event => {
     p.done = true; dirty(); updateGlobal();
     if (next) activate(next, next.selectedId, true); else status('最後の画像まで確認済み。一括保存で書き出せる。');
   } else if (['copy-all','cut-all','paste-all','copy-next'].includes(action)) {
-    guard(task=>bulkLayers(action,p,task),'レイヤー一括操作',3);
+    guard(task=>bulkLayers(action,p,task),'レイヤー一括操作',3,{waitForDraft:false});
   } else if (action === 'remove') {
     if (p.layers.length && !confirm(`「${p.name}」を一覧から外す？ 未保存の編集は失われる。元ファイルは残る。`)) return;
     removePage(p);
@@ -1886,10 +1886,10 @@ $('previous').onclick = () => { const displayed=displayedPages(),p = displayed[d
 $('next').onclick = () => { const displayed=displayedPages(),p = displayed[displayed.indexOf(active()) + 1]; if (p) activate(p, p.selectedId, true); };
 $('jump').onchange = () => { const p = pages.find(p => p.id === $('jump').value); if (p) { activate(p, p.selectedId, true);p.canvas.focus({preventScroll:true}); } };
 
-async function guard(fn,kind='処理',stageCount=1) {
+async function guard(fn,kind='処理',stageCount=1,{waitForDraft=true}={}) {
   if(busy)return;busy=true;drag=null;
   const task=new BulkTask(kind,{stageCount,onProgress:displayTask});task.metrics.poolStart=structuredClone(imagePool.metrics);currentTask=task;updateGlobal();let failure;
-  try {if(draftTask){task.data.stageCount++;task.stage('一時保存の完了待ち');await awaitWithAbort(draftTask.catch(()=>{}),task.signal);}await fn(task);}
+  try {if(waitForDraft&&draftTask){task.data.stageCount++;task.stage('一時保存の完了待ち');await awaitWithAbort(draftTask.catch(()=>{}),task.signal);}await fn(task);}
   catch(error){failure=error;if(error.name!=='AbortError')status(`処理できなかった: ${error.message}`);else status(`処理を中断した。${task.data.succeeded}件完了。${task.data.currentName}`);}
   finally{imagePool.resize(2);const poolDelta={jobs:imagePool.metrics.jobs-task.metrics.poolStart.jobs,fallbackJobs:imagePool.metrics.fallbackJobs-task.metrics.poolStart.fallbackJobs,timings:Object.fromEntries(Object.entries(imagePool.metrics.timings).map(([key,value])=>[key,value-(task.metrics.poolStart.timings[key]||0)]))};window.serifuMetrics={...task.finish(failure),poolDelta,pool:structuredClone(imagePool.metrics),cache:{bytes:pngCache.bytes,hits:pngCache.hits,misses:pngCache.misses}};currentTask=null;busy=false;updateGlobal();if(preferences.autosave.enabled&&revision!==lastSavedRevision)setTimeout(()=>temporarySave(false),0);}
 }

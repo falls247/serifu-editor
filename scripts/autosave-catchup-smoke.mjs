@@ -34,7 +34,7 @@ async function interveningWriter(page,project,{save=false}={}) {
   },{project,save});
 }
 for(const [index,pause] of [1000,121000].entries()) {
-  await sfxTest(5299+index,async({page,card})=>{
+  await sfxTest(5299+index,async({page,row,card})=>{
     await page.clock.install();
     await card.locator('textarea').fill('OLD');
     await card.locator('[data-action=sfx-text-apply]').click();
@@ -47,6 +47,8 @@ for(const [index,pause] of [1000,121000].entries()) {
       return new Promise(resolve=>request.onsuccess=()=>resolve(request.result[0]));
     });
     await page.check('#autosaveEnabled');
+    await row.locator('[data-action=copy-all]').click();
+    await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled,undefined,{timeout:3000});
     await card.locator('textarea').fill('NEW');
     await card.locator('[data-action=sfx-text-apply]').click();
     await page.clock.fastForward(pause);
