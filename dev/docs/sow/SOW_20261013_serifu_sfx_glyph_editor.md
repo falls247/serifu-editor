@@ -8,7 +8,7 @@
 - 要件確定状況: インタビュー第1〜113問まで確定。第113問は **B（保存完了後に最新データを切り替える）**。
 - 開発方針: 既存機能を保護して段階実装。1本の巨大PRでの一括置換は禁止。各フェーズで動作する成果物と自動テストを残す。
 
-## 0. 実装進捗・次の開発エージェント向け作業指示（2026-10-13 更新）
+## 0. 実装進捗・次の開発エージェント向け作業指示（2026-10-14 更新）
 
 > §1〜§14の113決定と受入基準は変更していない。この章だけが実装・検証台帳。自動試験と実機の正式受入を分ける。
 
@@ -17,7 +17,7 @@
 - 唯一の実装先: `docs/sow-20261013-sfx-glyph-editor`。ユーザー指定の既存ブランチを使用。`main`へpush・mergeせず、Pages公開もしない。
 - 着手基準: `63f37f6e51b7beeb16908477329684b489f07979`。旧記録の `bad0fe8c` は履歴であり今回の判定ではない。
 - H-01/H-02、D-01〜03、F-01〜04の製品実装・専用自動試験を追加。文書とUAT対応は[検証記録](../sfx-validation.md)を正本とする。
-- 最終コード: [`36801248`](https://github.com/falls247/serifu-editor/commit/36801248e39266e40cd8b26db67203714f49d9e4)。ローカル全検証合格。CI実行記録は[Checks 38392728754](https://github.com/falls247/serifu-editor/actions/runs/38392728754)、文書追加後は[本ブランチ最新Checks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照。全113要件の正式受入完了は宣言しない。iPhone／iPad SafariとPC主要ブラウザの実機試験が未確認。
+- 最終コード: [`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)。ローカル検証は検証記録を参照。保存追従補正の基準`f68164b5`のCI実行記録は[Checks 38457135604](https://github.com/falls247/serifu-editor/actions/runs/38457135604)、文書追加後は[本ブランチ最新Checks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照。全113要件の正式受入完了は宣言しない。iPhone／iPad SafariとPC主要ブラウザの実機試験が未確認。
 
 ### 0.2 フェーズ別台帳
 
@@ -30,7 +30,7 @@
 | P4 輪郭/効果 | 実インク重なり自動編成、手動メンバーロック、外周合成、掠れ前シルエット、上限付きcache、PNG試験 | 実機の視覚確認 |
 | P5 UI/テンプレート | Shift／Alt／矩形／なげなわ、Clipboard、4案比較、数値一括、ドラフト／IME保護、異字数テンプレート、欠損書体の明示解決、Chromium／WebKitモバイル寸法 | 実機PC/iPhone/iPad（UAT-16） |
 | P6 ファイルI/O | v14／コンテナ2、ID維持／再発行、三択競合、同ID画像差替、原子的画面切替、旧全版読込試験 | Checksの実行結果を参照 |
-| P7 保存/排他 | v2非破壊・中断再試行、原子的latest／5分5世代、素材共有／参照検証GC、容量管理、document owner／fencing、3タブ引継ぎ、quota／abort／native IDB中のPage crash | 実SafariのIndexedDB・複数タブ |
+| P7 保存/排他 | v2非破壊・中断再試行、原子的latest／5分5世代、素材共有／参照検証GC、容量管理、document owner／fencing、3タブ引継ぎ、quota／abort／native IDB中のタブ終了、保存中追加編集・準備後lease更新 | 実SafariのIndexedDB・複数タブ |
 | P8 統合/文書 | 全回帰、旧描画比較、性能記録、README／ADR／HANDOFF／UAT対応を更新 | Checksの実行結果と実機の正式受入 |
 
 ### 0.3 回帰の原因と修正
@@ -39,7 +39,9 @@
 
 H-01は保存／復元時にglobal activeを参照して別タブのprojectと混同し、復元用メタデータと素材を別々に取得する経路、再読込のlease引継ぎを修正した。タブのprojectIdを固定し、同一snapshotのbundleを読み、新document ownerへfenceを更新する。H-02はimage load後にSAM3のcontrolsを更新し、health完了が先行しても明示再検出を可能にした。
 
-追加で編集行のmount時UI cache破棄、文字サイズ設定のcache key、Worker起動中cancel／次操作のgenerationを修正した。既存ブラウザsmokeのassert・待機時間は変更していない。端末書体の基準を揃えるためCIでNoto CJKを準備する。dev launcher単体試験は `/proc` で観測するPIDをfixtureから報告し、仮想PIDとの不一致による誤判定を防ぐ。終了assertとtimeoutは維持した。
+追加で編集行のmount時UI cache破棄、文字サイズ設定のcache key、Worker起動中cancel／次操作のgenerationを修正した。既存ブラウザsmokeのassert・期待値・30秒の待機上限は維持し、Promiseを返す保存確認の述語だけを`browser-wait.mjs`で正しくawaitしてpollする。端末書体の基準を揃えるためCIでNoto CJKを準備する。dev launcher単体試験は `/proc` で観測するPIDをfixtureから報告し、仮想PIDとの不一致による誤判定を防ぐ。終了assertとtimeoutは維持した。
+
+保存中に追加された確定済み変更は、成功後に次の保存へ即時に引き継ぐ。画像hash・WebKitバイト変換の後、write transaction直前にleaseを更新する。ownerEpochで同documentの期限切れと別writerの介入を区別し、他writerが途中に保存した内容を古い準備で上書きしない。保存開始時にも最後の心拍からのwriter交代を確認し、latest再読込前の保存を拒否する。1秒／121秒保留・旧token拒否・writer交代とlatest再読込を`test:autosave-catchup`で確認する。
 
 ### 0.4 作業IDと証跡
 
@@ -49,7 +51,7 @@ H-01は保存／復元時にglobal activeを参照して別タブのprojectと�
 | H-02 | SAM3 image load後の再検出controls | 元 `test:sam3-browser`合格 |
 | D-01 | 保存・非破壊移行・冪等再試行・素材・GC・quota／crash | `test:project-history`、`test:mask-storage` |
 | D-02 | 追加／開く／新project／同ID三択・画像差替・失敗時維持 | `test:project-open`、`project-legacy-compat.test.mjs` |
-| D-03 | 3タブ閲覧・明示入力優先・終了／期限・旧writer拒否 | `test:project-tabs`、`test:project-history` |
+| D-03 | 3タブ閲覧・明示入力優先・終了／期限・旧writer拒否、hash中のwriter交代と再読込 | `test:project-tabs`、`test:project-history`、`test:autosave-catchup` |
 | F-01 | 原文index、複数選択、Clipboard、縦横往復、PNG | `test:sfx-render`、`test:sfx-selection`、`sfx-edit-operations.test.mjs` |
 | F-02 | 曲線／幅ハンドル、分割結合、精密接続 | `test:sfx-stroke`、長音線単体試験 |
 | F-03 | 自動重なり／手動ロック、合成外周、グランジ | `test:sfx-outline`、輪郭単体試験、`test:bulk` |

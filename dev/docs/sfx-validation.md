@@ -2,7 +2,7 @@
 
 対象ブランチ: `docs/sow-20261013-sfx-glyph-editor`。着手HEAD: `63f37f6e51b7beeb16908477329684b489f07979`。SOW §1〜14の113決定は変更していない。
 
-コードHEAD: [`36801248`](https://github.com/falls247/serifu-editor/commit/36801248e39266e40cd8b26db67203714f49d9e4)。Checks実行記録: [run 38392728754](https://github.com/falls247/serifu-editor/actions/runs/38392728754)。文書追加後の最新実行は[本ブランチのChecks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照する。本記録の自動試験合格と、実機の正式受入は別。
+コードHEAD: [`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)。保存追従補正の基準[`f68164b5`](https://github.com/falls247/serifu-editor/commit/f68164b53777e9c7db61db47010b2ebfad77e7aa)のChecks実行記録: [run 38457135604](https://github.com/falls247/serifu-editor/actions/runs/38457135604)。文書追加後の最新HEADの判定は[本ブランチのChecks](https://github.com/falls247/serifu-editor/actions/workflows/ci.yml?query=branch%3Adocs%2Fsow-20261013-sfx-glyph-editor)を参照する。本記録の自動試験合格と、実機の正式受入は別。
 
 ## 実行環境
 
@@ -14,8 +14,8 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 
 | 対象 | 結果・確認内容 |
 |---|---|
-| 構文・静的ビルド | 構文89ファイル、`npm run build`、`git diff --check`が合格。新moduleをserver／build／bulkの配信許可リストへ追加 |
-| Node単体 | 191件合格。原文grapheme、継承、run、点、幅、輪郭、seed、ID、互換、Worker中断を含む |
+| 構文・静的ビルド | 構文91ファイル、`npm run build`、`git diff --check`が合格。新moduleをserver／build／bulkの配信許可リストへ追加 |
+| Node単体 | 193件合格。原文grapheme、継承、run、点、幅、輪郭、seed、ID、互換、Worker中断を含む |
 | backend | 38件合格、既存適用条件のGPU試験1件は対象外 |
 | 既存回帰 | `test:browser`の元22本がすべて合格。最終CIはChecksで確認 |
 | 一括描画 | `test:bulk`合格。全21書体のWorkerとmainのRGBA差0、読込中編集、中断／次操作、形式往復、cache、書込失敗、Worker代替 |
@@ -25,14 +25,15 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | 合成外周 | `test:sfx-outline`。実インク3文字の重なり、手動ロック、grunge前シルエット不変、複数複製、PNG一致 |
 | テンプレート・書体 | `test:sfx-template`と単体。異字数、長音なし、deep validation、欠損書体の明示代替／アップロード、元書体名、PNG |
 | 旧描画・index | `test:sfx-render`。着手HEADのrenderer fixtureと旧SFX24条件のRGBA差0。改行・絵文字・縦横・光学字詰めの原文index4条件 |
-| 出力・再読込 | `test:sfx-export`。画像外警告とクリップ、元寸法1000×750、縦横往復、JSON再読込後のPNGバイト一致 |
+| 出力・再読込 | `test:sfx-export`。画像外警告とクリップ、文字単位の異なる書体のWorker描画、元寸法1000×750、縦横往復、JSON再読込後のPNGバイト一致 |
 | ファイルID | `test:project-open`。三択、追加／別projectのID、同ID画像差替と旧履歴、無効ファイルの原子的UI維持 |
 | 保存 | `test:project-history`。v2中断／同ID冪等再試行、旧ストア保持、20回短期確定、5分判定、6→5世代、同内容で履歴追加なし、画像／マスク旧世代、quota／abort rollback、参照検証GC、対象latestだけの消去、共有素材を重複計上しない容量／解放可能量 |
-| タブ終了中の保存 | 同history試験でsnapshot書込後のnative IDB transactionを維持し、CDP `Page.crash`。再オープン後も直前のlatest、全history、読める素材bundleを確認 |
+| タブ終了中の保存 | 同history試験でsnapshot書込後のnative IDB transactionを維持し、CDP `Target.closeTarget`でタブを終了。再オープン後も直前のlatest、全history、読める素材bundleを確認 |
+| 自動保存の追従・所有権 | `test:autosave-catchup`。画像hashを保留中に追加編集し、1秒／121秒のclock advance後に最新へ追従。期限切れ後も旧tokenは拒否。別writerの確定が保存準備中または次の心拍前に入れば古い保存を拒否し、latestを再読込 |
 | 3タブ | `test:project-tabs`。他2タブ閲覧、最後の明示操作優先、終了／期限切れ後の引継ぎ、latest再読込、旧token保存／削除拒否 |
 | モバイル寸法 | `test:sfx-touch`。Chromium／WebKit各2寸法でタップ・数値・保存復元・横はみ出しなし。Chromiumはnative touchによる長押しルーペ／2指pinchも確認。WebKitの多点ジェスチャは実機未確認 |
 
-`test/dev-launcher.test.mjs`はfixtureが `/proc/self/stat` のPIDを報告するよう変更した。検証環境の仮想PIDと `/proc` のPIDが異なり、無関係の生存プロセスを終了失敗と判定したため。終了assert・timeoutは保持した。既存ブラウザsmokeのassert・timeoutは変更していない。
+`test/dev-launcher.test.mjs`はfixtureが `/proc/self/stat` のPIDを報告するよう変更した。検証環境の仮想PIDと `/proc` のPIDが異なり、無関係の生存プロセスを終了失敗と判定したため。終了assert・timeoutは保持した。既存ブラウザsmokeのassert・期待値・30秒のtimeoutは維持し、非同期の保存待機だけを結果までawaitする共通helperへ変更した。
 
 ## UATとの対応
 
@@ -50,10 +51,10 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | 08 | export smokeの画像外警告／クリップ／原寸／再読込 | 実機視覚確認 |
 | 09 | legacy compatibility単体、legacy rendererの24条件差0、既存PNG／ファイル往復 | 利用者の実ファイル群 |
 | 10 | history／open smokeの同ID画像差替、旧画像／マスクと世代復元 | 実Safariの長時間保存 |
-| 11 | history smokeの20回確定／5分／5世代 | 実機の長時間放置・再開 |
-| 12 | tabs smokeの3タブ終了／expiry／fencing | 実Safariのタブ休止 |
+| 11 | history smokeの20回確定／5分／5世代、autosave smokeの保存中追加編集 | 実機の長時間放置・再開 |
+| 12 | tabs smokeの3タブ終了／expiry／fencing、保存hash中のwriter交代と再読込 | 実Safariのタブ休止 |
 | 13 | open smokeの同ID三択・独立ID・履歴保護 | 実機ファイルピッカー |
-| 14 | native IDB中のPage crash／quota／abort、migration再試行 | 実Safariの強制終了 |
+| 14 | native IDB中のタブ終了／quota／abort、migration再試行 | 実Safariの強制終了 |
 | 15 | history smokeの1世代削除／共有参照GCと容量報告 | 実機UI・容量表示 |
 | 16 | Chromium／Linux WebKitの2モバイル寸法と保存復元 | **iPhone／iPad Safari、PC主要ブラウザの実機は未確認** |
 
@@ -75,3 +76,15 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | glyph／stroke／輪郭／テンプレートのモデル・描画 | [`06f0ce51`](https://github.com/falls247/serifu-editor/commit/06f0ce51d49e0fcb51d0544a2b4b9c80b0afbe61) |
 | 編集UI・Clipboard・Touch・プロジェクト切替／復元 | [`1510c3f2`](https://github.com/falls247/serifu-editor/commit/1510c3f2806f7f42c5f2bcc09a2845d1d3d554b0) |
 | 専用E2E・旧描画fixture・全版互換・CI | [`36801248`](https://github.com/falls247/serifu-editor/commit/36801248e39266e40cd8b26db67203714f49d9e4) |
+| 保存中追加編集・準備後lease更新・所有権継続の検証・非同期待機上限 | [`f68164b5`](https://github.com/falls247/serifu-editor/commit/f68164b53777e9c7db61db47010b2ebfad77e7aa) |
+| 次の心拍前にwriterが交代した場合の保存拒否・再読込 | [`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4) |
+
+## CIで追加確認した待機条件
+
+初回のChecks [38392728754](https://github.com/falls247/serifu-editor/actions/runs/38392728754)と文書追加後の[38393149746](https://github.com/falls247/serifu-editor/actions/runs/38393149746)は、新設project-open試験で保存完了前に画像参照を比較して失敗した。Promiseを返すwaitForFunctionの述語を同期の完了表示へ変更し、指定projectの保存メタデータを直接assertする。画像差替／旧履歴のassertとtimeoutは維持し、ローカル5回連続合格を確認した。補正は[`4715e61c`](https://github.com/falls247/serifu-editor/commit/4715e61c29155df469ade248d264dc53d4e48bb3)。過去の赤いrunを合格の証跡に使わない。
+
+追加CI [38395302382](https://github.com/falls247/serifu-editor/actions/runs/38395302382)では既存balloon試験にも同じ非同期waitForFunctionの問題が再現した。`scripts/browser-wait.mjs`で述語のPromise結果を毎回awaitし、30秒以内でpollするよう統一した。吹き出しは修正後ローカル3回連続合格。補正は[`b6de524b`](https://github.com/falls247/serifu-editor/commit/b6de524b2b73de1ae7f2f66de97471ee935e51ea)。加えて、PNG Workerがglyph overridesの書体もロードするよう修正し、異なる文字書体のPNG一致と再読込を検証した（[`85869ecb`](https://github.com/falls247/serifu-editor/commit/85869ecbc2d0603ec77ef88dbe2e3660401d1e3c)）。タブ終了試験はnative IDB中にCDP Target.closeTargetを使い、終了待機10秒・CI job 15分を上限とする（[`2a987d19`](https://github.com/falls247/serifu-editor/commit/2a987d19009b052fec1410efe80cae724c9e6d2d)）。
+
+Checks [38451564581](https://github.com/falls247/serifu-editor/actions/runs/38451564581)では、正しい非同期待機によって既存browser試験の自動保存待機が失敗した。保存中の追加編集を次の保存へ即時に引き継ぎ、履歴判定のawait前に進行中の保存を確保する。保存ごとのPromiseだけを解除する。さらに素材hash／WebKitバイト変換後・write transaction直前にleaseを更新する。同じdocumentの期限切れではownerEpochを保ち、別writer取得・解放・reloadでは変えるため、他writerが途中に入った古い保存を拒否できる。transactionのowner／token／期限照合は維持した。新設autosave試験の1秒／121秒・writer交代と再読込、3タブ、history、元browser-smokeがローカルで合格。非同期待機helperは未解決のpage.evaluateも30秒の上限で終了し、単体2件でfalseのpollと期限を検証する。
+
+保存開始時にも、最後のlease照会以降にownerEpochが変わっていれば保存を拒否する。次の心拍前にwriter交代・保存・解放が完了したケースを追加し、別writerのlatestを保持して再読込することを確認した（[`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)）。

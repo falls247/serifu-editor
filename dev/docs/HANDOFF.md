@@ -260,7 +260,7 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 対象ブランチ: docs/sow-20261013-sfx-glyph-editor。src/sfx-lettering-model.js（P1）、src/sfx-stroke-geometry.js（P3の原型）、src/renderer.js（新SFX描画分岐）、src/app.js（編集開始、グリフ/線設定、ドラッグ、Undo/Redo）の順に確認。全113要件の完了ではない。各runの数値制御点編集とv14 projectId/pageId保存まで追加。P3〜P8の残作業一覧はADR 0027。既存IndexedDB v2のデータ移行は検証なしで進めない。
 
 
-## 2026-10-13 SFX/プロジェクト永続化の最新引継ぎ
+## 2026-10-14 SFX/プロジェクト永続化の最新引継ぎ
 
 前掲の部分実装・CI赤の記述は当初時点の履歴。H-01/H-02の復元・SAM3再検出を修正し、P1〜P7の残機能と専用回帰を追加した。最新状態は[SOW §0](sow/SOW_20261013_serifu_sfx_glyph_editor.md)、設計は[ADR-0027](adr/0027-sfx-lettering-foundation.md)、試験とUATの対応は[検証記録](sfx-validation.md)を参照する。実装先は `docs/sow-20261013-sfx-glyph-editor`。`main`へ別途指示なくpush・mergeしない。
 
@@ -273,3 +273,9 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 - 新moduleを `server.mjs`・`scripts/build.mjs`・`scripts/bulk-smoke.mjs` の許可リストへ追加済み。Playwrightは1.56.1、ChromiumとWebKit、日本語端末書体をCIで準備する。
 
 実機iPhone／iPad SafariとPC主要ブラウザの正式受入は未確認。Chromium／Linux WebKitのモバイル寸法試験と実機合格を区別する。次は専用プロファイルと複製データでSOW UAT-16を確認し、検証記録へ端末・OS・ブラウザ版と結果を追記する。GPU試験は既存の適用条件を維持する。
+
+2026-10-14のCI補正: `browser-wait.mjs`は非同期の保存確認を結果までawaitしてpollする。Promise自体を成功とみなす待機を使わない。元のassert・期待値・30秒の上限は維持。`image-worker.js`はglyph overridesの書体もロードする。最新版の成功／失敗は検証記録冒頭のcode SHAとChecksを照合する。
+
+保存の追従補正: 進行中の保存を履歴照会前に確保し、成功後の追加編集を即時に次の保存へ渡す。画像hash・WebKitバイト変換後の`beforeCommit`でleaseを更新する。`ownerEpoch`は同documentの期限切れで維持し、writer交代・解放後の取得・reloadで変わる。古いtokenは常に拒否し、準備中に他writerが確定したlatestを上書きしない。編集権の再読込は進行中の保存が終わってから開始する。`test:autosave-catchup`で1秒／121秒保留中の追加編集、旧token、writer交代、latest再読込を検証する。
+
+保存開始前にも最後のlease照会からのownerEpoch変更を検査する。別writerが次の心拍前に保存・解放した場合も、保存を拒否してlatestを再読込する。4ケースのautosave専用試験と既存回帰をChecksで実行する。最終コードとCIの照合先は[検証記録](sfx-validation.md)。
