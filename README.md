@@ -248,3 +248,5 @@ npm run test:sam3-real-browser
 タッチは大型ハンドル・長押しルーペ・2本指ズーム／パンに対応。画像外の文字・線は警告し、原寸PNGでクリップする。編集データには残る。旧SFXは明示的な編集開始前の描画を維持する。
 
 設計は[ADR 0027](dev/docs/adr/0027-sfx-lettering-foundation.md)、確定仕様は[SOW](dev/docs/sow/SOW_20261013_serifu_sfx_glyph_editor.md)、実行済み試験と実機未確認の範囲は[検証記録](dev/docs/sfx-validation.md)を参照する。
+
+PC向け追加検証は`npm run test:sfx-desktop`。Playwright 1.56.1と`npx playwright install chromium webkit firefox`を準備し、3 engineで編集・曲線D&D・個別書体・PNG・ファイル往復・保存復元・3タブ排他を確認する。結果は`artifacts/sfx-desktop-results.json`。Linux headlessの自動試験と、Windows／macOS・iPhone／iPad実機の正式受入は別として[検証記録](dev/docs/sfx-validation.md)へ記録する。

@@ -27,6 +27,6 @@
 
 ## 検証と残る受入
 
-単体・旧描画24条件RGBA差0・原文index4条件・曲線／輪郭／テンプレート／選択・ID競合・3タブ排他・quota／中断／旧v2移行・Chromium／WebKitのモバイル寸法試験を追加した。既存回帰を省略せずCIで実行する。結果と性能値は[検証記録](../sfx-validation.md)を正本とする。保存待機の非同期述語は結果までawaitして30秒以内でpollし、既存assertと期限を維持する。PNG Workerはレイヤーと個別glyphの書体を両方ロードする。
+単体・旧描画24条件RGBA差0・原文index4条件・曲線／輪郭／テンプレート／選択・ID競合・3タブ排他・quota／中断／旧v2移行・Chromium／WebKitのモバイル寸法試験を追加した。既存回帰を省略せずCIで実行する。結果と性能値は[検証記録](../sfx-validation.md)を正本とする。保存待機の非同期述語は結果までawaitして30秒以内でpollし、既存assertと期限を維持する。PNG Workerはレイヤーと個別glyphの書体を両方ロードする。PC向けの共通試験はChromium／WebKit／Firefoxで編集・書体実ロード・PNGの画素一致・JSON/.serifu往復・IndexedDB再読込・3タブ排他を確認する。OS・ブラウザ版・実行環境のoverrideをJSONへ記録し、Linux headlessと実機の受入を区別する。モバイルログは各engineで実際に確認した操作だけをPASSと表示する。
 
 iPhone／iPadのSafariとPC主要ブラウザの実機操作は未確認。Linux WebKitのモバイル寸法試験を実Safariの合格とは扱わない。SOW §1〜14の要件・受入基準は変更していない。`main`へのマージ・Pages公開は別途指示の対象。

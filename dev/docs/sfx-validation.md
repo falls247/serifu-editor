@@ -6,15 +6,17 @@
 
 ## 実行環境
 
-ローカルはLinux、Node 24.19.0、Playwright 1.56.1、Chromium 141.0.7390.37、WebKit 26。日本語の端末書体はNoto CJK、同梱19書体を確定ロードする。CIはNode 22、同じPlaywright版・両engine・Noto CJKを準備する。製品にテスト依存を追加していない。
+ローカルはLinux、Node 24.19.0、Playwright 1.56.1、Chromium 141.0.7390.37、WebKit 26、Firefox 142.0.1。日本語の端末書体はNoto CJK、同梱19書体を確定ロードする。CIはNode 22、同じPlaywright版・3 engine・Noto CJKを準備する。製品にテスト依存を追加していない。
 
 WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touch設定で操作した。ローカルでは抽出した共有ライブラリを使うためホスト依存の事前検査だけ省略し、WebKit本体とアプリの試験は実行した。実iOS Safariとは異なる。
+
+PC向け追加試験はLinuxのheadless、1440×1080、DPR 1。ローカルでは共有ライブラリを抽出して使い、Firefoxは実行環境のuser namespace制約に合わせてブラウザsandboxを検証プロセス内だけで調整した。検査省略とsandbox overrideは結果JSONへ記録する。CIは通常の依存導入・ブラウザ起動設定で実行し、環境差を同じ条件の合格へ読み替えない。
 
 ## 自動試験
 
 | 対象 | 結果・確認内容 |
 |---|---|
-| 構文・静的ビルド | 構文91ファイル、`npm run build`、`git diff --check`が合格。新moduleをserver／build／bulkの配信許可リストへ追加 |
+| 構文・静的ビルド | 構文92ファイル、`npm run build`、`git diff --check`が合格。新moduleをserver／build／bulkの配信許可リストへ追加 |
 | Node単体 | 193件合格。原文grapheme、継承、run、点、幅、輪郭、seed、ID、互換、Worker中断を含む |
 | backend | 38件合格、既存適用条件のGPU試験1件は対象外 |
 | 既存回帰 | `test:browser`の元22本がすべて合格。最終CIはChecksで確認 |
@@ -31,6 +33,7 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | タブ終了中の保存 | 同history試験でsnapshot書込後のnative IDB transactionを維持し、CDP `Target.closeTarget`でタブを終了。再オープン後も直前のlatest、全history、読める素材bundleを確認 |
 | 自動保存の追従・所有権 | `test:autosave-catchup`。画像hashを保留中にClipboard操作と追加編集を行い、1秒／121秒のclock advance後に最新へ追従。期限切れ後も旧tokenは拒否。別writerの確定が保存準備中または次の心拍前に入れば古い保存を拒否し、latestを再読込 |
 | 3タブ | `test:project-tabs`。他2タブ閲覧、最後の明示操作優先、終了／期限切れ後の引継ぎ、latest再読込、旧token保存／削除拒否 |
+| PCブラウザ3系統 | `test:sfx-desktop`。Chromium／WebKit／Firefoxで数値編集・Esc取消・Ctrl+D／Undo、native曲線D&D・幅・個別書体の実ロード、共通drawとPNGのRGBA一致、JSON／.serifu往復、IndexedDB再読込とPNG一致、3タブ閲覧／明示入力優先／旧tokenの保存・削除拒否を確認 |
 | モバイル寸法 | `test:sfx-touch`。Chromium／WebKit各2寸法でタップ・数値・保存復元・横はみ出しなし。Chromiumはnative touchによる長押しルーペ／2指pinchも確認。WebKitの多点ジェスチャは実機未確認 |
 
 `test/dev-launcher.test.mjs`はfixtureが `/proc/self/stat` のPIDを報告するよう変更した。検証環境の仮想PIDと `/proc` のPIDが異なり、無関係の生存プロセスを終了失敗と判定したため。終了assert・timeoutは保持した。既存ブラウザsmokeのassert・期待値・30秒のtimeoutは維持し、非同期の保存待機だけを結果までawaitする共通helperへ変更した。
@@ -56,7 +59,7 @@ WebKitはLinux用のブラウザ。390×844／1024×1366、DPR 2、mobile／touc
 | 13 | open smokeの同ID三択・独立ID・履歴保護 | 実機ファイルピッカー |
 | 14 | native IDB中のタブ終了／quota／abort、migration再試行 | 実Safariの強制終了 |
 | 15 | history smokeの1世代削除／共有参照GCと容量報告 | 実機UI・容量表示 |
-| 16 | Chromium／Linux WebKitの2モバイル寸法と保存復元 | **iPhone／iPad Safari、PC主要ブラウザの実機は未確認** |
+| 16 | Chromium／Linux WebKitの2モバイル寸法と保存復元、PC3 engineの編集／書体／PNG／保存／3タブ | **iPhone／iPad Safari、PC主要ブラウザの実機は未確認** |
 
 ## 性能
 
@@ -91,3 +94,9 @@ Checks [38451564581](https://github.com/falls247/serifu-editor/actions/runs/3845
 保存開始時にも、最後のlease照会以降にownerEpochが変わっていれば保存を拒否する。次の心拍前にwriter交代・保存・解放が完了したケースを追加し、別writerのlatestを保持して再読込することを確認した（[`459b7092`](https://github.com/falls247/serifu-editor/commit/459b7092ded1af55341098f25be9bdffd5ad5da4)）。
 
 Checks [38457135604](https://github.com/falls247/serifu-editor/actions/runs/38457135604)は既存paged-smokeの83行目で、次画像への複製後の表示範囲が更新前のままとなり失敗した。自動保存を待つ共通guardが、同project内のClipboard操作まで保留していたため。Clipboardのguardは進行中の保存を待たずに適用し、project切替・復元・消去等の待機は保持する。元500ページ試験のassertとtimeoutは変更せず、50／100／全表示、範囲境界の複製・移動、500枚出力、保存復元までローカルで合格。autosave専用試験は画像hashを保留したままClipboard操作が3秒以内に完了することも確認する（[`76e160d0`](https://github.com/falls247/serifu-editor/commit/76e160d0e6f5f42222c71280d0d746aacd152e94)）。
+
+## PCブラウザ検証の追加
+
+追加試験のコミットは[`cc7686f0`](https://github.com/falls247/serifu-editor/commit/cc7686f0586b877c5244f9791ae4ce2c7497273f)。`npm run test:sfx-desktop`で3 engineを順に実行する。結果は`artifacts/sfx-desktop-results.json`へengine名・version・ホストOS／Node版・viewport・起動時override・各操作の結果を保存し、画面を`artifacts/sfx-desktop-*.png`へ記録する。起動やpage作成で失敗しても成功済みengineだけのJSONにせず、失敗したengineを記録する。page作成待機は30秒を上限とし、既存assertと期限を延長しない。
+
+モバイル試験のログも確認した操作だけをPASSと表示する。WebKitではtap／数値／保存復元を記録し、Chromiumだけで実行したnative長押し／2指pinchをWebKitの合格として表示しない。新試験はPC向けの自動確認であり、Windows／macOSやiPhone／iPad実機の正式受入ではない。

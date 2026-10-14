@@ -28,7 +28,7 @@
 | P2 文字描画 | 個別位置・共通中心変形・縦組み・変形後質感・外接範囲・原寸PNG。sourceIndex4条件、PNG共通draw一致 | 実機の書体・表示品質 |
 | P3 長音線 | Canvas曲線／幅ハンドル、点追加削除、3種補間、cap、実インクattach、固定位置／長さ、分割結合、部分コピー／プリセット | 実機タッチ操作 |
 | P4 輪郭/効果 | 実インク重なり自動編成、手動メンバーロック、外周合成、掠れ前シルエット、上限付きcache、PNG試験 | 実機の視覚確認 |
-| P5 UI/テンプレート | Shift／Alt／矩形／なげなわ、Clipboard、4案比較、数値一括、ドラフト／IME保護、異字数テンプレート、欠損書体の明示解決、Chromium／WebKitモバイル寸法 | 実機PC/iPhone/iPad（UAT-16） |
+| P5 UI/テンプレート | Shift／Alt／矩形／なげなわ、Clipboard、4案比較、数値一括、ドラフト／IME保護、異字数テンプレート、欠損書体の明示解決、Chromium／WebKitモバイル寸法、PC3 engineの編集・PNG・保存・3タブ | 実機PC/iPhone/iPad（UAT-16） |
 | P6 ファイルI/O | v14／コンテナ2、ID維持／再発行、三択競合、同ID画像差替、原子的画面切替、旧全版読込試験 | Checksの実行結果を参照 |
 | P7 保存/排他 | v2非破壊・中断再試行、原子的latest／5分5世代、素材共有／参照検証GC、容量管理、document owner／fencing、3タブ引継ぎ、quota／abort／native IDB中のタブ終了、保存中追加編集・準備後lease更新 | 実SafariのIndexedDB・複数タブ |
 | P8 統合/文書 | 全回帰、旧描画比較、性能記録、README／ADR／HANDOFF／UAT対応を更新 | Checksの実行結果と実機の正式受入 |
@@ -45,6 +45,8 @@ H-01は保存／復元時にglobal activeを参照して別タブのprojectと�
 
 同project内のコピー・カット・貼付け・次画像へのコピーは進行中の保存を待たずに適用する。切替・復元等の待機は維持し、元500ページ試験の範囲切替・全出力・保存復元と、hash保留中のClipboard操作で確認する。
 
+PC向け自動試験`test:sfx-desktop`をChromium／WebKit／Firefoxへ追加した。数値・取消・複製／Undo・native曲線D&D・書体実ロード・PNG・ファイル往復・保存復元・3タブ排他を同じ操作で確認する。OS・version・起動overrideを結果JSONへ記録し、Linux headlessの合格とUAT-16の実機受入を区別する。
+
 ### 0.4 作業IDと証跡
 
 | ID | 対応 | 主な自動試験 |
@@ -58,7 +60,7 @@ H-01は保存／復元時にglobal activeを参照して別タブのprojectと�
 | F-02 | 曲線／幅ハンドル、分割結合、精密接続 | `test:sfx-stroke`、長音線単体試験 |
 | F-03 | 自動重なり／手動ロック、合成外周、グランジ | `test:sfx-outline`、輪郭単体試験、`test:bulk` |
 | F-04 | テンプレート／書体、選択、タッチ・ルーペ・ズーム | `test:sfx-template`、`test:sfx-selection`、`test:sfx-touch` |
-| V-01 | 全回帰・旧版比較・性能・UAT対応を記録 | [検証記録](../sfx-validation.md)。実機分は未確認 |
+| V-01 | 全回帰・旧版比較・性能・PC3 engine・UAT対応を記録 | [検証記録](../sfx-validation.md)。実機分は未確認 |
 | V-02 | README／ADR-27／HANDOFF／本章を現実装へ更新 | 最終コードとCIを検証記録に記載 |
 
 ### 0.5 次の作業と制約

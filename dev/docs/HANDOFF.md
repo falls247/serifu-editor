@@ -281,3 +281,5 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 保存開始前にも最後のlease照会からのownerEpoch変更を検査する。別writerが次の心拍前に保存・解放した場合も、保存を拒否してlatestを再読込する。4ケースのautosave専用試験と既存回帰をChecksで実行する。最終コードとCIの照合先は[検証記録](sfx-validation.md)。
 
 Clipboardのguardは`waitForDraft:false`で、同project内のコピー・カット・貼付け・次画像への複製を保存中も適用する。project切替・復元・消去等は保存を待つ。元`paged-smoke.mjs`の500ページ確認を保持し、autosave専用試験で画像hash保留中もClipboard操作が完了することを確認する。
+
+PCブラウザ検証を追加（2026-10-14）: `npm run test:sfx-desktop`はChromium／WebKit／Firefoxで編集・曲線D&D・個別書体・PNG・JSON/.serifu・IndexedDB復元・3タブ排他を確認する。`sfx-test-support.mjs`は既定Chromiumを維持したままengineを切替可能にし、page作成を30秒で打ち切る。結果JSONにOS／ブラウザ版／起動overrideを残す。CIは3 engineを通常設定で実行する。モバイルログはWebKitで未実行のnative長押し／pinchをPASSに含めない。Linux headlessの合格と実機の正式受入は区別する。
