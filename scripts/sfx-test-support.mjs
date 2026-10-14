@@ -3,9 +3,46 @@ import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {readFile} from 'node:fs/promises';
 const {chromium}=createRequire(import.meta.url)('playwright');
-export async function sfxTest(port,fn){
- const server=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port)},stdio:['ignore','pipe','inherit']});let browser;
- try{await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error('server exited '+code)));});browser=await chromium.launch({headless:true});const context=await browser.newContext({viewport:{width:1440,height:1080},acceptDownloads:true}),page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(`http://localhost:${port}`);await page.uncheck('#autosaveEnabled');const buffer=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=1000;c.height=750;c.getContext('2d').fillStyle='#899099';c.getContext('2d').fillRect(0,0,c.width,c.height);return c.toDataURL().split(',')[1];}),'base64');await page.locator('#fileInput').setInputFiles({name:'sfx.png',mimeType:'image/png',buffer});await page.waitForFunction(()=>document.querySelector('.image-row')&&!document.querySelector('#projectLoad').disabled);const row=page.locator('.image-row').first();await row.locator('[data-action=add-sfx]').click();const card=row.locator('[data-kind=sfx]');await card.locator('textarea').fill('ザーーーーッ');for(const [field,value] of Object.entries({x:500,y:350,w:800,h:600,size:80,rotation:0})){const input=row.locator(`.position-controls [data-field=${field}]`);await input.fill(String(value));await input.press('Tab');}await row.locator('.position-controls [data-field=vertical]').selectOption('false');await card.locator('[data-action=sfx-glyph-enter]').click();await fn({page,row,card,browser,buffer});assert.deepEqual(errors,[]);}finally{await browser?.close();server.kill('SIGTERM');}
+async function withDeadline(operation,label){
+ let timer;
+ try{return await Promise.race([operation,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(label+' did not finish within 30000ms')),30000);})]);}
+ finally{clearTimeout(timer);}
+}
+export async function sfxTest(port,fn,{engine=chromium,onStage=()=>{}}={}){
+ const server=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port)},stdio:['ignore','pipe','inherit']});
+ let browser;
+ try{
+  await new Promise((resolve,reject)=>{server.stdout.once('data',resolve);server.once('error',reject);server.once('exit',code=>reject(new Error('server exited '+code)));});
+  onStage('server ready');
+  browser=await engine.launch({headless:true});
+  onStage('browser ready');
+  const context=await browser.newContext({viewport:{width:1440,height:1080},acceptDownloads:true}),page=await withDeadline(context.newPage(),engine.name()+' page creation'),errors=[];
+  page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(`http://localhost:${port}`);
+  onStage('app loaded');
+  await page.uncheck('#autosaveEnabled');
+  const buffer=Buffer.from(await page.evaluate(()=>{
+   const c=document.createElement('canvas');c.width=1000;c.height=750;
+   const ctx=c.getContext('2d');ctx.fillStyle='#899099';ctx.fillRect(0,0,c.width,c.height);
+   return c.toDataURL().split(',')[1];
+  }),'base64');
+  onStage('fixture PNG ready');
+  await page.locator('#fileInput').setInputFiles({name:'sfx.png',mimeType:'image/png',buffer});
+  await page.waitForFunction(()=>document.querySelector('.image-row')&&!document.querySelector('#projectLoad').disabled);
+  onStage('image loaded');
+  const row=page.locator('.image-row').first();
+  await row.locator('[data-action=add-sfx]').click();
+  const card=row.locator('[data-kind=sfx]');
+  await card.locator('textarea').fill('ザーーーーッ');
+  for(const [field,value] of Object.entries({x:500,y:350,w:800,h:600,size:80,rotation:0})){
+   const input=row.locator(`.position-controls [data-field=${field}]`);await input.fill(String(value));await input.press('Tab');
+  }
+  await row.locator('.position-controls [data-field=vertical]').selectOption('false');
+  await card.locator('[data-action=sfx-glyph-enter]').click();
+  onStage('SFX editor ready');
+  await fn({page,row,card,browser,buffer,errors});
+  assert.deepEqual(errors,[]);
+ }finally{await browser?.close();server.kill('SIGTERM');}
 }
 export async function exportJson(page){await page.selectOption('#projectFormat','json');const pending=page.waitForEvent('download');await page.click('#projectSave');const file=await pending;await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);return JSON.parse(await readFile(await file.path(),'utf8'));}
 export async function exportPng(page,row){const pending=page.waitForEvent('download');await row.locator('[data-action=save-image]').click();const file=await pending;await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);return (await readFile(await file.path())).toString('base64');}

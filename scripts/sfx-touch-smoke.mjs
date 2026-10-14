@@ -19,7 +19,7 @@ try{
     await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:point.x-15,y:point.y,id:1},{x:point.x+15,y:point.y,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:point.x-30,y:point.y,id:1},{x:point.x+30,y:point.y,id:2}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await page.waitForTimeout(100);assert.ok(await row.locator('canvas.preview').evaluate(c=>c.getBoundingClientRect().width)>point.width*1.5,'two-finger zoom persists through resize callbacks');
    }
    await page.click('#temporarySave');await page.waitForFunction(()=>document.querySelector('#draftStatus').textContent.includes('保存済'));await page.reload();await page.locator('#draftNotice:not([hidden])').waitFor();await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelector('[data-kind=sfx]')&&!document.querySelector('#projectLoad').disabled);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);assert.deepEqual(errors,[]);await context.close();
-   console.log(engine.name(),viewport.width,'touch numeric/lens/pinch/storage PASS');
+   console.log(engine.name(),viewport.width,engine===chromium?'tap/numeric/native lens/native pinch/storage PASS':'tap/numeric/storage PASS (native lens/pinch not exercised)');
   }
   await browser.close();browser=null;
  }

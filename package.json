@@ -48,6 +48,7 @@
     "test:project-open": "node scripts/project-open-smoke.mjs",
     "test:sfx-selection": "node scripts/sfx-selection-smoke.mjs",
     "test:sfx-export": "node scripts/sfx-export-smoke.mjs",
-    "test:autosave-catchup": "node scripts/autosave-catchup-smoke.mjs"
+    "test:autosave-catchup": "node scripts/autosave-catchup-smoke.mjs",
+    "test:sfx-desktop": "node scripts/sfx-desktop-browser-smoke.mjs"
   }
 }
