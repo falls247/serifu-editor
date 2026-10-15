@@ -2,6 +2,7 @@ import {graphemes} from './typography.js';
 import {defaultGlyph,replaceLetteringText,normalizeLettering,startLettering,duplicateLetteringGlyphs} from './sfx-lettering-model.js';
 
 export const glyphSelection=mode=>[...new Set(mode.indices??[mode.selected])].filter(Number.isInteger);
+const glyphLayoutShift=(layer,item)=>(item.letter?.shift??0)*(item.letter?.baseSize??0)*((layer.stretchX??100)/100);
 export function selectGlyph(mode,index,{toggle=false,range=false,visible=[]}={}){
   const current=new Set(glyphSelection(mode));
   if(range&&Number.isInteger(mode.selected)){const lo=Math.min(index,mode.selected),hi=Math.max(index,mode.selected);for(const i of visible)if(i>=lo&&i<=hi)current.add(i);}
@@ -9,8 +10,9 @@ export function selectGlyph(mode,index,{toggle=false,range=false,visible=[]}={})
   else{current.clear();current.add(index);}
   mode.indices=[...current].sort((a,b)=>a-b);mode.selected=current.has(index)?index:mode.indices.at(-1)??null;
 }
-export function freezeGlyphOrigins(layer,scene){
-  for(const item of scene.glyphs){const glyph=layer.lettering.glyphs.find(g=>g.index===item.index);if(!glyph.origin)glyph.origin={x:item.x-glyph.dx,y:item.y-glyph.dy};}
+export function freezeGlyphOrigins(layer,scene,indices=null){
+  const selected=indices==null?null:new Set(indices);
+  for(const item of scene.glyphs){if(selected&&!selected.has(item.index))continue;const glyph=layer.lettering.glyphs.find(g=>g.index===item.index);if(!glyph.origin)glyph.origin={x:item.x-glyph.dx-glyphLayoutShift(layer,item),y:item.y-glyph.dy};}
 }
 export function copyLetteringSelection(layer,mode,scene){
   const indices=new Set(glyphSelection(mode));
@@ -59,9 +61,9 @@ export function rotateLetteringOrientation(layer,vertical){
 export function transformGlyphSelection(layer,indices,scene,{dx=0,dy=0,rotation=0,scaleX=1,scaleY=1}={}){
   const chosen=scene.glyphs.filter(item=>indices.includes(item.index));if(!chosen.length)return;
   const center={x:chosen.reduce((s,g)=>s+g.x,0)/chosen.length,y:chosen.reduce((s,g)=>s+g.y,0)/chosen.length};
-  const a=rotation*Math.PI/180,c=Math.cos(a),s=Math.sin(a);freezeGlyphOrigins(layer,scene);
+  const a=rotation*Math.PI/180,c=Math.cos(a),s=Math.sin(a);freezeGlyphOrigins(layer,scene,indices);
   for(const item of chosen){const g=layer.lettering.glyphs.find(g=>g.index===item.index),x=(item.x-center.x)*scaleX,y=(item.y-center.y)*scaleY;
-    g.dx=center.x+x*c-y*s+dx-g.origin.x;g.dy=center.y+x*s+y*c+dy-g.origin.y;
+    g.dx=center.x+x*c-y*s+dx-g.origin.x-glyphLayoutShift(layer,item);g.dy=center.y+x*s+y*c+dy-g.origin.y;
     g.rotation+=rotation;g.scaleX=Math.max(.01,Math.min(20,g.scaleX*scaleX));g.scaleY=Math.max(.01,Math.min(20,g.scaleY*scaleY));g.manual.position=true;g.manual.transform=rotation!==0||scaleX!==1||scaleY!==1||g.manual.transform;
   }
 }

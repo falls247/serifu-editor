@@ -1059,9 +1059,54 @@ const strokeShapePoints=shape=>shape==='arc'?[{x:0,y:0},{x:.33,y:.22},{x:.67,y:.
   :shape==='wave'?[{x:0,y:0},{x:.16,y:.25},{x:.33,y:.25},{x:.5,y:0},{x:.67,y:-.25},{x:.83,y:-.25},{x:1,y:0}]
   :[{x:0,y:0},{x:.33,y:0},{x:.67,y:0},{x:1,y:0}];
 
+function captureCardViewport(p) {
+  if(!p.row)return null;
+  const pane=p.row.querySelector('.dialogue-pane'),active=document.activeElement,container=p.row.querySelector('.layer-cards');
+  const card=active?.closest('.layer-card');
+  const focus=card&&container.contains(active)?{
+    layerId:card.dataset.layerId,
+    tag:active.tagName,
+    identity:[...active.attributes].filter(attribute=>attribute.name.startsWith('data-')||attribute.name==='class').map(({name,value})=>[name,value]),
+    selection:typeof active.selectionStart==='number'?{start:active.selectionStart,end:active.selectionEnd,direction:active.selectionDirection}:null,
+  }:null;
+  return {
+    windowX:window.scrollX,windowY:window.scrollY,
+    paneLeft:pane.scrollLeft,paneTop:pane.scrollTop,
+    glyphLists:[...container.querySelectorAll('.sfx-glyph-list')].map(list=>({layerId:list.closest('.layer-card')?.dataset.layerId,left:list.scrollLeft,top:list.scrollTop})),
+    focus,
+  };
+}
+
+function restoreCardViewport(p,view) {
+  if(!view||!p.row)return;
+  const pane=p.row.querySelector('.dialogue-pane'),container=p.row.querySelector('.layer-cards');
+  const cards=new Map([...container.querySelectorAll('.layer-card')].map(card=>[card.dataset.layerId,card]));
+  pane.scrollLeft=view.paneLeft;pane.scrollTop=view.paneTop;
+  for(const saved of view.glyphLists){
+    const list=cards.get(saved.layerId)?.querySelector('.sfx-glyph-list');
+    if(list){list.scrollLeft=saved.left;list.scrollTop=saved.top;}
+  }
+  if(view.focus){
+    const card=cards.get(view.focus.layerId);
+    const target=[...(card?.querySelectorAll(view.focus.tag.toLowerCase())||[])].find(element=>
+      view.focus.identity.every(([name,value])=>element.getAttribute(name)===value));
+    if(target){
+      target.focus({preventScroll:true});
+      if(view.focus.selection)try{target.setSelectionRange(view.focus.selection.start,view.focus.selection.end,view.focus.selection.direction);}catch{}
+    }
+  }
+  pane.scrollLeft=view.paneLeft;pane.scrollTop=view.paneTop;
+  for(const saved of view.glyphLists){
+    const list=cards.get(saved.layerId)?.querySelector('.sfx-glyph-list');
+    if(list){list.scrollLeft=saved.left;list.scrollTop=saved.top;}
+  }
+  document.scrollingElement.scrollLeft=view.windowX;document.scrollingElement.scrollTop=view.windowY;
+}
+
 function renderCards(p) {
   if(p.renderingCards)return;p.renderingCards=true;
   try{
+  const viewport=captureCardViewport(p);
   syncSelection(p);p.row?.classList.toggle('sfx-editing',!!activeGlyphEdit(p,selected(p)));
   updateImageView(p);
   if (!p.row) return;
@@ -1174,7 +1219,7 @@ function renderCards(p) {
   const cards=new Map([...container.children].map(card=>[card.dataset.layerId,card]));
   for(const [index,effect] of p.maskEffects.entries())cards.set(effect.id,createMaskEffectCard(effect,p.maskAssets[effect.assetId],index,p.id===activeId&&p.selectedMaskId===effect.id,p.img.width,p.img.height));
   for(const object of paintOrder(p.layers,p.maskEffects))container.append(cards.get(object.id));
-  refreshPresetMenus(p); updateControls(p);
+  refreshPresetMenus(p); updateControls(p);restoreCardViewport(p,viewport);
   }finally{p.renderingCards=false;}
 }
 

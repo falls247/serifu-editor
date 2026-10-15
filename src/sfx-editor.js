@@ -30,7 +30,7 @@ export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify
   let operation='move',picked=null;
   if(handle){operation=handle.kind;mode.pointSelection=event.shiftKey?[...(mode.pointSelection||[]).filter(h=>h.kind!==handle.kind||h.index!==handle.index),handle]:[handle];if(handle.kind==='curve')mode.strokePoint=handle.index;else mode.widthIndex=handle.index;}
   else if(selectedBounds&&Math.hypot(point.x-selectedBounds.maxX,point.y-selectedBounds.maxY)<=radius)operation='scale';
-  else if(selectedBounds&&Math.hypot(point.x-(selectedBounds.minX+selectedBounds.maxX)/2,point.y-selectedBounds.minY-25/scale)<=radius)operation='rotate';
+  else if(selectedBounds&&Math.hypot(point.x-(selectedBounds.minX+selectedBounds.maxX)/2,point.y-(selectedBounds.minY-25/scale))<=radius)operation='rotate';
   else{
     let candidates=scene.items.filter(i=>sfxItemHit(i,point)).reverse();
     if(mode.priority==='stroke')candidates.sort((a,b)=>(b.type==='stroke')-(a.type==='stroke'));
@@ -153,13 +153,20 @@ export function advancedLetteringPanel(p,l,mode,{edit,render,fonts,copyStroke,pa
   }
   const previewVariants=()=>{if(!panel.open)return;for(const {variant,canvas} of variants){const ctx=canvas.getContext('2d'),scene=sfxScene(ctx,variant),b=boundsOf(scene.items);if(!b)continue;const scale=Math.min(110/Math.max(1,b.maxX-b.minX),70/Math.max(1,b.maxY-b.minY));ctx.setTransform(1,0,0,1,0,0);ctx.clearRect(0,0,120,80);ctx.translate(60,40);ctx.scale(scale,scale);ctx.translate(-(b.minX+b.maxX)/2,-(b.minY+b.maxY)/2);paintEditedSfx(ctx,variant);}};
   panel.addEventListener('toggle',previewVariants);if(document.fonts)void document.fonts.ready.then(()=>{if(panel.isConnected)previewVariants();});
-  const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun);
+  const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];
   if(run){
+    mode.strokeRun=run.runStart;
     numeric('選択点の回転','pointRotation',0,-360,360,value=>edit(()=>{const handles=mode.pointSelection||[{kind:'curve',index:mode.strokePoint??1,run:run.runStart}],points=handles.filter(h=>h.kind==='curve'&&h.run===run.runStart).map(h=>run.path.points[h.index]);if(!points.length)return;const x=points.reduce((n,p)=>n+p.x,0)/points.length,y=points.reduce((n,p)=>n+p.y,0)/points.length,a=value*Math.PI/180;for(const p of points){const dx=p.x-x,dy=p.y-y;p.x=x+dx*Math.cos(a)-dy*Math.sin(a);p.y=y+dx*Math.sin(a)+dy*Math.cos(a);}}));
     numeric('選択点の倍率','pointScale',1,.01,20,value=>edit(()=>{const handles=mode.pointSelection||[{kind:'curve',index:mode.strokePoint??1,run:run.runStart}],points=handles.filter(h=>h.kind==='curve'&&h.run===run.runStart).map(h=>run.path.points[h.index]);if(points.length){const x=points.reduce((n,p)=>n+p.x,0)/points.length,y=points.reduce((n,p)=>n+p.y,0)/points.length;for(const p of points){p.x=Math.max(-10,Math.min(10,x+(p.x-x)*value));p.y=Math.max(-10,Math.min(10,y+(p.y-y)*value));}}for(const h of handles.filter(h=>h.kind==='width'&&h.run===run.runStart))run.widths[h.index].w=Math.min(500,run.widths[h.index].w*value);}));
     select('ハンドル','handleMode',[['smooth','滑らか'],['sharp','角'],['independent','左右独立']],run.path.handleMode??'independent',value=>edit(()=>{run.path.handleMode=value;}));
     select('長さロック','lengthLock',[['false','なし'],['true','固定']],run.manualLengthLocked,value=>edit(()=>{run.manualLengthLocked=value==='true';run.lockedLength=strokeFrame(run,sceneFor(p,l).positions,{vertical:l.vertical,size:l.size})?.length??null;}));
-    action('曲線点を追加','curve-add',()=>edit(()=>Object.assign(run,addCurvePoint(run))));
+    action('曲線点を追加','curve-add',()=>edit(()=>{
+      const segments=(run.path.points.length-1)/3,segment=Math.min(segments-1,Math.floor(segments/2));
+      Object.assign(run,addCurvePoint(run));
+      if(mode.editMode!=='both')mode.editMode='curve';
+      mode.strokePoint=segment*3+3;
+      mode.pointSelection=[{kind:'curve',index:mode.strokePoint,run:run.runStart}];
+    }));
     action('曲線点を削除','curve-remove',()=>edit(()=>Object.assign(run,removeCurvePoint(run,mode.strokePoint??3))));
     action('線幅点を追加','width-add',()=>edit(()=>Object.assign(run,addWidthPoint(run,(mode.widthT??.5)))));
     action('線幅点を削除','width-remove',()=>edit(()=>Object.assign(run,removeWidthPoint(run,mode.widthIndex??1))));
