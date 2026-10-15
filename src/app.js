@@ -1047,6 +1047,11 @@ function sfxLetteringPanel(p,l){
     }
     panel.append(fieldset);
   }
+  for(const details of panel.querySelectorAll(':scope > details')){
+    const grid=element('div','sfx-control-grid');
+    grid.append(...[...details.children].filter(child=>child.tagName!=='SUMMARY'));
+    details.append(grid);
+  }
   return panel;
 }
 const strokeShapePoints=shape=>shape==='arc'?[{x:0,y:0},{x:.33,y:.22},{x:.67,y:.22},{x:1,y:0}]
