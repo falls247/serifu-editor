@@ -1401,7 +1401,7 @@ function renderCards(p) {
     presetLine.append(presetSelect,button('save-preset','保存','この設定に名前を付けてプリセットを保存'),button('delete-preset','削除','選択中の保存プリセットを削除'));card.append(presetLine);
     if(l.kind==='balloon'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='吹き出しのセリフを入力';text.setAttribute('aria-label',l.speaker==='female'?'女性の吹き出しセリフ':'男性の吹き出しセリフ');card.append(text);
-      card.append(speechStyleControls(l),textPositionControls(l),element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。枠は動かさず本文を移動。余白を減らすと改行までの長さが広がる。'));
+      card.append(speechStyleControls(l),textPositionControls(l),element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。枠は動かさず本文を移動。余白を減らすと改行までの長さが広がる。本文は枠外も表示。'));
       const grid=element('div','effect-grid');
       for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);

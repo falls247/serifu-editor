@@ -143,6 +143,14 @@ test('layer bounds include vertical punctuation ink outside its em cell', () => 
   assert.deepEqual([ctx.font,ctx.textAlign,ctx.textBaseline],['18px sans','right','top']);
 });
 
+test('balloon bounds include overflowing text and its outline after offsets and rotation', () => {
+  for(const vertical of [true,false])for(const rotation of [0,90])for(const direction of [-1,1]){
+    const balloon={...newLayer('balloon',400,300),text:'枠外',w:80,h:80,size:40,lineAlign:'center',vertical,rotation,textOffsetX:direction*140,outline:8,thickness:2};
+    const bounds=layerBounds(context(),balloon),axis=rotation===0?'X':'Y';
+    assert.ok(direction<0?bounds[`min${axis}`]<-150:bounds[`max${axis}`]>150,'shifted text must extend the measured bounds beyond the frame');
+  }
+});
+
 test('spiky caption bounds include solid miter joins beyond the outline vertices', () => {
   const caption = { ...newLayer('caption', 500, 400), shape: 'spiky', shapeSeed: 12345, distortion: 100, w: 220, h: 170, borderWidth: 24, borderStyle: 'solid' };
   const points = captionOutline(caption),vertices=points.slice(0,-1),bounds = layerBounds(context(), caption),half=caption.borderWidth/2;

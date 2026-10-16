@@ -3,7 +3,7 @@ import { strokeGeometry, strokePolygon, strokeBounds } from './sfx-stroke-geomet
 import {unionOuterContour,glyphGroupBounds,resolveOutlineGroups} from './sfx-outline-groups.js';
 import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { glyphFontDescription, clearFontCache } from './fonts.js';
-import { newBalloon, balloonHit, balloonOutline, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
+import { newBalloon, balloonHit, balloonOutline, paintBalloon, paintOrder, balloonContentBox } from './balloons.js';
 import { newCaption, captionOutline, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
@@ -488,6 +488,7 @@ export function layerBounds(ctx,layer){
         const shadow=emptyBounds();includePoints(shadow,outline.map(p=>({x:p.x+(layer.shadowOffsetX??0),y:p.y+(layer.shadowOffsetY??0)})));
         inflateBounds(shadow,Math.max(1,(layer.shadowBlur??0)*3));includeBounds(bounds,shadow);
       }
+      if(layer.text)for(const glyph of textGlyphs(ctx,layer))includeTextGlyph(bounds,ctx,layer,glyph);
     }else if(layer.kind==='caption'){
       const outline=captionOutline(layer);includePoints(bounds,outline);
       inflateBounds(bounds,captionBorderPad(layer,outline));
@@ -566,7 +567,7 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
     ctx.save(); ctx.translate(l.x, l.y); ctx.rotate(l.rotation * Math.PI / 180);
     if(l.kind==='balloon'){
       paintBalloon(ctx,l);
-      if(l.text){ctx.save();clipBalloon(ctx,l);paintText(ctx,l);ctx.restore();}
+      if(l.text)paintText(ctx,l);
     }
     else if(l.kind==='caption')paintCaption(ctx,l);
     else {ornament(ctx, l); if(l.kind==='sfx'&&l.lettering?.enabled)paintEditedSfx(ctx,l);else paintText(ctx, l);}
