@@ -1,5 +1,6 @@
 import {graphemes} from './typography.js';
 import {defaultGlyph,replaceLetteringText,normalizeLettering,startLettering,duplicateLetteringGlyphs} from './sfx-lettering-model.js';
+import {strokeGeometry,strokeFrame,pathToLocal,localToPath} from './sfx-stroke-geometry.js';
 
 export const glyphSelection=mode=>[...new Set(mode.indices??[mode.selected])].filter(Number.isInteger);
 const glyphLayoutShift=(layer,item)=>(item.letter?.shift??0)*(item.letter?.baseSize??0)*((layer.stretchX??100)/100);
@@ -58,13 +59,47 @@ export function rotateLetteringOrientation(layer,vertical){
   for(const stroke of next.lettering.strokes)for(const side of ['start','end']){const p=stroke[side].fixedPosition;if(p)[p.x,p.y]=[-s*p.y,s*p.x];}
   return next;
 }
-export function transformGlyphSelection(layer,indices,scene,{dx=0,dy=0,rotation=0,scaleX=1,scaleY=1}={}){
+export function transformGlyphSelection(layer,indices,scene,{dx=0,dy=0,rotation=0,scaleX=1,scaleY=1,center:pivot}={}){
   const chosen=scene.glyphs.filter(item=>indices.includes(item.index));if(!chosen.length)return;
-  const center={x:chosen.reduce((s,g)=>s+g.x,0)/chosen.length,y:chosen.reduce((s,g)=>s+g.y,0)/chosen.length};
+  const center=pivot??{x:chosen.reduce((s,g)=>s+g.x,0)/chosen.length,y:chosen.reduce((s,g)=>s+g.y,0)/chosen.length};
   const a=rotation*Math.PI/180,c=Math.cos(a),s=Math.sin(a);freezeGlyphOrigins(layer,scene,indices);
   for(const item of chosen){const g=layer.lettering.glyphs.find(g=>g.index===item.index),x=(item.x-center.x)*scaleX,y=(item.y-center.y)*scaleY;
     g.dx=center.x+x*c-y*s+dx-g.origin.x-glyphLayoutShift(layer,item);g.dy=center.y+x*s+y*c+dy-g.origin.y;
     g.rotation+=rotation;g.scaleX=Math.max(.01,Math.min(20,g.scaleX*scaleX));g.scaleY=Math.max(.01,Math.min(20,g.scaleY*scaleY));g.manual.position=true;g.manual.transform=rotation!==0||scaleX!==1||scaleY!==1||g.manual.transform;
+  }
+}
+export function transformStrokeSelection(layer,runStarts,scene,{dx=0,dy=0,rotation=0,scaleX=1,scaleY=1,center}={}){
+  const selected=new Set(runStarts),a=rotation*Math.PI/180,c=Math.cos(a),s=Math.sin(a);
+  for(const run of layer.lettering.strokes){
+    if(!selected.has(run.runStart)||run.mode!=='continuous')continue;
+    const oldFrame=strokeFrame(run,scene.positions,{vertical:layer.vertical,size:layer.size});if(!oldFrame)continue;
+    const pivot=center??{x:(oldFrame.start.x+oldFrame.end.x)/2,y:(oldFrame.start.y+oldFrame.end.y)/2};
+    const transformPoint=point=>{const x=(point.x-pivot.x)*scaleX,y=(point.y-pivot.y)*scaleY;return {x:pivot.x+x*c-y*s+dx,y:pivot.y+x*s+y*c+dy};};
+    const start=transformPoint(oldFrame.start),end=transformPoint(oldFrame.end),vx=end.x-start.x,vy=end.y-start.y,length=Math.hypot(vx,vy);
+    if(length<.001)continue;
+    if(rotation===0&&scaleX===1&&scaleY===1){
+      run.start.detached=true;run.start.fixedPosition=start;
+      run.end.detached=true;run.end.fixedPosition=end;
+      continue;
+    }
+    const nextFrame={start,end,vx,vy,length,nx:-vy/length,ny:vx/length},lengthScale=length/oldFrame.length;
+    const samples=strokeGeometry(run,scene.positions,{vertical:layer.vertical,size:layer.size,samples:128});
+    run.path.points=run.path.points.map(point=>{
+      const moved=transformPoint(pathToLocal(oldFrame,point)),local=localToPath(nextFrame,moved);
+      return {x:Math.max(-10,Math.min(10,local.x)),y:Math.max(-10,Math.min(10,local.y))};
+    });
+    run.shape='custom';
+    for(const knot of run.widths){
+      const index=Math.max(0,Math.min(samples.length-1,Math.round(knot.t*(samples.length-1)))),before=samples[Math.max(0,index-1)],after=samples[Math.min(samples.length-1,index+1)];
+      const tx=after.x-before.x,ty=after.y-before.y,tangentLength=Math.hypot(tx,ty)||1,nx=-ty/tangentLength,ny=tx/tangentLength;
+      knot.w=Math.max(0,Math.min(500,knot.w*Math.hypot(scaleX*nx,scaleY*ny)));
+      if(knot.fixed&&Number.isFinite(knot.distance))knot.distance=Math.max(0,Math.min(30000,knot.distance*lengthScale));
+    }
+    if(run.lockedLength!=null)run.lockedLength=Math.max(0,Math.min(30000,run.lockedLength*lengthScale));
+    for(const side of ['start','end']){
+      run[side].detached=true;run[side].fixedPosition=side==='start'?start:end;
+      run[side].length=Math.max(0,Math.min(30000,run[side].length*lengthScale));
+    }
   }
 }
 export function pointInPolygon(point,polygon){let inside=false;for(let i=0,j=polygon.length-1;i<polygon.length;j=i++){const a=polygon[i],b=polygon[j];if((a.y>point.y)!==(b.y>point.y)&&point.x<(b.x-a.x)*(point.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}return inside;}

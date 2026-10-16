@@ -1,4 +1,4 @@
-import {beginLetteringGesture,moveLetteringGesture,endLetteringGesture,drawLetteringOverlay,advancedLetteringPanel,sceneFor} from './sfx-editor.js';
+import {beginLetteringGesture,moveLetteringGesture,endLetteringGesture,drawLetteringOverlay,advancedLetteringPanel,sceneFor,strokeHandles} from './sfx-editor.js';
 import {glyphSelection,selectGlyph,freezeGlyphOrigins,copyLetteringSelection,pasteLetteringSelection,duplicateSelectedGlyphs,transformGlyphSelection,rotateLetteringOrientation,scaleLetteringData} from './sfx-edit-operations.js';
 import {strokeFrame} from './sfx-stroke-geometry.js';
 import { graphemes } from './typography.js';
@@ -6,7 +6,7 @@ import { sfxVisibleIndices } from './sfx-lettering-model.js';
 import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
 import {validProjectId} from './project-identity.js';
 import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY,validateStrokePresets} from './sfx-lettering-templates.js';
-import { textGlyphs,sfxScene } from './renderer.js';
+import { textGlyphs,sfxScene,sfxItemHit } from './renderer.js';
 import { startLettering, defaultGlyph, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
@@ -1477,10 +1477,10 @@ $('deck').addEventListener('change',event=>{
       });return;
     }
     if(input.matches('[data-glyph-stroke-run]')){
-      mode.strokeRun=Number(input.value);mode.strokePoint=1;renderCards(p);return;
+      mode.strokeRun=Number(input.value);mode.strokePoint=1;mode.pointSelection=[{kind:'curve',index:1,run:mode.strokeRun}];renderCards(p);return;
     }
     const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];if(!run)return;
-    if(input.matches('[data-glyph-stroke-point]')){mode.strokePoint=Number(input.value);renderCards(p);return;}
+    if(input.matches('[data-glyph-stroke-point]')){mode.strokePoint=Number(input.value);mode.pointSelection=[{kind:'curve',index:mode.strokePoint,run:run.runStart}];if(mode.editMode!=='both')mode.editMode='curve';renderCards(p);return;}
     if(input.matches('[data-glyph-stroke-point-axis]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
     if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500))return;
     edit(p,()=>{
@@ -1573,7 +1573,11 @@ $('deck').addEventListener('click', async event => {
       input.click();return;
     }
     if(action==='sfx-glyph-select'){
-      selectGlyph(glyphMode,Number(event.target.closest('[data-glyph-index]').dataset.glyphIndex),{toggle:event.shiftKey,range:event.shiftKey&&event.altKey,visible:l.lettering.glyphs.map(g=>g.index)});glyphMode.strokeRuns=[];
+      selectGlyph(glyphMode,Number(event.target.closest('[data-glyph-index]').dataset.glyphIndex),{toggle:event.shiftKey,range:event.shiftKey&&event.altKey,visible:l.lettering.glyphs.map(g=>g.index)});
+      glyphMode.editMode='glyph';glyphMode.pointSelection=[];
+      const indices=glyphSelection(glyphMode);
+      glyphMode.strokeRuns=l.lettering.strokes.filter(run=>run.mode==='continuous'&&indices.some(index=>index>=run.runStart&&index<run.runStart+run.runLength)).map(run=>run.runStart);
+      if(glyphMode.strokeRuns.length)glyphMode.strokeRun=glyphMode.strokeRuns.at(-1);
       renderCards(p);drawPage(p);return;
     }
     if(action==='sfx-glyph-duplicate'){
@@ -1729,7 +1733,23 @@ function editMaskDrag(p,event){
 
 function connectCanvas(p) {
   p.canvas.addEventListener('paste',event=>{const l=selected(p),mode=activeGlyphEdit(p,l);if(!mode||editLocked())return;const text=event.clipboardData?.getData('text/plain');if(!text)return;event.preventDefault();pasteSfxClipboard(p,l,mode,sfxClipboard?.text===text?sfxClipboard:plainSfxClipboard(text));});
-  p.canvas.addEventListener('dblclick',event=>{if(editLocked())return;const pos=coords(event,p),l=paintOrder(p.layers).reverse().find(l=>l.kind==='sfx'&&hit(l,pos.x,pos.y));if(l){selectObject(p,l.id);activate(p);p.row.querySelector(`[data-layer-id="${l.id}"] [data-action=sfx-glyph-enter]`)?.click();}});
+  p.canvas.addEventListener('dblclick',event=>{
+    if(editLocked()||p.cropDraft)return;
+    const pos=coords(event,p),l=paintOrder(p.layers).reverse().find(l=>l.kind==='sfx'&&hit(l,pos.x,pos.y));
+    if(!l)return;
+    selectObject(p,l.id);activate(p);
+    if(!activeGlyphEdit(p,l))p.row.querySelector(`[data-layer-id="${l.id}"] [data-action=sfx-glyph-enter]`)?.click();
+    const mode=activeGlyphEdit(p,l);if(!mode)return;
+    const point=localPoint(l,pos.x,pos.y),scene=sceneFor(p,l);
+    const item=scene.items.filter(item=>sfxItemHit(item,point)).at(-1);
+    if(item?.type!=='stroke')return;
+    event.preventDefault();
+    mode.editMode='curve';mode.strokeRun=item.stroke.runStart;mode.strokeRuns=[item.stroke.runStart];mode.indices=[];mode.selected=null;
+    const nearest=strokeHandles(scene,l,mode).reduce((closest,handle)=>
+      !closest||Math.hypot(handle.x-point.x,handle.y-point.y)<Math.hypot(closest.x-point.x,closest.y-point.y)?handle:closest,null);
+    mode.strokePoint=nearest.index;mode.pointSelection=[{kind:'curve',index:nearest.index,run:item.stroke.runStart}];
+    renderCards(p);drawPage(p);p.canvas.focus({preventScroll:true});
+  });
   p.canvas.addEventListener('pointerdown', event => {
     if(editLocked()||event.button!==0||drag)return;
     const letter=selected(p),mode=activeGlyphEdit(p,letter);

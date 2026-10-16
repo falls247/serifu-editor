@@ -1,9 +1,15 @@
 import {sfxScene,sfxItemHit,sfxResolvedGroups,paintEditedSfx} from './renderer.js';
 import {strokeGeometry,strokeFrame,pathToLocal,localToPath,bezierPoint,moveCurvePoint,addCurvePoint,removeCurvePoint,addWidthPoint,removeWidthPoint} from './sfx-stroke-geometry.js';
-import {glyphSelection,selectGlyph,freezeGlyphOrigins,duplicateSelectedGlyphs,transformGlyphSelection,selectionRegion} from './sfx-edit-operations.js';
+import {glyphSelection,selectGlyph,freezeGlyphOrigins,duplicateSelectedGlyphs,transformGlyphSelection,transformStrokeSelection,selectionRegion} from './sfx-edit-operations.js';
 
 export const sceneFor=(p,l)=>sfxScene(p.canvas.getContext('2d'),l);
 const boundsOf=items=>items.length?{minX:Math.min(...items.map(i=>i.bounds.minX)),maxX:Math.max(...items.map(i=>i.bounds.maxX)),minY:Math.min(...items.map(i=>i.bounds.minY)),maxY:Math.max(...items.map(i=>i.bounds.maxY))}:null;
+const selectedSceneItems=(scene,mode,strokeRuns=mode.strokeRuns||[])=>scene.items.filter(item=>item.type==='glyph'?glyphSelection(mode).includes(item.index):mode.editMode==='glyph'&&strokeRuns.includes(item.stroke.runStart));
+export function nearestStrokeHandle(handles,point,radius){
+  let closest=null,distance=Infinity;
+  for(const handle of handles){const next=Math.hypot(handle.x-point.x,handle.y-point.y);if(next<=radius&&next<distance){closest=handle;distance=next;}}
+  return closest;
+}
 export function strokeHandles(scene,l,mode){
   const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun);if(!run||run.mode!=='continuous'||mode.editMode==='glyph')return [];
   const frame=strokeFrame(run,scene.positions,{vertical:l.vertical,size:l.size});if(!frame)return [];
@@ -25,8 +31,8 @@ export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify
   }
   if(!event.isPrimary||event.button!==0)return true;
   const scene=sceneFor(p,l),handles=strokeHandles(scene,l,mode),radius=(event.pointerType==='touch'?18:10)/Math.max(.01,scale);
-  const handle=handles.find(h=>Math.hypot(h.x-point.x,h.y-point.y)<=radius);
-  const selectedBounds=boundsOf(scene.items.filter(i=>i.type==='glyph'&&glyphSelection(mode).includes(i.index)));
+  const handle=nearestStrokeHandle(handles,point,radius);
+  const selectedBounds=boundsOf(selectedSceneItems(scene,mode));
   let operation='move',picked=null;
   if(handle){operation=handle.kind;mode.pointSelection=event.shiftKey?[...(mode.pointSelection||[]).filter(h=>h.kind!==handle.kind||h.index!==handle.index),handle]:[handle];if(handle.kind==='curve')mode.strokePoint=handle.index;else mode.widthIndex=handle.index;}
   else if(selectedBounds&&Math.hypot(point.x-selectedBounds.maxX,point.y-selectedBounds.maxY)<=radius)operation='scale';
@@ -42,12 +48,13 @@ export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify
         const group=sfxResolvedGroups(scene,l.lettering).find(g=>g.members.includes(picked.index));mode.indices=group?.members??[picked.index];mode.selected=picked.index;
       }else if(event.shiftKey)selectGlyph(mode,picked.index,{toggle:true});
       else if(event.altKey||!glyphSelection(mode).includes(picked.index))selectGlyph(mode,picked.index);else mode.selected=picked.index;
-      mode.strokeRuns=[];
+      mode.strokeRuns=[];mode.editMode='glyph';mode.pointSelection=[];
     }else if(picked?.type==='stroke'){
-      mode.strokeRun=picked.stroke.runStart;mode.strokeRuns=event.shiftKey?[...new Set([...(mode.strokeRuns||[]),picked.stroke.runStart])]:[picked.stroke.runStart];mode.indices=[];mode.selected=null;operation='stroke';
+      mode.strokeRun=picked.stroke.runStart;mode.strokeRuns=event.shiftKey?[...new Set([...(mode.strokeRuns||[]),picked.stroke.runStart])]:[picked.stroke.runStart];mode.indices=[];mode.selected=null;mode.editMode='glyph';mode.pointSelection=[];operation='move';
     }else{operation=event.pointerType==='touch'&&mode.selectionTool!=='lasso'&&mode.selectionTool!=='rectangle'?'pan':mode.selectionTool==='lasso'?'lasso':'rectangle';if(!event.shiftKey){mode.indices=[];mode.selected=null;mode.strokeRuns=[];}}
   }
-  const gesture=p.glyphDrag={id:event.pointerId,anchor:point,screen:{x:event.clientX,y:event.clientY},operation,narrowOnClick:picked?.type==='glyph'&&!event.shiftKey&&mode.priority!=='group'&&glyphSelection(mode).length>1,handle,scene,selection:glyphSelection(mode),before:structuredClone(l),undo:p.undo.length,redo:p.redo.slice(),done:p.done,edited:p.edited,region:[point],copy:(event.ctrlKey||event.metaKey)&&operation==='move',scrollX:p.canvas.parentElement.scrollLeft,scrollY:p.canvas.parentElement.scrollTop};
+  const strokeRuns=mode.editMode==='glyph'?[...(mode.strokeRuns||[])]:[];
+  const gesture=p.glyphDrag={id:event.pointerId,anchor:point,screen:{x:event.clientX,y:event.clientY},operation,narrowOnClick:picked?.type==='glyph'&&!event.shiftKey&&mode.priority!=='group'&&glyphSelection(mode).length>1,handle,scene,selection:glyphSelection(mode),strokeRuns,before:structuredClone(l),undo:p.undo.length,redo:p.redo.slice(),done:p.done,edited:p.edited,region:[point],copy:(event.ctrlKey||event.metaKey)&&operation==='move'&&!strokeRuns.length,scrollX:p.canvas.parentElement.scrollLeft,scrollY:p.canvas.parentElement.scrollTop};
   if(event.pointerType==='touch')gesture.longPress=setTimeout(()=>{if(p.glyphDrag===gesture&&!gesture.changed)magnify?.();},450);
   p.canvas.setPointerCapture(event.pointerId);p.canvas.focus({preventScroll:true});render?.();return true;
 }
@@ -70,11 +77,15 @@ export function moveLetteringGesture(p,l,mode,event,point,{checkpoint,render}={}
   if(mode.snap){dx=Math.round(dx/5)*5;dy=Math.round(dy/5)*5;}
   if(event.shiftKey&&g.operation==='move'){if(Math.abs(dx)>Math.abs(dy))dy=0;else dx=0;}
   if(['move','scale','rotate'].includes(g.operation)){
-    let transform={dx,dy};
-    if(g.operation!=='move'){const bounds=boundsOf(g.scene.glyphs.filter(i=>g.selection.includes(i.index))),center={x:(bounds.minX+bounds.maxX)/2,y:(bounds.minY+bounds.maxY)/2};
+    let transform={dx,dy},center=null;
+    if(g.operation!=='move'){const bounds=boundsOf(selectedSceneItems(g.scene,{indices:g.selection,selected:g.selection.at(-1),editMode:'glyph',strokeRuns:g.strokeRuns}));if(!bounds)return true;center={x:(bounds.minX+bounds.maxX)/2,y:(bounds.minY+bounds.maxY)/2};
       transform=g.operation==='rotate'?{rotation:(Math.atan2(point.y-center.y,point.x-center.x)-Math.atan2(g.anchor.y-center.y,g.anchor.x-center.x))*180/Math.PI}:{scaleX:Math.max(.05,Math.min(20,(point.x-center.x)/(g.anchor.x-center.x||1))),scaleY:Math.max(.05,Math.min(20,(point.y-center.y)/(g.anchor.y-center.y||1)))};
     }
-    transformGlyphSelection(l,g.selection,g.scene,transform);
+    const withCenter=g.strokeRuns.length?{...transform,center:center??{x:0,y:0}}:transform;
+    const strokeMembers=new Set(l.lettering.strokes.filter(run=>run.mode==='continuous'&&g.strokeRuns.includes(run.runStart)).flatMap(run=>Array.from({length:run.runLength},(_,i)=>run.runStart+i)));
+    const glyphSelectionIndices=g.selection.filter(index=>!strokeMembers.has(index));
+    if(glyphSelectionIndices.length)transformGlyphSelection(l,glyphSelectionIndices,g.scene,withCenter);
+    if(g.strokeRuns.length)transformStrokeSelection(l,g.strokeRuns,g.scene,{...transform,center:center??{x:0,y:0}});
   }else if(g.operation==='stroke'){
     for(const run of l.lettering.strokes.filter(s=>(mode.strokeRuns||[]).includes(s.runStart))){const old=strokeFrame(run,g.scene.positions,{vertical:l.vertical,size:l.size});if(!old)continue;for(const side of ['start','end']){const origin=side==='start'?old.start:old.end;run[side].detached=true;run[side].fixedPosition={x:origin.x+dx,y:origin.y+dy};}}
   }else{
@@ -110,11 +121,18 @@ export function drawLetteringOverlay(ctx,l,mode,scene,scale,gesture){
   ctx.strokeStyle='#00bfff';ctx.fillStyle='#182d3b';ctx.lineWidth=2/scale;ctx.setLineDash([5/scale,3/scale]);
   const selected=scene.items.filter(i=>i.type==='glyph'?glyphSelection(mode).includes(i.index):(mode.strokeRuns||[]).includes(i.stroke.runStart));
   for(const item of selected){const b=item.bounds;ctx.strokeRect(b.minX-3/scale,b.minY-3/scale,b.maxX-b.minX+6/scale,b.maxY-b.minY+6/scale);}
-  const bounds=boundsOf(selected.filter(i=>i.type==='glyph')),radius=(mode.touch?12:7)/scale;ctx.setLineDash([]);
-  if(bounds){ctx.fillRect(bounds.maxX-radius,bounds.maxY-radius,radius*2,radius*2);ctx.strokeRect(bounds.maxX-radius,bounds.maxY-radius,radius*2,radius*2);ctx.beginPath();ctx.arc((bounds.minX+bounds.maxX)/2,bounds.minY-25/scale,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
-  for(const h of strokeHandles(scene,l,mode)){ctx.fillStyle=h.kind==='curve'?'#00bfff':'#ffba66';ctx.beginPath();ctx.arc(h.x,h.y,radius,0,Math.PI*2);ctx.fill();ctx.stroke();}
+  const boundsItems=mode.editMode==='glyph'?selected:selected.filter(i=>i.type==='glyph');
+  const bounds=boundsOf(boundsItems),boxRadius=(mode.touch?12:7)/scale,pointRadius=boxRadius/2;ctx.setLineDash([]);
+  if(bounds){ctx.fillRect(bounds.maxX-boxRadius,bounds.maxY-boxRadius,boxRadius*2,boxRadius*2);ctx.strokeRect(bounds.maxX-boxRadius,bounds.maxY-boxRadius,boxRadius*2,boxRadius*2);ctx.beginPath();ctx.arc((bounds.minX+bounds.maxX)/2,bounds.minY-25/scale,boxRadius,0,Math.PI*2);ctx.fill();ctx.stroke();}
   const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun),frame=run&&strokeFrame(run,scene.positions,{vertical:l.vertical,size:l.size});
   if(frame&&mode.editMode!=='glyph'){ctx.strokeStyle='#00bfff88';ctx.beginPath();run.path.points.forEach((p,i)=>{const q=pathToLocal(frame,p);if(i)ctx.lineTo(q.x,q.y);else ctx.moveTo(q.x,q.y);});ctx.stroke();}
+  const selectedCurves=mode.pointSelection?.filter(h=>h.kind==='curve')??(mode.strokePoint==null?[]:[{run:mode.strokeRun,index:mode.strokePoint}]);
+  const handles=strokeHandles(scene,l,mode),isSelected=h=>h.kind==='curve'&&selectedCurves.some(point=>point.run===h.run&&point.index===h.index);
+  for(const h of [...handles.filter(h=>!isSelected(h)),...handles.filter(isSelected)]){
+    const active=isSelected(h);
+    ctx.fillStyle=active?'#ef4b91':h.kind==='curve'?'#00bfff':'#ffba66';ctx.strokeStyle=active?'#762543':'#00bfff';
+    ctx.beginPath();ctx.arc(h.x,h.y,pointRadius,0,Math.PI*2);ctx.fill();ctx.stroke();
+  }
   if(gesture?.region?.length>1){ctx.strokeStyle='#00bfff';ctx.beginPath();gesture.region.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.stroke();}
 }
 const node=(tag,text)=>{const n=document.createElement(tag);if(text)n.textContent=text;return n;};
@@ -170,7 +188,7 @@ export function advancedLetteringPanel(p,l,mode,{edit,render,fonts,copyStroke,pa
     action('曲線点を削除','curve-remove',()=>edit(()=>Object.assign(run,removeCurvePoint(run,mode.strokePoint??3))));
     action('線幅点を追加','width-add',()=>edit(()=>Object.assign(run,addWidthPoint(run,(mode.widthT??.5)))));
     action('線幅点を削除','width-remove',()=>edit(()=>Object.assign(run,removeWidthPoint(run,mode.widthIndex??1))));
-    select('線幅点','widthIndex',run.widths.map((_,i)=>[String(i),String(i+1)+'番']),mode.widthIndex??0,value=>{mode.widthIndex=Number(value);const point=run.widths[mode.widthIndex];panel.querySelector('[data-sfx-editor=widthW]').value=point.w;panel.querySelector('[data-sfx-editor=widthT]').value=point.t;panel.querySelector('[data-sfx-editor=widthInterpolation]').value=point.interpolation;panel.querySelector('[data-sfx-editor=widthFixed]').value=String(point.fixed);});
+    select('線幅点','widthIndex',run.widths.map((_,i)=>[String(i),String(i+1)+'番']),mode.widthIndex??0,value=>{mode.widthIndex=Number(value);mode.pointSelection=[{kind:'width',index:mode.widthIndex,run:run.runStart}];if(mode.editMode!=='both')mode.editMode='width';render();});
     const currentKnot=()=>run.widths[Math.min(mode.widthIndex??0,run.widths.length-1)],knot=currentKnot();
     numeric('線幅点の位置','widthT',knot.t,0,1,value=>edit(()=>{const knot=currentKnot(),i=run.widths.indexOf(knot);if(i>0&&i<run.widths.length-1)knot.t=Math.max(run.widths[i-1].t+.001,Math.min(run.widths[i+1].t-.001,value));mode.widthT=value;}));
     numeric('線幅点の太さ','widthW',knot.w,0,500,value=>edit(()=>{currentKnot().w=value;}));
