@@ -12,7 +12,7 @@ const ratioKeys = {w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRa
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
-  balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','vertical','lineAlign','font'],
+  balloon:['speaker','shape','shapeSeed','spikeCount','polygonCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {

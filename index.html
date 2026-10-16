@@ -134,9 +134,11 @@
             <label class="multiline-align-control" data-text-control>改行位置<select data-field="lineAlign"><option value="top">上付き</option><option value="center">中央揃え</option></select></label>
             <label data-text-control>書体<select data-field="font" aria-label="文字の書体"></select></label>
           </div><div class="balloon-style-controls control-grid" hidden>
-            <label class="balloon-shape-control">吹き出し形状<select data-field="shape"><option value="ellipse">楕円</option><option value="distorted-rect">歪み長方形</option><option value="spiky">尖り形</option><option value="rect">長方形</option></select></label>
+            <label class="balloon-shape-control">吹き出し形状<select data-field="shape"><option value="ellipse">楕円</option><option value="distorted-rect">歪み長方形</option><option value="spiky">尖り形</option><option value="polygon">多角形</option><option value="rect">長方形</option></select></label>
             <label class="balloon-distortion-control" hidden>歪み度（<output>55%</output>）<input data-field="distortion" type="range" min="0" max="100" step="1"></label>
             <label data-shape-seed-control hidden>形状seed<input data-field="shapeSeed" type="number" min="0" max="4294967295" step="1"></label><label class="balloon-spike-count-control" hidden>尖りの頂点数<input data-field="spikeCount" type="number" min="6" max="60" step="1"></label>
+            <label data-polygon-control hidden>多角形の頂点数<input data-field="polygonCount" type="number" min="3" max="60" step="1"></label>
+            <button data-polygon-control data-action="randomize-polygon-count" title="3〜60の範囲で現在と異なる頂点数にする" hidden>頂点数をランダム生成</button>
             <button data-shape-seed-control data-action="regenerate-shape" hidden>形状を再生成</button>
             <label>枠線の色<input data-field="borderColor" type="color"></label><label>枠線の太さ（px）<input data-field="borderWidth" type="number" min="0" max="80" step="0.5"></label>
           </div><div class="text-position-controls" hidden><div class="control-grid">
@@ -151,7 +153,7 @@
           </div><div class="balloon-tail-controls control-grid" hidden>
             <label>テール先端X（中心からpx）<input data-field="tailX" type="number" min="-30000" max="30000" step="1"></label><label>テール先端Y（中心からpx）<input data-field="tailY" type="number" min="-30000" max="30000" step="1"></label>
             <label>テール付根の角度 °<input data-field="tailAngle" type="number" min="-180" max="180" step="1"></label><label>テール付根の幅（px）<input data-field="tailWidth" type="number" min="1" max="1000" step="1"></label>
-          </div><p class="balloon-position-note effect-note" hidden>形状は楕円または歪み長方形。歪み度は0〜100%で調整。テールありなら水色の点で先端を移動。</p><p class="effect-note" data-text-control data-ink-control>太さ：負の値で細く／0で書体の標準／正の値で太く。</p><p class="font-note effect-note" hidden></p><p class="font-status" role="status" hidden></p><div class="layer-actions"><button data-action="backmost" title="選択オブジェクトを最背面へ移動">最背面へ</button><button data-action="backward" title="選択オブジェクトを1段背面へ移動">背面へ</button><button data-action="forward" title="選択オブジェクトを1段前面へ移動">前面へ</button><button data-action="frontmost">最前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
+          </div><p class="balloon-position-note effect-note" hidden>形状は楕円・歪み長方形・尖り形・多角形。多角形の頂点数は3〜60で指定・ランダム生成できる。歪み度0%では均等な多角形になる。テールありなら水色の点で先端を移動。</p><p class="effect-note" data-text-control data-ink-control>太さ：負の値で細く／0で書体の標準／正の値で太く。</p><p class="font-note effect-note" hidden></p><p class="font-status" role="status" hidden></p><div class="layer-actions"><button data-action="backmost" title="選択オブジェクトを最背面へ移動">最背面へ</button><button data-action="backward" title="選択オブジェクトを1段背面へ移動">背面へ</button><button data-action="forward" title="選択オブジェクトを1段前面へ移動">前面へ</button><button data-action="frontmost">最前面へ</button><button data-action="center">中央に配置</button></div></fieldset>
         </section>
       </div>
     </article>

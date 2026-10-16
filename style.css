@@ -36,7 +36,7 @@
 
 .balloon-shape-control[hidden]{display:none}
 .balloon-distortion-control[hidden]{display:none}
-.balloon-seed-controls[hidden],.balloon-spike-count-control[hidden],[data-shape-seed-control][hidden]{display:none}
+.balloon-seed-controls[hidden],.balloon-spike-count-control[hidden],[data-shape-seed-control][hidden],[data-polygon-control][hidden]{display:none}
 .balloon-style-controls [data-shape-seed-control]{grid-column:span 2}
 .balloon-seed-controls>button,.speech-style-controls>button{grid-column:1/-1;justify-self:start;font-size:10px;padding:5px 8px}
 .speech-style-controls input[type=color],[data-text-color-control] input[type=color]{height:32px;padding:3px}

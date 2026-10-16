@@ -2,6 +2,8 @@
 
 ローカルリポジトリで作業を継続するエージェント向けの入口。
 
+2026-10-16：吹き出しの多角形モード・3〜60頂点の指定とランダム生成は [ADR-0029](adr/0029-polygon-balloons.md) を参照。保存版は15、ブラウザ検証は `npm run test:polygon-browser`。
+
 2026-10-16：画像別JSON下書きの自動取り込み・配置は [ADR-0028](adr/0028-annotation-draft-import.md) を参照。対応する外部ファイル名は `画像のファイル名.jpg.json`。検証は `npm run test:annotation-drafts`。
 
 | 文書 | 用途 |

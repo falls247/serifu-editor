@@ -7,7 +7,7 @@ import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
 import { isTextColor } from './colors.js';
-export const PROJECT_VERSION=14;
+export const PROJECT_VERSION=15;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
@@ -45,7 +45,7 @@ function normalizeTextLayer(input, version) {
   if(input?.kind==='balloon'){
     const shapeSeed=input.shapeSeed??balloonSeedFromId(input.id);
     input={textOffsetX:0,textOffsetY:0,padding:0,...input,...normalizeBrush(input),distortion:input.distortion===undefined?50:input.distortion,text:input.text===undefined?'':input.text,speaker:input.speaker===undefined?'male':input.speaker,lineAlign:input.lineAlign??'top',
-      spikeCount:input.spikeCount===undefined?defaultSpikeCount(shapeSeed):input.spikeCount,...speechColors(input),
+      spikeCount:input.spikeCount===undefined?defaultSpikeCount(shapeSeed):input.spikeCount,polygonCount:input.polygonCount===undefined?6:input.polygonCount,...speechColors(input),
       size:input.size===undefined?40:input.size,outline:input.outline===undefined?4:input.outline,thickness:input.thickness===undefined?0:input.thickness,
       vertical:input.vertical===undefined?true:input.vertical,font:input.font===undefined?'sans':input.font,shadowEnabled:input.shadowEnabled??false,shadowColor:input.shadowColor??'#222222',shadowBlur:input.shadowBlur??12,shadowOffsetX:input.shadowOffsetX??6,shadowOffsetY:input.shadowOffsetY??6,shadowOpacity:input.shadowOpacity??45,borderStyle:input.borderStyle??'solid',brushRoughness:input.brushRoughness??50};
     if(version<4)throw new Error('吹き出しはバージョン4以降の編集データに対応');
@@ -57,7 +57,7 @@ function normalizeTextLayer(input, version) {
     if(typeof input.tail!=='boolean')throw new Error('吹き出しのテール設定が不正');
     if(version<11&&input.sfxOrder!==undefined&&!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しの重なり設定が不正');
     const shape=input.shape??'ellipse';
-    if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295||!Number.isInteger(input.spikeCount))throw new Error('吹き出しの形状が不正');
+    if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295||!Number.isInteger(input.spikeCount)||!Number.isInteger(input.polygonCount))throw new Error('吹き出しの形状が不正');
     if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!(Object.hasOwn(FONT_CHOICES,input.font)||hasSessionFont(input.font))||!['top','center'].includes(input.lineAlign))throw new Error('吹き出しのセリフ設定が不正');
     if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<0||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
     return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,...normalizeBrush(input),shadowEnabled:input.shadowEnabled,shadowColor:input.shadowColor,borderStyle:input.borderStyle,text:input.text,speaker:input.speaker,...speechColors(input),size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};

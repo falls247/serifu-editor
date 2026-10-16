@@ -2,6 +2,7 @@ import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
 const limit=(value,min,max)=>Math.max(min,Math.min(max,value));
 const FULL_TURN=Math.PI*2;
 const spikeCache=new Map();
+const polygonCache=new Map();
 
 function seededRandom(seed) {
   let state=seed>>>0;
@@ -51,8 +52,39 @@ function spikeRadius(layer,angle) {
   return (u*u*a.x+2*u*t*c.x+t*t*b.x)*cosine+(u*u*a.y+2*u*t*c.y+t*t*b.y)*sine;
 }
 
-export const BALLOON_LIMITS=Object.freeze({textOffsetX:[-30000,30000],textOffsetY:[-30000,30000],padding:[0,2000],transparency:[0,100],borderWidth:[0,80],distortion:[0,100],spikeCount:[6,60],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
-export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形',spiky:'尖り形'});
+function polygonShape(layer) {
+  const seed=layer.shapeSeed>>>0,amount=(layer.distortion??50)/100,count=layer.polygonCount??6,key=seed+':'+amount+':'+count;
+  if(polygonCache.has(key))return polygonCache.get(key);
+  const random=seededRandom(seed),phase=random()*FULL_TURN,step=FULL_TURN/count;
+  const vertices=Array.from({length:count},(_,index)=>{
+    // Bounded angular jitter keeps every gap below half a turn, even for triangles.
+    // The centre stays inside, so tails and radial hit tests use the same edges.
+    const angle=index*step+(index?amount*(random()-.5)*step*.36:0),radius=1+amount*(random()-.5)*.32;
+    return {angle,x:radius*Math.cos(angle),y:radius*Math.sin(angle)};
+  });
+  vertices.push({...vertices[0],angle:FULL_TURN});
+  const shape={phase,vertices};polygonCache.set(key,shape);
+  if(polygonCache.size>64)polygonCache.delete(polygonCache.keys().next().value);
+  return shape;
+}
+
+function polygonRadius(layer,angle) {
+  const {phase,vertices}=polygonShape(layer),relative=((angle-phase)%FULL_TURN+FULL_TURN)%FULL_TURN;
+  let low=0,high=vertices.length-2;
+  while(low<high){const middle=(low+high)>>>1;if(relative<vertices[middle+1].angle)high=middle;else low=middle+1;}
+  const a=vertices[low],b=vertices[low+1],cosine=Math.cos(relative),sine=Math.sin(relative);
+  const ca=a.x*sine-a.y*cosine,cb=b.x*sine-b.y*cosine,t=limit(ca/(ca-cb),0,1);
+  return (a.x+(b.x-a.x)*t)*cosine+(a.y+(b.y-a.y)*t)*sine;
+}
+
+export const BALLOON_LIMITS=Object.freeze({textOffsetX:[-30000,30000],textOffsetY:[-30000,30000],padding:[0,2000],transparency:[0,100],borderWidth:[0,80],distortion:[0,100],spikeCount:[6,60],polygonCount:[3,60],tailX:[-30000,30000],tailY:[-30000,30000],tailAngle:[-180,180],tailWidth:[1,1000],shadowBlur:[0,100],shadowOffsetX:[-100,100],shadowOffsetY:[-100,100],shadowOpacity:[0,100],brushRoughness:[0,100]});
+export const BALLOON_SHAPES=Object.freeze({ellipse:'楕円', 'distorted-rect':'歪み長方形',spiky:'尖り形',polygon:'多角形'});
+
+export function randomPolygonCount(current) {
+  const [min,max]=BALLOON_LIMITS.polygonCount,exclude=Number.isInteger(current)&&current>=min&&current<=max;
+  const count=min+Math.floor(Math.random()*(max-min+1-(exclude?1:0)));
+  return exclude&&count>=current?count+1:count;
+}
 
 export function balloonSeedFromId(id) {
   let hash=2166136261;
@@ -72,7 +104,7 @@ export function newBalloon(width,height,speaker='male') {
     text:'',speaker,textColor:null,textOutlineColor:'#ffffff',size:limit(width*.055,8,500),outline:limit(width*.006,1,80),thickness:0,vertical:true,lineAlign:'top',font:'sans',textOffsetX:0,textOffsetY:0,padding:0,
     color:'#ffffff',transparency:25,borderColor:'#111111',borderWidth:limit(width*.003,.5,80),
     ...brushDefaults(id),shadowEnabled:false,shadowColor:'#222222',shadowBlur:12,shadowOffsetX:6,shadowOffsetY:6,shadowOpacity:45,borderStyle:'solid',brushRoughness:50,
-    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),
+    shape:'distorted-rect',shapeSeed:balloonSeedFromId(id),spikeCount:12,polygonCount:6,distortion:50,tail:false,tailX:0,tailY:h*.85,tailAngle:90,tailWidth:limit(width*.08,1,1000),
   };
 }
 
@@ -88,6 +120,7 @@ function boundaryScale(layer,angle) {
   if(layer.shape==='spiky'){
     return spikeRadius(layer,angle);
   }
+  if(layer.shape==='polygon')return polygonRadius(layer,angle);
   if(layer.shape!=='distorted-rect')return 1;
   const cosine=Math.cos(angle),sine=Math.sin(angle),power=5;
   const roundedRect=(Math.abs(cosine)**power+Math.abs(sine)**power)**(-1/power);
@@ -129,6 +162,16 @@ export function balloonHit(layer,point) {
 
 export function balloonOutline(layer) {
   const g=balloonGeometry(layer);
+  if(layer.shape==='polygon'){
+    const {phase,vertices}=polygonShape(layer);
+    const corners=vertices.slice(0,-1).map(vertex=>{
+      const wrapped=(vertex.angle+phase)%FULL_TURN,angle=wrapped+Math.ceil((g.start-wrapped)/FULL_TURN)*FULL_TURN;
+      return {angle,point:{x:layer.w/2*(vertex.x*Math.cos(phase)-vertex.y*Math.sin(phase)),y:layer.h/2*(vertex.x*Math.sin(phase)+vertex.y*Math.cos(phase))}};
+    });
+    if(!g.hasTail){const points=corners.map(corner=>corner.point);return [...points,points[0]];}
+    const points=corners.filter(corner=>corner.angle>g.start&&corner.angle<g.end).sort((a,b)=>a.angle-b.angle).map(corner=>corner.point);
+    return [g.a,...points,g.b,g.tip,g.a];
+  }
   const from=g.hasTail?g.start:0,to=g.hasTail?g.end:FULL_TURN,steps=Math.max(2,Math.ceil((to-from)/(FULL_TURN/360)));
   const angles=Array.from({length:steps+1},(_,index)=>from+(to-from)*index/steps);
   if(layer.shape==='spiky'){
@@ -149,7 +192,7 @@ export function balloonOutline(layer) {
 function balloonPath(ctx,layer) {
   const g=balloonGeometry(layer);
   ctx.beginPath();
-  if(layer.shape==='distorted-rect'||layer.shape==='spiky'){
+  if(layer.shape==='distorted-rect'||layer.shape==='spiky'||layer.shape==='polygon'){
     const points=balloonOutline(layer);ctx.moveTo(points[0].x,points[0].y);
     for(const point of points.slice(1))ctx.lineTo(point.x,point.y);
   }else if(g.hasTail){ctx.ellipse(0,0,g.rx,g.ry,0,g.start,g.end);ctx.lineTo(g.tip.x,g.tip.y);ctx.lineTo(g.a.x,g.a.y);}

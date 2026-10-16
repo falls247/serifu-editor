@@ -10,7 +10,7 @@ import { textGlyphs,sfxScene,sfxItemHit,layerBounds } from './renderer.js';
 import { draftFileName,parseAnnotationDraft,createDraftLayers,layoutDraftLayers } from './annotation-drafts.js';
 import { startLettering, defaultGlyph, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
-import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
+import { BALLOON_LIMITS, BALLOON_SHAPES, randomPolygonCount } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
@@ -371,7 +371,7 @@ function drawPage(p) {
 }
 
 function layerSummary(layer) {
-  if(layer.kind==='balloon')return `吹き出し：${layer.shape==='distorted-rect'?'歪み長方形':layer.shape==='spiky'?'尖り形':'楕円'}`;
+  if(layer.kind==='balloon')return `吹き出し：${BALLOON_SHAPES[layer.shape]??'楕円'}`;
   return layer.text||'（未入力）';
 }
 
@@ -673,12 +673,13 @@ function updateControls(p) {
   const shapeControl=controls.querySelector('.balloon-shape-control'),shapeSelect=shapeControl.querySelector('select');
   shapeControl.hidden=!balloon&&!caption;
   shapeControl.firstChild.textContent=caption?'キャプション形状':'吹き出し形状';
-  for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!['ellipse','distorted-rect','spiky'].includes(option.value);
-  const showDistortion=balloon?['distorted-rect','spiky'].includes(l.shape):caption&&l.shape==='spiky';
+  for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!Object.hasOwn(BALLOON_SHAPES,option.value);
+  const showDistortion=balloon?['distorted-rect','spiky','polygon'].includes(l.shape):caption&&l.shape==='spiky';
   controls.querySelector('.balloon-distortion-control').hidden=!showDistortion;
-  const showSeed=balloon&&['distorted-rect','spiky'].includes(l.shape);
+  const showSeed=balloon&&['distorted-rect','spiky','polygon'].includes(l.shape);
   for(const node of controls.querySelectorAll('[data-shape-seed-control]'))node.hidden=!showSeed;
   controls.querySelector('.balloon-spike-count-control').hidden=!balloon||l.shape!=='spiky';
+  for(const node of controls.querySelectorAll('[data-polygon-control]'))node.hidden=!balloon||l.shape!=='polygon';
   controls.querySelector('.balloon-distortion-control output').value=`${numericValue(l?.distortion??55,'distortion')}%`;
   controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
@@ -724,8 +725,9 @@ function updateControls(p) {
       }
     }
     if(layer?.kind==='balloon'){
-      card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky'].includes(layer.shape);
+      card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky','polygon'].includes(layer.shape);
       card.querySelector('.balloon-spike-count-control').hidden=layer.shape!=='spiky';
+      for(const node of card.querySelectorAll('[data-polygon-control]'))node.hidden=layer.shape!=='polygon';
     }
     if(layer)for(const input of card.querySelectorAll(CONTROL_SELECTOR)){
       if(input===document.activeElement)continue;
@@ -1029,7 +1031,7 @@ function textPositionControls(layer){
   return grid;
 }
 const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
-const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','brushSeed','glyphSeed',
+const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','polygonCount','brushSeed','glyphSeed',
   'x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth',
   'textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth',
   'shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY']);
@@ -1406,12 +1408,14 @@ function renderCards(p) {
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
       card.append(grid,brushControls(l));
-      const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky'].includes(l.shape);
-      for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount]]){
+      const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky','polygon'].includes(l.shape);
+      for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount],['polygonCount','多角形の頂点数',...BALLOON_LIMITS.polygonCount]]){
         const label=element('label',field==='spikeCount'?'balloon-spike-count-control':'',title),input=element('input');input.type='number';input.dataset.field=field;input.min=String(min);input.max=String(max);input.step='1';input.value=String(l[field]);
-        label.hidden=field==='spikeCount'&&l.shape!=='spiky';label.append(input);shapeControls.append(label);
+        if(field==='polygonCount')label.dataset.polygonControl='';
+        label.hidden=field==='spikeCount'&&l.shape!=='spiky'||field==='polygonCount'&&l.shape!=='polygon';label.append(input);shapeControls.append(label);
       }
-      shapeControls.append(button('regenerate-shape','形状を再生成','形状seedを変更して別の歪み・尖り方にする'));card.append(shapeControls);
+      const randomCount=button('randomize-polygon-count','頂点数をランダム生成','3〜60の範囲で現在と異なる頂点数にする');randomCount.dataset.polygonControl='';randomCount.hidden=l.shape!=='polygon';
+      shapeControls.append(randomCount,button('regenerate-shape','形状を再生成','形状seedを変更して別の歪み・尖り方にする'));card.append(shapeControls);
        const shadowLabel=element('label','tail-toggle','影を付ける'),shadowToggle=element('input');
        shadowToggle.type='checkbox';shadowToggle.dataset.field='shadowEnabled';shadowToggle.checked=l.shadowEnabled??false;
        shadowLabel.prepend(shadowToggle);card.append(shadowLabel);
@@ -1931,6 +1935,8 @@ $('deck').addEventListener('click', async event => {
     edit(p,()=>{l.textureSeed=(Math.imul(l.textureSeed??0,1664525)+1013904223)>>>0;l.presetId=null;});
   } else if (action === 'regenerate-shape' && l?.kind==='balloon') {
     edit(p,()=>{l.shapeSeed=(Math.imul(l.shapeSeed,1664525)+1013904223)>>>0;l.presetId=null;});
+  } else if (action === 'randomize-polygon-count' && l?.kind==='balloon' && l.shape==='polygon') {
+    edit(p,()=>{l.polygonCount=randomPolygonCount(l.polygonCount);l.presetId=null;});
   } else if (action === 'reset-text-color' && ['dialogue','balloon'].includes(l?.kind)) {
     edit(p,()=>{l.textColor=null;l.presetId=null;});
   } else if (action === 'duplicate' && l) {
