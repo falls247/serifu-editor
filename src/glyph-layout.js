@@ -110,13 +110,13 @@ export function opticalTextGlyphs(ctx,layer,sizeAt){
   const description=fontDescription(layer),key=JSON.stringify([description,layer.text,layer.size,layer.effect,layer.taperRate,layer.vertical,layer.lineAlign,layer.w,layer.h,layer.thickness,layer.outline,layer.stretchX,layer.stretchY,layer.skew,layer.distortion,layer.warp,layer.sizeVariation,layer.horizontalJitter,layer.glyphSeed,...Object.keys(PLACEMENT_DEFAULTS).map(k=>layer[k])]);
   if(layouts.has(key)){const entry=layouts.get(key);layouts.delete(key);layouts.set(key,entry);return entry;}
   const vertical=layer.vertical,seed=layer.glyphSeed??inkSeed(layer.text),strength=layer.kerningMode==='optical'?(layer.kerningStrength??0)/100:0;
-  let index=0;const lines=layer.text.split('\n').map(line=>graphemes(line).map(char=>{
+  let index=0,sourceIndex=0;const lines=layer.text.split('\n').map(line=>{const letters=graphemes(line).map(char=>{
     const i=index++,baseSize=sizeAt(layer,i),variation=glyphVariation(seed,i,layer.sizeVariation||0,layer.horizontalJitter||0,{rotationJitter:layer.rotationJitter,verticalJitter:layer.verticalJitter,spacingJitter:layer.spacingJitter,correlated:true}),size=Math.max(8,baseSize*variation.scale),angle=(vertical?verticalRotation(char):0)+variation.rotation;
-    const glyph={char,index:i,baseSize,size,angle,shift:0,x:0,y:0,variation};
+    const glyph={char,sourceIndex:sourceIndex++,index:i,baseSize,size,angle,shift:0,x:0,y:0,variation};
     glyph.geometry=measureGlyph(ctx,{...layer,size},char,angle);glyph.width=glyph.geometry.advance;
     glyph.dx=variation.shift*size*layer.stretchX/100;glyph.dy=variation.vertical*size*layer.stretchY/100;
     return glyph;
-  }));
+  });sourceIndex++;return letters;});
   const axis=vertical?'y':'x',cross=vertical?'x':'y',capacity=(vertical?layer.h:layer.w)*.88,runs=[];
   for(const line of lines){
     let run=[];

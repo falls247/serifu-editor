@@ -1,8 +1,29 @@
-import { clamp } from './renderer.js';
-import { uncroppedImageEdit } from './image-edit.js';
+import { clamp, sfxScene } from './renderer.js';
+import { imagePoint, uncroppedImageEdit } from './image-edit.js';
 import { getPreviewCanvas, releasePreviewCanvas } from './preview-render.js';
 
 let lens = null;
+
+function sfxFocus(page) {
+  const layer = page.layers.find(layer => layer.id === page.selectedId);
+  if (layer?.kind !== 'sfx') return null;
+  let point = { x: 0, y: 0 };
+  if (layer.lettering?.enabled) {
+    const scene = sfxScene(page.canvas.getContext('2d'), layer), mode = page.glyphEdit;
+    const indices = new Set(mode?.id === layer.id ? mode.indices ?? [mode.selected] : []);
+    const chosen = scene.items.filter(item => item.members.some(index => indices.has(index)) ||
+      mode?.id === layer.id && item.type === 'stroke' && mode.strokeRuns?.includes(item.stroke.runStart));
+    const items = chosen.length ? chosen : scene.items;
+    if (items.length) point = {
+      x: (Math.min(...items.map(item => item.bounds.minX)) + Math.max(...items.map(item => item.bounds.maxX))) / 2,
+      y: (Math.min(...items.map(item => item.bounds.minY)) + Math.max(...items.map(item => item.bounds.maxY))) / 2,
+    };
+  }
+  const angle = layer.rotation * Math.PI / 180;
+  return imagePoint({ x: layer.x + point.x * Math.cos(angle) - point.y * Math.sin(angle),
+    y: layer.y + point.x * Math.sin(angle) + point.y * Math.cos(angle) }, page.img.width, page.img.height,
+    page.cropDraft ? uncroppedImageEdit(page.img.width, page.img.height, page.imageEdit) : page.imageEdit);
+}
 
 function place(current) {
   const width = current.frame.clientWidth, height = current.frame.clientHeight;
@@ -41,7 +62,16 @@ async function render(current) {
     const source = await getPreviewCanvas(page.cropDraft
       ? { ...page, imageEdit: uncroppedImageEdit(page.img.width, page.img.height, page.imageEdit) } : page);
     if (!source || lens !== current || token !== current.generation) return;
-    current.source = source; current.message.textContent = ''; place(current);
+    current.source = source; current.message.textContent = '';
+    if (current.focusPoint) {
+      const { canvas, frame } = current;
+      current.panX = clamp((current.focusPoint.x - canvas.clientWidth / 2) / Math.max(1, source.width - canvas.clientWidth), 0, 1);
+      current.panY = clamp((current.focusPoint.y - canvas.clientHeight / 2) / Math.max(1, source.height - canvas.clientHeight), 0, 1);
+      current.x = current.panX * Math.max(0, frame.clientWidth - current.width);
+      current.y = current.panY * Math.max(0, frame.clientHeight - current.height);
+      current.focusPoint = null;
+    }
+    place(current);
   } catch (error) {
     if (lens === current && token === current.generation) current.message.textContent = `表示できなかった: ${error.message}`;
   } finally {
@@ -76,7 +106,8 @@ export function toggleMagnifier(page, trigger) {
   frame.append(element);
   const current = lens = { page, trigger, frame, element, canvas: element.querySelector('canvas'),
     message: element.querySelector('.magnifier-status'), width: Math.min(280, frame.clientWidth - 24),
-    height: Math.min(220, frame.clientHeight - 24), x: 12, y: 12, panX: .5, panY: .5, generation: 0 };
+    height: Math.min(220, frame.clientHeight - 24), x: 12, y: 12, panX: .5, panY: .5, generation: 0,
+    focusPoint: sfxFocus(page) };
   trigger.setAttribute('aria-pressed', 'true');
   const resize = element.querySelector('.magnifier-resize');
   element.querySelector('.magnifier-close').onclick = () => closeMagnifier(page, true);

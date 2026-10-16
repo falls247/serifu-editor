@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {readFile,mkdir} from 'node:fs/promises';
@@ -67,7 +68,7 @@ try{
   const actual=await page.evaluate(async base64=>{const image=new Image();image.src=`data:image/png;base64,${base64}`;await image.decode();const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;canvas.getContext('2d').drawImage(image,0,0);return canvas.toDataURL();},png.toString('base64'));
   assert.equal(actual,expected,'worker PNG uses the same order as preview renderer');
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');
-  await page.waitForFunction(async version=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.version===version;},PROJECT_VERSION);
+  await waitForAsync(page,async version=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.version===version;},PROJECT_VERSION);
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===1&&!document.querySelector('#projectLoad').disabled);
   assert.deepEqual(await order(),['balloon','dialogue','caption','sfx']);assert.ok(await redCount()>100,'draft recovery retains SFX in front');

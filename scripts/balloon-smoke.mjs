@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {PROJECT_VERSION} from '../src/model.js';
 import { spawn } from 'node:child_process';
@@ -124,7 +125,9 @@ try {
   await page.evaluate(()=>window.exportFontLoads.shift()());await page.waitForFunction(()=>window.exportFontLoads.length===1);
   await page.evaluate(()=>window.exportFontLoads.shift()());await page.evaluate(()=>document.fonts.load=window.originalFontLoad);single=await saving;
   assert.equal(downloads.length,2);assert.equal(single.suggestedFilename(),'001_01-source.png');
-  assert.equal((await decodedSingle(single)).src,preview,'single PNG must include the supplied font and colored balloon, without selection handles');
+  const actualSingle=(await decodedSingle(single)).src;
+  if(actualSingle!==preview){await mkdir('artifacts',{recursive:true});await writeFile('artifacts/balloon-before-export.png',Buffer.from(preview.split(',')[1],'base64'));await writeFile('artifacts/balloon-actual-export.png',Buffer.from(actualSingle.split(',')[1],'base64'));}
+  assert.equal(actualSingle,preview,'single PNG must include the supplied font and colored balloon, without selection handles');
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);
   await page.evaluate(()=>document.fonts.load=()=>Promise.reject(new Error('simulated font load failure')));
   await source.locator('[data-action=save-image]').click();await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled&&document.querySelector('#status').textContent.includes('simulated font load failure'));
@@ -158,9 +161,9 @@ try {
   await page.click('#saveEdited');await page.waitForFunction(()=>window.outputs.length===3&&window.outputs[2].files['serifu-project.json']&&!document.querySelector('#projectLoad').disabled);
   const filtered=await page.evaluate(()=>window.outputs[2].files['serifu-project.json']);assert.deepEqual(filtered.pages.map(page=>page.name),['01-source.png','03-portrait.png']);
   await source.locator('[data-action=cut-all]').click();assert.equal(await source.locator('.layer-card').count(),0);
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].edited===false&&meta.pages[0].layers.length===0;});
+  await page.click('#temporarySave');await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js'),{PROJECT_VERSION}=await import('./src/model.js');const meta=await getDraftMeta();return meta?.version===PROJECT_VERSION&&meta.pages[0].edited===false&&meta.pages[0].layers.length===0;});
   await source.locator('[data-action=undo]').click();assert.equal(await source.locator('[data-kind=balloon]').count(),1);
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.some(layer=>layer.kind==='balloon');});
+  await page.click('#temporarySave');await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.some(layer=>layer.kind==='balloon');});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);
   assert.equal(await source.locator('[data-kind=balloon] [data-field=transparency]').inputValue(),'45');assert.equal(await source.locator('[data-kind=balloon] [data-field=tail]').isChecked(),true);

@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {mkdir,readFile} from 'node:fs/promises';
@@ -83,7 +84,7 @@ try {
   },[(await readFile(await png.path())).toString('base64'),preview]);assert.equal(pngDiff.channels,0,`saved PNG must match the preview pixels: ${JSON.stringify(pngDiff)}`);
   await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);saving=page.waitForEvent('download');await page.click('#projectSave');const json=await saving,projectBytes=await readFile(await json.path()),project=JSON.parse(projectBytes.toString());
   for(const layer of project.pages[0].layers){assert.equal(layer.textOffsetX,-25);assert.equal(layer.textOffsetY,34);assert.equal(layer.padding,layer.kind==='caption'?61:19);}
-  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25&&layer.textOffsetY===34);});
+  await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);await page.click('#temporarySave');await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers.every(layer=>layer.textOffsetX===-25&&layer.textOffsetY===34);});
   await page.reload();await page.waitForSelector('#draftNotice:not([hidden])');await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);
   for(const kind of ['balloon','caption']){const card=source.locator(`[data-kind=${kind}]`);assert.equal(await card.locator('[data-field=textOffsetX]').inputValue(),'-25');assert.equal(await card.locator('[data-field=textOffsetY]').inputValue(),'34');assert.equal(await card.locator('[data-field=padding]').inputValue(),kind==='caption'?'61':'19');}
   await target.locator('canvas.preview').focus();await page.evaluate(()=>document.fonts.ready);assert.equal(await source.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL()),preview);

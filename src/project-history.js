@@ -1,0 +1,333 @@
+// Versioned project vault. Legacy v2 draft stores are retained for safe fallback.
+import {openDraftDatabase} from './storage.js';
+import {assetFromEncoded,maskAssetMetadata,maxMaskPayloadBytes} from './mask-codec.js';
+import {validProjectId} from './project-identity.js';
+import {checkAbort} from './bulk-task.js';
+import {normalizeLayers} from './model.js';
+
+const read=request=>new Promise((resolve,reject)=>{request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+const finished=tx=>new Promise((resolve,reject)=>{tx.oncomplete=()=>resolve();tx.onabort=()=>reject(tx.error||new Error('保存トランザクションが中断'));tx.onerror=()=>{};});
+const digest=async blob=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await blob.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('');
+const snapshotId=()=>crypto.randomUUID();
+const cleanMeta=meta=>structuredClone(meta);
+// Do not retain all Uint8Array payloads while calculating capacity.
+const assetSizes=store=>new Promise((resolve,reject)=>{const rows=[],request=store.openCursor();request.onerror=()=>reject(request.error);request.onsuccess=()=>{const cursor=request.result;if(!cursor){resolve(rows);return;}const item=cursor.value;rows.push({assetId:item.assetId,byteLength:item.byteLength??item.blob?.size??0});cursor.continue();};});
+
+let byteAssetFallback=false;
+function storedAssetBlob(record){
+  if(record?.blob instanceof Blob)return record.blob;
+  if(record?.bytes instanceof Uint8Array&&record.bytes.byteLength===record.byteLength)return new Blob([record.bytes],{type:record.mime||'application/octet-stream'});
+  throw new Error('保存素材のBlob/バイトデータが不足または破損');
+}
+export async function activeProjectSnapshot(){
+  const db=await openDraftDatabase(),tx=db.transaction(['drafts','latest','snapshots'],'readonly'),done=finished(tx);
+  const active=await read(tx.objectStore('drafts').get('active'));
+  const pointer=active?.projectId?await read(tx.objectStore('latest').get(active.projectId)):null;
+  const snapshot=pointer?await read(tx.objectStore('snapshots').get(pointer.snapshotId)):null;
+  await done;
+  if(pointer&&(!snapshot||snapshot.projectId!==active.projectId))throw new Error('最新スナップショットの参照が破損');
+  return snapshot||null;
+}
+export async function projectImageIds(projectId){
+  const snapshot=await latestProjectSnapshot(projectId);
+  return new Set(snapshot?.images.map(record=>record.pageId)||[]);
+}
+export async function latestProjectSnapshot(projectId){
+  const db=await openDraftDatabase(),tx=db.transaction(['latest','snapshots'],'readonly'),done=finished(tx);
+  const pointer=await read(tx.objectStore('latest').get(projectId));
+  const snapshot=pointer?await read(tx.objectStore('snapshots').get(pointer.snapshotId)):null;
+  await done;
+  if(pointer&&(!snapshot||snapshot.projectId!==projectId))throw new Error('最新スナップショットの参照が破損');
+  return snapshot||null;
+}
+export async function projectSnapshotImages(snapshot,ids){
+  if(!snapshot)return [];
+  const byPage=new Map(snapshot.images.map(record=>[record.pageId,record.assetId]));
+  const db=await openDraftDatabase(),tx=db.transaction('imageAssets','readonly'),done=finished(tx);
+  const images=await Promise.all(ids.map(id=>read(tx.objectStore('imageAssets').get(byPage.get(id)))));
+  await done;
+  return images.map((item,i)=>({id:ids[i],blob:storedAssetBlob(item)}));
+}
+export async function projectSnapshotMasks(snapshot,pageIds){
+  if(!snapshot)return [];
+  const included=new Set(pageIds),records=snapshot.masks.filter(record=>included.has(record.pageId));
+  const db=await openDraftDatabase(),tx=db.transaction('maskAssetsV2','readonly'),done=finished(tx);
+  const data=await Promise.all(records.map(record=>read(tx.objectStore('maskAssetsV2').get(record.assetId))));
+  await done;
+  data.forEach(storedAssetBlob);
+  const result=[];
+  for(let i=0;i<data.length;i++){
+    const record=records[i],item=data[i],blob=storedAssetBlob(item);
+    if(blob.size!==item.metadata.byteLength)throw new Error('保存済みマスクのサイズ不一致');
+    const asset=await assetFromEncoded({...item.metadata,id:record.id,data:new Uint8Array(await blob.arrayBuffer())});
+    result.push({pageId:record.pageId,id:record.id,asset});
+  }
+  return result;
+}
+export async function listProjectHistories(projectId){
+  const db=await openDraftDatabase(),tx=db.transaction('history','readonly'),done=finished(tx);
+  const records=await read(tx.objectStore('history').getAll());await done;
+  return records.filter(x=>x.projectId===projectId).sort((a,b)=>b.createdAt-a.createdAt||b.historyId.localeCompare(a.historyId));
+}
+export async function listStoredProjects(){
+  const db=await openDraftDatabase(),tx=db.transaction(['projects','latest'],'readonly'),done=finished(tx);
+  const [projects,latest]=await Promise.all([read(tx.objectStore('projects').getAll()),read(tx.objectStore('latest').getAll())]);await done;
+  const byId=new Map(latest.map(x=>[x.projectId,x]));
+  return projects.map(p=>({...p,latest:byId.get(p.projectId)||null}));
+}
+export async function getStoredSnapshot(snapshotKey){
+  const db=await openDraftDatabase(),tx=db.transaction('snapshots','readonly'),done=finished(tx);
+  const snapshot=await read(tx.objectStore('snapshots').get(snapshotKey));await done;
+  if(!snapshot)throw new Error('指定した復元世代が見つからない');
+  return snapshot;
+}
+export async function saveProjectSnapshot(meta,newImages,{signal,masks=[],fence=null,beforeCommit=null,history=true,_byteAttempt=false}={}){
+  checkAbort(signal);
+  if(!validProjectId(meta?.projectId)||!Array.isArray(meta.pages)||!Number.isFinite(meta.savedAt))throw new Error('プロジェクト保存メタデータが不正');
+  const pageIds=new Set(meta.pages.map(x=>x.id));
+  if(pageIds.size!==meta.pages.length||pageIds.has(undefined))throw new Error('ページIDが重複または欠損');
+  const imageInputs=new Map();
+  for(const image of newImages){
+    checkAbort(signal);
+    if(!pageIds.has(image.id)||!(image.blob instanceof Blob)||imageInputs.has(image.id))throw new Error('画像の参照またはBlobが不正');
+    const hash=await digest(image.blob);imageInputs.set(image.id,{assetId:'image:'+hash+':'+image.blob.type,blob:image.blob,byteLength:image.blob.size,hash});
+  }
+  let decodedBytes=0,compressedBytes=0;for(const record of masks){const asset=record?.asset;maxMaskPayloadBytes(asset);decodedBytes+=asset.bbox.width*asset.bbox.height;compressedBytes+=asset.byteLength;if(!Number.isSafeInteger(decodedBytes)||!Number.isSafeInteger(compressedBytes)||decodedBytes>256*1024**2||compressedBytes>256*1024**2)throw new Error('保存マスクの総量が256MiBを超える');}
+  const maskInputs=new Map(),maskPages=new Set(),maskRefs=[];
+  for(const record of masks){
+    checkAbort(signal);
+    if(!record||!pageIds.has(record.pageId)||record.id!==record.asset?.id)throw new Error('マスク参照が不正');
+    const key=JSON.stringify([record.pageId,record.id]);if(maskPages.has(key))throw new Error('マスク参照の重複');maskPages.add(key);
+    const asset=await assetFromEncoded(record.asset),metadata=maskAssetMetadata(asset);
+    const blob=new Blob([asset.data],{type:'application/octet-stream'});
+    const assetId='mask:'+metadata.sha256+':'+[metadata.imageWidth,metadata.imageHeight,metadata.bbox.x,metadata.bbox.y,metadata.bbox.width,metadata.bbox.height,metadata.codec].join(':');
+    maskInputs.set(assetId,{assetId,blob,metadata,byteLength:blob.size});
+    maskRefs.push({pageId:record.pageId,id:record.id,assetId});
+  }
+  for(const p of meta.pages)for(const effect of p.maskEffects||[])if(!maskPages.has(JSON.stringify([p.id,effect.assetId])))throw new Error('マスク素材が不足');
+  if(byteAssetFallback||_byteAttempt){for(const inputs of [imageInputs,maskInputs])for(const [key,item] of inputs){const {blob,...rest}=item;inputs.set(key,{...rest,mime:blob.type,bytes:new Uint8Array(await blob.arrayBuffer())});}}
+  checkAbort(signal);
+  const db=await openDraftDatabase();
+  if(beforeCommit)fence=await beforeCommit();
+  checkAbort(signal);
+  const tx=db.transaction(['projects','latest','snapshots','history','imageAssets','maskAssetsV2','drafts','locks'],'readwrite'),done=finished(tx);
+  const abort=()=>{try{tx.abort();}catch{}};
+  signal?.addEventListener('abort',abort,{once:true});if(signal?.aborted)abort();
+  try{
+    const [previous,entries,lock,project]=await Promise.all([
+      read(tx.objectStore('latest').get(meta.projectId)),
+      read(tx.objectStore('history').getAll()),
+      read(tx.objectStore('locks').get(meta.projectId)),
+      read(tx.objectStore('projects').get(meta.projectId))
+    ]);
+    if(fence!==null && (!lock||lock.token!==fence.token||lock.owner!==fence.owner||lock.until<Date.now()))throw new Error('編集権を失ったため保存できない');
+    if(fence===null&&lock&&lock.until>Date.now())throw new Error('別のタブが編集中のため保存できない');
+    const prevSnapshot=previous?await read(tx.objectStore('snapshots').get(previous.snapshotId)):null;
+    if(previous&&!prevSnapshot)throw new Error('最新スナップショットの参照が破損');
+    const oldImages=new Map(prevSnapshot?.images.map(record=>[record.pageId,record.assetId])||[]);
+    const imageRefs=meta.pages.map(page=>{
+      const assetId=imageInputs.get(page.id)?.assetId||oldImages.get(page.id);
+      if(!assetId)throw new Error('保存対象の原画像が不足: '+page.name);
+      return {pageId:page.id,assetId};
+    });
+    for(const record of imageRefs){
+      const asset=imageInputs.get(record.pageId);
+      if(!asset&&!await read(tx.objectStore('imageAssets').get(record.assetId)))throw new Error('最新スナップショットの画像参照が破損');
+    }
+    for(const input of imageInputs.values())tx.objectStore('imageAssets').put(input);
+    for(const input of maskInputs.values())tx.objectStore('maskAssetsV2').put(input);
+    const id=snapshotId(),createdAt=Date.now();
+    const snapshot={id,projectId:meta.projectId,createdAt,meta:cleanMeta(meta),images:imageRefs,masks:maskRefs};
+    const own=entries.filter(x=>x.projectId===meta.projectId).sort((a,b)=>b.createdAt-a.createdAt);
+    const prior=own[0];
+    const historySnapshot=prior?await read(tx.objectStore('snapshots').get(prior.snapshotId)):null;
+    const changed=!historySnapshot||JSON.stringify({
+      pages:historySnapshot.meta.pages,preferences:historySnapshot.meta.preferences,images:historySnapshot.images,masks:historySnapshot.masks
+    })!==JSON.stringify({pages:meta.pages,preferences:meta.preferences,images:imageRefs,masks:maskRefs});
+    const shouldHistory=history&&(!prior||createdAt-prior.createdAt>=300000)&&changed;
+    tx.objectStore('snapshots').put(snapshot);
+    tx.objectStore('projects').put({projectId:meta.projectId,name:meta.sourceFolderName||'名称未設定',updatedAt:createdAt,createdAt:project?.createdAt||createdAt});
+    tx.objectStore('latest').put({projectId:meta.projectId,snapshotId:id,revision:meta.revision??0,savedAt:meta.savedAt});
+    tx.objectStore('drafts').put({key:'active',projectId:meta.projectId});
+    if(shouldHistory)tx.objectStore('history').put({historyId:snapshotId(),projectId:meta.projectId,createdAt,snapshotId:id});
+    const kept=shouldHistory?4:5;
+    for(const extra of own.slice(kept))tx.objectStore('history').delete(extra.historyId);
+    await done;
+    return {snapshotId:id,historyCreated:shouldHistory};
+  }catch(error){abort();await done.catch(()=>{});if(!_byteAttempt&&!signal?.aborted&&error.name!=='QuotaExceededError'&&/Blob|File/.test(error.message)){byteAssetFallback=true;return saveProjectSnapshot(meta,newImages,{signal,masks,fence,beforeCommit,history,_byteAttempt:true});}throw signal?.aborted?signal.reason:error;}
+  finally{signal?.removeEventListener('abort',abort);}
+}
+export async function activateStoredProject(projectId,{fence=null}={}){
+  const db=await openDraftDatabase(),tx=db.transaction(['latest','locks','drafts'],'readwrite'),complete=finished(tx);
+  try{
+    const [latest,lock]=await Promise.all([read(tx.objectStore('latest').get(projectId)),read(tx.objectStore('locks').get(projectId))]);
+    if(!latest)throw new Error('指定プロジェクトには最新の保存内容がない');
+    if(fence&&(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<Date.now()))throw new Error('編集権を失っている');
+    tx.objectStore('drafts').put({key:'active',projectId});await complete;
+    return latest;
+  }catch(error){try{tx.abort();}catch{}await complete.catch(()=>{});throw error;}
+}
+export async function restoreProjectHistory(projectId,snapshotKey,{fence=null}={}){
+  const snapshot=await getStoredSnapshot(snapshotKey);
+  if(snapshot.projectId!==projectId)throw new Error('異なるプロジェクトの復元データ');
+  const db=await openDraftDatabase(),tx=db.transaction(['locks','latest','drafts'],'readwrite'),done=finished(tx);
+  try{
+    const lock=await read(tx.objectStore('locks').get(projectId));
+    if(fence!==null&&(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<Date.now()))throw new Error('編集権を失ったため復元できない');
+    if(fence===null&&lock&&lock.until>Date.now())throw new Error('他のタブが編集中');
+    tx.objectStore('latest').put({projectId,snapshotId:snapshotKey,revision:snapshot.meta.revision??0,savedAt:Date.now()});
+    tx.objectStore('drafts').put({key:'active',projectId});await done;
+  }catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
+  return snapshot;
+}
+export async function deleteProjectHistory(projectId,historyId,{fence=null}={}){
+  const db=await openDraftDatabase(),tx=db.transaction(['locks','history'],'readwrite'),done=finished(tx);
+  try{
+    const lock=await read(tx.objectStore('locks').get(projectId));
+    if(fence!==null&&(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<Date.now()))throw new Error('編集権がない');
+    if(fence===null&&lock&&lock.until>Date.now())throw new Error('他のタブが編集中');
+    const record=await read(tx.objectStore('history').get(historyId));
+    if(!record||record.projectId!==projectId)throw new Error('復元世代が見つからない');
+    tx.objectStore('history').delete(historyId);await done;
+  }catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
+}
+export async function collectUnusedProjectAssets(){
+  const db=await openDraftDatabase(),tx=db.transaction(['snapshots','latest','history','imageAssets','maskAssetsV2'],'readwrite'),done=finished(tx);
+  try{
+    const [snapshots,latest,history,images,masks]=await Promise.all([read(tx.objectStore('snapshots').getAll()),read(tx.objectStore('latest').getAll()),read(tx.objectStore('history').getAll()),read(tx.objectStore('imageAssets').getAllKeys()),read(tx.objectStore('maskAssetsV2').getAllKeys())]);
+    const kept=new Set([...latest.map(x=>x.snapshotId),...history.map(x=>x.snapshotId)]),all=new Set(snapshots.map(x=>x.id));
+    if([...kept].some(id=>!all.has(id)))throw new Error('保存参照が破損しているため素材回収を中止');
+    const liveImage=new Set(),liveMask=new Set();
+    for(const snapshot of snapshots)if(kept.has(snapshot.id)){for(const ref of snapshot.images)liveImage.add(ref.assetId);for(const ref of snapshot.masks)liveMask.add(ref.assetId);}
+    const presentImage=new Set(images),presentMask=new Set(masks);
+    if([...liveImage].some(id=>!presentImage.has(id))||[...liveMask].some(id=>!presentMask.has(id)))throw new Error('素材参照が破損しているため素材回収を中止');
+    for(const snapshot of snapshots)if(!kept.has(snapshot.id))tx.objectStore('snapshots').delete(snapshot.id);
+    for(const key of images)if(!liveImage.has(key))tx.objectStore('imageAssets').delete(key);
+    for(const key of masks)if(!liveMask.has(key))tx.objectStore('maskAssetsV2').delete(key);
+    await done;return {snapshotsRemoved:snapshots.filter(x=>!kept.has(x.id)).length,imageAssetsRemoved:images.filter(x=>!liveImage.has(x)).length,maskAssetsRemoved:masks.filter(x=>!liveMask.has(x)).length};
+  }catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
+}
+
+export async function projectStorageReport(){
+  const db=await openDraftDatabase(),tx=db.transaction(['projects','latest','history','snapshots','imageAssets','maskAssetsV2'],'readonly'),done=finished(tx);
+  const [projects,latest,history,snapshots,images,masks]=await Promise.all([
+    read(tx.objectStore('projects').getAll()),read(tx.objectStore('latest').getAll()),read(tx.objectStore('history').getAll()),
+    read(tx.objectStore('snapshots').getAll()),assetSizes(tx.objectStore('imageAssets')),assetSizes(tx.objectStore('maskAssetsV2'))
+  ]);await done;
+  const bySnapshot=new Map(snapshots.map(s=>[s.id,s]));
+  const sizes=new Map([...images,...masks].map(a=>[a.assetId,a.byteLength??a.blob?.size??0]));
+  const relevant=new Map();
+  for(const pointer of [...latest,...history])if(bySnapshot.has(pointer.snapshotId))relevant.set(pointer.snapshotId,bySnapshot.get(pointer.snapshotId));
+  const owners=new Map();
+  const refs=s=>[...s.images.map(a=>a.assetId),...s.masks.map(a=>a.assetId)];
+  for(const snap of relevant.values())for(const key of new Set(refs(snap))){
+    if(!owners.has(key))owners.set(key,new Set());owners.get(key).add(snap.projectId);
+  }
+  return projects.map(p=>{
+    const versions=history.filter(h=>h.projectId===p.projectId).sort((a,b)=>b.createdAt-a.createdAt);
+    const latestPointer=latest.find(x=>x.projectId===p.projectId)||null,individual=new Set();
+    let logicalBytes=0;
+    const projectSnapshots=[...new Map([...versions.map(x=>bySnapshot.get(x.snapshotId)),bySnapshot.get(latestPointer?.snapshotId)].filter(Boolean).map(s=>[s.id,s])).values()];
+    for(const snap of projectSnapshots){
+      logicalBytes+=JSON.stringify(snap.meta).length*2;
+      for(const key of refs(snap)){if(!individual.has(key))logicalBytes+=sizes.get(key)??0;individual.add(key);}
+    }
+    const reclaimableBytes=[...individual].reduce((total,key)=>total+((owners.get(key)?.size??0)===1?sizes.get(key)??0:0),0);
+    return {...p,latest:latestPointer,history:versions.map(h=>{const snap=bySnapshot.get(h.snapshotId),keys=new Set(snap?refs(snap):[]);return {historyId:h.historyId,createdAt:h.createdAt,snapshotId:h.snapshotId,logicalBytes:JSON.stringify(snap?.meta??{}).length*2+[...keys].reduce((n,k)=>n+(sizes.get(k)||0),0),reclaimableBytes:[...keys].reduce((n,k)=>n+([...relevant.values()].every(s=>s.id===h.snapshotId||!refs(s).includes(k))&&latestPointer?.snapshotId!==h.snapshotId?sizes.get(k)||0:0),0)};}),logicalBytes,reclaimableBytes};
+  });
+}
+export async function deleteStoredProject(projectId,{fence=null}={}){
+  const db=await openDraftDatabase(),tx=db.transaction(['projects','latest','history','snapshots','locks','drafts'],'readwrite'),done=finished(tx);
+  try{
+    const lock=await read(tx.objectStore('locks').get(projectId));
+    if(fence){
+      if(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<Date.now())throw new Error('編集権がない');
+    }else if(lock?.owner&&lock.until>Date.now())throw new Error('他のタブが編集中のため削除できない');
+    const [histories,snapshots,active]=await Promise.all([
+      read(tx.objectStore('history').getAll()),read(tx.objectStore('snapshots').getAll()),read(tx.objectStore('drafts').get('active'))
+    ]);
+    const refs=histories.filter(x=>x.projectId===projectId),owned=snapshots.filter(x=>x.projectId===projectId);
+    for(const record of refs)tx.objectStore('history').delete(record.historyId);
+    for(const record of owned)tx.objectStore('snapshots').delete(record.id);
+    tx.objectStore('projects').delete(projectId);tx.objectStore('latest').delete(projectId);
+    if(active?.projectId===projectId)tx.objectStore('drafts').delete('active');
+    if(lock)tx.objectStore('locks').put({...lock,owner:null,until:0});
+    await done;return {histories:refs.length,snapshots:owned.length};
+  }catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
+}
+
+export async function migrateLegacyDraft(){
+  const db=await openDraftDatabase();
+  const idTx=db.transaction(['drafts'],'readwrite'),idDone=finished(idTx),draftStore=idTx.objectStore('drafts');
+  const active=await read(draftStore.get('active'));
+  if(active){await idDone;return false;}
+  const old=await read(draftStore.get('current'));
+  if(await read(draftStore.get('legacy-cleared'))){await idDone;return false;}
+  if(!old?.pages?.length){await idDone;return false;}
+  let migration=await read(draftStore.get('v3-migration'));
+  if(!migration){
+    migration={key:'v3-migration',projectId:validProjectId(old.projectId)?old.projectId:crypto.randomUUID()};
+    draftStore.put(migration);
+  }
+  await idDone;
+  const current=await (async()=>{
+    const tx=db.transaction('latest','readonly'),done=finished(tx),value=await read(tx.objectStore('latest').get(migration.projectId));await done;return value;
+  })();
+  if(current)return false;
+  const {claimProjectLease,releaseProjectLease,tabIdentity}=await import('./project-lock.js');
+  const claim=await claimProjectLease(migration.projectId,tabIdentity);
+  if(!claim.held)return false;
+  try{
+    const check=db.transaction(['latest','drafts','images','masks'],'readonly'),checkDone=finished(check);
+    const [saved,meta,images,maskRecord]=await Promise.all([
+      read(check.objectStore('latest').get(migration.projectId)),
+      read(check.objectStore('drafts').get('current')),
+      read(check.objectStore('images').getAll()),
+      read(check.objectStore('masks').get('current'))
+    ]);
+    await checkDone;
+    if(saved||!meta?.pages?.length)return false;
+    const byId=new Map(images.map(image=>[image.id,image])),idMap=new Map();
+    const pages=meta.pages.map(p=>{
+      if(!p||!Array.isArray(p.layers))throw new Error('v2データのページが不正');
+      const id=validProjectId(p.id)?p.id:crypto.randomUUID();
+      if(idMap.has(p.id))throw new Error('v2データに重複ページIDがある');
+      idMap.set(p.id,id);return {...p,id,layers:normalizeLayers(p.layers,meta.version)};
+    });
+    const convertedImages=[];
+    for(const page of meta.pages){
+      const item=byId.get(page.id);
+      if(!(item?.blob instanceof Blob))throw new Error('旧一時保存の画像が不足: '+page.name);
+      convertedImages.push({id:idMap.get(page.id),blob:item.blob});
+    }
+    const masks=[];
+    for(const record of maskRecord?.records||[]){
+      const mapped=idMap.get(record.pageId);
+      if(!mapped)continue;
+      if(!(record.blob instanceof Blob)||record.blob.size!==record.metadata?.byteLength)throw new Error('v2マスク素材が壊れている');
+      const asset=await assetFromEncoded({...record.metadata,data:new Uint8Array(await record.blob.arrayBuffer())});
+      masks.push({pageId:mapped,id:record.id,asset});
+    }
+    // Keep v2 records untouched. A failed transaction may be retried with the same migration ID.
+    const {key,...rest}=meta;
+    const fresh={...rest,version:14,projectId:migration.projectId,pages,
+      revision:Number.isInteger(meta.revision)?meta.revision:0,savedAt:Number.isFinite(meta.savedAt)?meta.savedAt:Date.now()};
+    await saveProjectSnapshot(fresh,convertedImages,{masks,fence:{owner:tabIdentity,token:claim.token}});
+    return true;
+  }finally{await releaseProjectLease(migration.projectId,tabIdentity).catch(()=>{});}
+}
+
+// Capture metadata and immutable source blobs in one transaction before any decode awaits.
+export async function readProjectBundle(projectId,{snapshotId=null}={}){
+  const db=await openDraftDatabase(),tx=db.transaction(['latest','snapshots','imageAssets','maskAssetsV2'],'readonly'),done=finished(tx);
+  const pointer=snapshotId?{snapshotId}:await read(tx.objectStore('latest').get(projectId));
+  if(!pointer){await done;return null;}
+  const snapshot=await read(tx.objectStore('snapshots').get(pointer.snapshotId));
+  if(!snapshot||snapshot.projectId!==projectId){await done;throw new Error('復元スナップショットの参照が破損');}
+  const [images,masks]=await Promise.all([Promise.all(snapshot.images.map(ref=>read(tx.objectStore('imageAssets').get(ref.assetId)))),Promise.all(snapshot.masks.map(ref=>read(tx.objectStore('maskAssetsV2').get(ref.assetId))))]);
+  await done;
+  images.forEach(storedAssetBlob);masks.forEach(storedAssetBlob);
+  const decoded=[];
+  for(let i=0;i<masks.length;i++){const item=masks[i],record=snapshot.masks[i],blob=storedAssetBlob(item);const asset=await assetFromEncoded({...item.metadata,id:record.id,data:new Uint8Array(await blob.arrayBuffer())});decoded.push({pageId:record.pageId,id:record.id,asset});}
+  return {snapshot,images:images.map((item,i)=>({id:snapshot.images[i].pageId,blob:storedAssetBlob(item)})),masks:decoded};
+}

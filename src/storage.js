@@ -1,7 +1,8 @@
+import {activeProjectSnapshot,projectSnapshotImages,projectSnapshotMasks} from './project-history.js';
 import {checkAbort} from './bulk-task.js';
 import {assetFromEncoded,maskAssetMetadata,maxMaskPayloadBytes} from './mask-codec.js';
 import {MAX_PROJECT_MASK_DECODED_BYTES} from './project-io.js';
-const DB_NAME='serifu-editor-drafts', DB_VERSION=2;
+const DB_NAME='serifu-editor-drafts', DB_VERSION=3;
 let connection;
 function validateMaskBudget(metadata){
   let decoded=0,compressed=0;
@@ -23,14 +24,16 @@ async function database() {
       if(!db.objectStoreNames.contains('drafts'))db.createObjectStore('drafts',{keyPath:'key'});
       if(!db.objectStoreNames.contains('images'))db.createObjectStore('images',{keyPath:'id'});
       if(!db.objectStoreNames.contains('masks'))db.createObjectStore('masks',{keyPath:'key'});
+      for(const [name,keyPath] of [['projects','projectId'],['snapshots','id'],['latest','projectId'],['history','historyId'],['imageAssets','assetId'],['maskAssetsV2','assetId'],['locks','projectId'],['projectViewers','key']])if(!db.objectStoreNames.contains(name))db.createObjectStore(name,{keyPath});
     };
     request.onsuccess=()=>{const db=request.result;db.onversionchange=()=>{db.close();connection=null;};resolve(db);};
     request.onerror=()=>{connection=null;reject(request.error);};request.onblocked=()=>{connection=null;reject(new Error('他のタブが一時保存を使用中'));};
   });
   return connection;
 }
-export async function getDraftMeta() {const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const data=await requestResult(tx.objectStore('drafts').get('current'));await done;return data||null;}
-export async function getImageIds() {const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);const ids=await requestResult(tx.objectStore('images').getAllKeys());await done;return new Set(ids);}
+export const openDraftDatabase=()=>database();
+export async function getDraftMeta() {const versioned=await activeProjectSnapshot();if(versioned)return versioned.meta;const db=await database(),tx=db.transaction('drafts','readonly'),done=completed(tx);const [data,cleared]=await Promise.all([requestResult(tx.objectStore('drafts').get('current')),requestResult(tx.objectStore('drafts').get('legacy-cleared'))]);await done;return cleared?null:data||null;}
+export async function getImageIds() {const versioned=await activeProjectSnapshot();if(versioned)return new Set(versioned.images.map(x=>x.pageId));const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);const ids=await requestResult(tx.objectStore('images').getAllKeys());await done;return new Set(ids);}
 export async function saveDraft(meta,newImages,{signal,onProgress=()=>{},masks=[]}={}) {
   checkAbort(signal);
   validateMaskBudget(masks.map(record=>record.asset));
@@ -55,14 +58,16 @@ export async function saveDraft(meta,newImages,{signal,onProgress=()=>{},masks=[
   let prepared=0;for(const image of newImages){const request=images.put(image);request.onsuccess=()=>onProgress(++prepared,newImages.length);}
   const keys=images.getAllKeys();keys.onsuccess=()=>{const present=new Set(keys.result);if(meta.pages.some(p=>!present.has(p.id)))abort();};
   const cursor=images.openCursor();cursor.onsuccess=()=>{const value=cursor.result;if(value){if(!keep.has(value.key))value.delete();value.continue();}};
-  tx.objectStore('drafts').put({...meta,key:'current'});try{await done;}catch(error){if(signal?.aborted)throw signal.reason;throw error;}finally{signal?.removeEventListener('abort',abort);}
+  tx.objectStore('drafts').delete('legacy-cleared');tx.objectStore('drafts').put({...meta,key:'current'});try{await done;}catch(error){if(signal?.aborted)throw signal.reason;throw error;}finally{signal?.removeEventListener('abort',abort);}
 }
 export async function getDraftImages(ids) {
+  const versioned=await activeProjectSnapshot();if(versioned)return projectSnapshotImages(versioned,ids);
   const db=await database(),tx=db.transaction('images','readonly'),done=completed(tx);
   const values=await Promise.all(ids.map(id=>requestResult(tx.objectStore('images').get(id))));await done;
   if(values.some(v=>!v?.blob))throw new Error('一時保存の画像が不足');return values;
 }
 export async function getDraftMasks(pageIds) {
+  const versioned=await activeProjectSnapshot();if(versioned)return projectSnapshotMasks(versioned,pageIds);
   const db=await database(),tx=db.transaction('masks','readonly'),done=completed(tx);
   const snapshot=await requestResult(tx.objectStore('masks').get('current'));await done;
   const pages=new Set(pageIds),result=[],seen=new Set();
@@ -77,4 +82,20 @@ export async function getDraftMasks(pageIds) {
   }
   return result;
 }
-export async function clearDraft() {const db=await database(),tx=db.transaction(['drafts','images','masks'],'readwrite'),done=completed(tx);tx.objectStore('drafts').clear();tx.objectStore('images').clear();tx.objectStore('masks').put({key:'current',records:[]});await done;}
+// Clear only the selected latest pointer. History, other projects and v2 sources survive.
+export async function clearDraft({projectId=null,fence=null}={}) {
+  const db=await database(),tx=db.transaction(['drafts','latest','locks'],'readwrite'),done=completed(tx);
+  try {
+    const active=await requestResult(tx.objectStore('drafts').get('active'));
+    const target=projectId||active?.projectId;
+    if(target){
+      const lock=await requestResult(tx.objectStore('locks').get(target));
+      if(fence?(!lock||lock.owner!==fence.owner||lock.token!==fence.token||lock.until<=Date.now()):lock?.owner&&lock.until>Date.now())throw new Error('編集権がないため消去できない');
+      tx.objectStore('latest').delete(target);
+      if(active?.projectId===target)tx.objectStore('drafts').delete('active');
+    }
+    // Tombstone prevents a cleared v2 draft from being resurrected by fallback/migration.
+    tx.objectStore('drafts').put({key:'legacy-cleared'});
+    await done;
+  } catch(error){try{tx.abort();}catch{}await done.catch(()=>{});throw error;}
+}

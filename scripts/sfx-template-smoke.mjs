@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {sfxTest,exportJson,exportPng,assertPng} from './sfx-test-support.mjs';
+await sfxTest(5282,async({page,row,card})=>{
+ const dialogs=[];page.on('dialog',async d=>{dialogs.push(d.message());await d.accept('Dense SFX');});
+ await card.locator('[data-glyph-field=dx]').fill('50');await card.locator('[data-glyph-field=dx]').press('Tab');await card.locator('.sfx-template-panel summary').click();await card.locator('[data-action=sfx-template-save]').click();await card.locator('textarea').fill('ボコッ');await card.locator('[data-action=sfx-text-apply]').click();await card.locator('[data-sfx-template-select]').selectOption({label:'Dense SFX'});await card.locator('[data-action=sfx-template-apply]').click();let project=await exportJson(page),l=project.pages[0].layers[0];assert.equal(l.text,'ボコッ');assert.equal(l.x,500);assert.equal(l.y,350);assert.equal(l.lettering.strokes.length,0);assert.ok(project.preferences.sfxTemplates.length===1);
+ // Invalid nested numeric data is rejected at import rather than deferred to render.
+ assert.equal(await page.evaluate(async()=>{const {createSfxTemplate,validateSfxTemplate}=await import('/src/sfx-lettering-templates.js'),{newLayer}=await import('/src/renderer.js');const t=createSfxTemplate(newLayer('sfx',1000,750),'x');t.design.glyphs[0].overrides.fill='invalid';try{validateSfxTemplate(t);return false;}catch{return true;}}),true);
+ // Missing fonts require an explicit visible choice, and cancelling preserves the layer.
+ await page.evaluate(()=>{const key='serifu.sfx.templates.v1',data=JSON.parse(localStorage.getItem(key));data.templates[0].design.style.font='absent_font';localStorage.setItem(key,JSON.stringify(data));});await page.reload();await page.locator('#projectInput').setInputFiles({name:'template.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(project))});await page.waitForFunction(()=>document.querySelector('.image-row')&&!document.querySelector('#projectLoad').disabled);const restored=page.locator('[data-kind=sfx]').first();await restored.locator('[data-action=sfx-glyph-enter]').click();await restored.locator('.sfx-template-panel summary').click();await restored.locator('[data-sfx-template-select]').selectOption({label:'Dense SFX'});await restored.locator('[data-action=sfx-template-apply]').click();await page.locator('.missing-font-dialog').waitFor();await page.locator('[data-font-fallback]').selectOption('sans');await page.getByRole('button',{name:'代替書体を使用',exact:true}).click();project=await exportJson(page);assert.equal(project.pages[0].layers[0].font,'sans');await assertPng(page,project,await exportPng(page,page.locator('.image-row').first()));
+ assert.equal(project.pages[0].layers[0].originalFont,'absent_font','fallback retains the requested font name');
+ // Uploading a licensed font resolves the same template without a silent fallback.
+ await restored.locator('[data-sfx-template-select]').selectOption({label:'Dense SFX'});await restored.locator('[data-action=sfx-template-apply]').click();await page.locator('.missing-font-dialog').waitFor();
+ await page.locator('[data-font-upload]').setInputFiles('assets/fonts/GEKIFUDE-SFX-Regular.ttf');await page.locator('.missing-font-dialog').waitFor({state:'detached'});
+ project=await exportJson(page);assert.equal(project.pages[0].layers[0].font,'absent_font');
+ assert.equal(await page.evaluate(async()=>{const {hasSessionFont}=await import('/src/fonts.js');return hasSessionFont('absent_font');}),true);
+ await assertPng(page,project,await exportPng(page,page.locator('.image-row').first()));
+ console.log('SFX templates: differing text, seed, deep validation, visible missing-font fallback/upload and PNG PASS');
+});

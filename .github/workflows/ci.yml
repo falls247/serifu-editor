@@ -3,6 +3,7 @@ on: [push, pull_request]
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -12,8 +13,29 @@ jobs:
       - run: npm test
       - run: npm run fonts
       - run: npm run build
-      - run: npm install --no-save playwright
-      - run: npx playwright install chromium --with-deps
+      - name: Install browser test dependencies
+        timeout-minutes: 6
+        run: |
+          if [ -f /etc/apt/apt-mirrors.txt ]; then
+            printf '%s\n' 'https://archive.ubuntu.com/ubuntu/' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          fi
+          printf '%s\n' 'Acquire::http::Timeout "15";' 'Acquire::https::Timeout "20";' 'Acquire::Retries "1";' | sudo tee /etc/apt/apt.conf.d/99-serifu-ci > /dev/null
+          npm install --no-save --package-lock=false playwright@1.56.1
+          npx playwright install --with-deps chromium webkit firefox
+          sudo apt-get install -y fonts-noto-cjk
+      - run: npm run test:sfx-lettering-browser
+      - run: npm run test:sfx-selection
+      - run: npm run test:sfx-stroke
+      - run: npm run test:sfx-outline
+      - run: npm run test:sfx-template
+      - run: npm run test:sfx-render
+      - run: npm run test:sfx-export
+      - run: npm run test:sfx-touch
+      - run: npm run test:sfx-desktop
+      - run: npm run test:project-open
+      - run: npm run test:project-tabs
+      - run: npm run test:project-history
+      - run: npm run test:autosave-catchup
       - run: npm run test:bulk
       - run: npm run test:mask-render
       - run: npm run test:mask-order
@@ -23,11 +45,13 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: manga-ink-balloon-previews
+          name: serifu-regression
           path: |
-            artifacts/grunge-ink-preview.png
-            artifacts/spiky-balloon-preview.png
+            artifacts/*.png
+            artifacts/*results.json
+            artifacts/sfx-validation.json
           if-no-files-found: ignore
+          retention-days: 7
 
   backend:
     runs-on: ubuntu-latest

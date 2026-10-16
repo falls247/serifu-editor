@@ -1,17 +1,19 @@
+import {hasSessionFont} from './fonts.js';
+import { normalizeLettering } from './sfx-lettering-model.js';
 import { DIALOGUE_COLORS, EFFECTS, FONT_CHOICES, WARP_CHOICES, clamp, paintOrder } from './renderer.js';
 import { inkSeed } from './ink.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } from './balloons.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
-export const PROJECT_VERSION=13;
+import { isTextColor } from './colors.js';
+export const PROJECT_VERSION=14;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
 function speechColors(input) {
   const textColor=input.textColor===undefined?null:input.textColor,textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
-  const validColor=value=>typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);
-  if(textColor!==null&&!validColor(textColor)||!validColor(textOutlineColor))throw new Error('セリフの文字色・輪郭色が不正');
+  if(textColor!==null&&!isTextColor(textColor)||!isTextColor(textOutlineColor))throw new Error('セリフの文字色・輪郭色が不正');
   return {textColor,textOutlineColor};
 }
 
@@ -22,7 +24,7 @@ function normalizedLayoutOrder(input, version = PROJECT_VERSION) {
 }
 
 export function normalizeLayer(input, version = PROJECT_VERSION) {
-  return {...normalizeTextLayer(input,version),...normalizedLayoutOrder(input,version)};
+  return {...normalizeTextLayer(input,version),...(typeof input?.originalFont==='string'&&input.originalFont.length<=128?{originalFont:input.originalFont}:{}),...normalizedLayoutOrder(input,version),...(version>=14&&typeof input?.id==='string'&&/^[a-f0-9-]{36}$/i.test(input.id)?{id:input.id}:{})};
 }
 
 function normalizeTextLayer(input, version) {
@@ -31,9 +33,10 @@ function normalizeTextLayer(input, version) {
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('キャプションの座標・サイズが範囲外');
-    for(const key of ['color','borderColor','textColor','textOutlineColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('キャプションの色が不正');
+    for(const key of ['color','borderColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('キャプションの色が不正');
+    for(const key of ['textColor','textOutlineColor'])if(!isTextColor(input[key]))throw new Error('キャプションの文字色が不正');
     for(const [key,[min,max]] of Object.entries(CAPTION_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('キャプションの設定が範囲外');
-    if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font))throw new Error('キャプションの本文・書体設定が不正');
+    if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!(Object.hasOwn(FONT_CHOICES,input.font)||hasSessionFont(input.font)))throw new Error('キャプションの本文・書体設定が不正');
     const alignX=input.alignX===undefined?(version<6?'right':'center'):input.alignX,alignY=input.alignY===undefined?(version<6?'top':'center'):input.alignY;
     if(!Object.hasOwn(CAPTION_ALIGNMENTS.alignX,alignX)||!Object.hasOwn(CAPTION_ALIGNMENTS.alignY,alignY))throw new Error('キャプションの揃える方向が不正');
     if(!['rect','spiky'].includes(input.shape)||!Number.isInteger(input.shapeSeed)||input.shapeSeed<0||input.shapeSeed>4294967295||!Number.isFinite(input.distortion)||input.distortion<0||input.distortion>100)throw new Error('キャプションの形状設定が不正');
@@ -55,7 +58,7 @@ function normalizeTextLayer(input, version) {
     if(version<11&&input.sfxOrder!==undefined&&!['behind','above'].includes(input.sfxOrder))throw new Error('吹き出しの重なり設定が不正');
     const shape=input.shape??'ellipse';
     if(!Object.hasOwn(BALLOON_SHAPES,shape)||!Number.isInteger(shapeSeed)||shapeSeed<0||shapeSeed>4294967295||!Number.isInteger(input.spikeCount))throw new Error('吹き出しの形状が不正');
-    if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!Object.hasOwn(FONT_CHOICES,input.font)||!['top','center'].includes(input.lineAlign))throw new Error('吹き出しのセリフ設定が不正');
+    if(typeof input.text!=='string'||!Object.hasOwn(DIALOGUE_COLORS,input.speaker)||typeof input.vertical!=='boolean'||!(Object.hasOwn(FONT_CHOICES,input.font)||hasSessionFont(input.font))||!['top','center'].includes(input.lineAlign))throw new Error('吹き出しのセリフ設定が不正');
     if(!Number.isFinite(input.size)||input.size<8||input.size>500||!Number.isFinite(input.outline)||input.outline<0||input.outline>80||!Number.isFinite(input.thickness)||input.thickness<THICKNESS_LIMIT[0]||input.thickness>THICKNESS_LIMIT[1])throw new Error('吹き出しの文字設定が範囲外');
     return {id:crypto.randomUUID(),kind:'balloon',presetId:typeof input.presetId==='string'?input.presetId:null,shape,shapeSeed,...normalizeBrush(input),shadowEnabled:input.shadowEnabled,shadowColor:input.shadowColor,borderStyle:input.borderStyle,text:input.text,speaker:input.speaker,...speechColors(input),size:input.size,outline:input.outline,thickness:input.thickness,vertical:input.vertical,lineAlign:input.lineAlign,font:input.font,...Object.fromEntries(['x','y','w','h','rotation','color','borderColor','tail',...Object.keys(BALLOON_LIMITS)].map(key=>[key,input[key]]))};
   }
@@ -72,14 +75,14 @@ function normalizeTextLayer(input, version) {
   const outline = legacy ? Math.max(2, Math.round(input.size * .15)) : input.outline;
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < 0 || outline > 80) throw new Error('文字の輪郭の太さが不正');
-  if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
+  if (!isTextColor(input.color)) throw new Error('文字色が不正');
   const textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
-  if(typeof textOutlineColor!=='string'||!/^#[0-9a-f]{6}$/i.test(textOutlineColor))throw new Error('文字の輪郭色が不正');
+  if(!isTextColor(textOutlineColor))throw new Error('文字の輪郭色が不正');
   const extras = { ...PLACEMENT_DEFAULTS, taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, grungeAmount:65, scratchLength:55, scratchAngle:90, spatterAmount:40, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
   if(!['standard','optical'].includes(extras.kerningMode))throw new Error('文字配置方式が不正');
   if(!['top','center'].includes(extras.lineAlign))throw new Error('改行の配置設定が不正');
-  if (!Object.hasOwn(FONT_CHOICES,extras.font) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
+  if (!(Object.hasOwn(FONT_CHOICES,extras.font)||(input.kind==='sfx'&&hasSessionFont(extras.font))) || !Object.hasOwn(WARP_CHOICES,extras.warp)) throw new Error('書体または歪み設定が不正');
   if (!Number.isFinite(extras.thickness) || extras.thickness<THICKNESS_LIMIT[0] || extras.thickness>THICKNESS_LIMIT[1]) throw new Error('文字の太さが範囲外');
   for (const [key,[min,max]] of Object.entries(EFFECT_LIMITS)) if (!Number.isFinite(extras[key]) || extras[key]<min || extras[key]>max) throw new Error('効果音の設定が範囲外');
   const inkTexture=input.inkTexture??'none',textureSeed=input.textureSeed??inkSeed((input.id??input.text)+':texture');
@@ -91,7 +94,7 @@ function normalizeTextLayer(input, version) {
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
     rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
     ...(kind==='dialogue'?speechColors(input):{textOutlineColor}),
-    ...extras, glyphSeed, inkTexture, textureSeed, presetId: typeof input.presetId==='string' ? input.presetId : null,
+    ...extras, glyphSeed, inkTexture, textureSeed, ...(kind==='sfx'&&input.lettering!=null?{lettering:normalizeLettering(input.lettering,input.text,{size:input.size,vertical:input.vertical})}:{}), presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }
 
@@ -221,7 +224,7 @@ export function syncSelection(page) {
 function historyState(page) {
   return JSON.stringify({ layers: page.layers, done: page.done, imageEdit: page.imageEdit ?? null,
     selectedId: page.selectedId, selectedIds: page.selectedIds ?? [page.selectedId],
-    maskEffects: page.maskEffects ?? [], selectedMaskId: page.selectedMaskId ?? null });
+    maskEffects: page.maskEffects ?? [], selectedMaskId: page.selectedMaskId ?? null,glyphEdit:page.glyphEdit?Object.fromEntries(['id','selected','indices','strokeRun','strokeRuns','strokePoint','widthIndex','pointSelection','inherit','editMode','priority','selectionTool','valueMode','snap','touch'].filter(k=>page.glyphEdit[k]!==undefined).map(k=>[k,page.glyphEdit[k]])):null });
 }
 
 export function checkpoint(page) {
@@ -237,7 +240,7 @@ export function restore(page, direction) {
   if (!from.length) return false;
   to.push(historyState(page));
   const state = JSON.parse(from.pop());
-  page.layers = state.layers; page.done = state.done; page.imageEdit = state.imageEdit ?? null;
+  page.glyphEdit=state.glyphEdit??null;page.layers = state.layers; page.done = state.done; page.imageEdit = state.imageEdit ?? null;
   page.maskEffects = state.maskEffects ?? [];
   page.edited = hasEdits(page);
   setSelection(page, state.selectedIds ?? [state.selectedId ?? page.layers[0]?.id], state.selectedId);

@@ -253,3 +253,33 @@ IndexedDB版2は旧ストアを保持してmasksを追加する。確定マス�
 コミットとPR作成はユーザーのコミット承認後。実機未確認・未完了の項目は検証記録のまま引き継ぎ、正式完成と表現しない。
 
 2026-10-11の追加指示で、マスクカードも非選択時に短縮表示し、文字と共通の重なり順へ対応した。[ADR-0024](adr/0024-shared-mask-and-text-order.md)を参照。現在の出力は版13／コンテナ版2、旧JSON版12も読込可能。各オブジェクトの`layoutOrder`を保存する。配列を分けたまま共通`paintOrder`でカード・描画・Canvas選択を揃え、前面のマスクは文字を覆う。旧データの文字が前面にある見た目を維持し、順序変更時に全オブジェクトへ連番を付ける。版11未満の旧文字順移行は維持する。
+
+
+## SFXグリフ編集の引継ぎ（部分実装）
+
+対象ブランチ: docs/sow-20261013-sfx-glyph-editor。src/sfx-lettering-model.js（P1）、src/sfx-stroke-geometry.js（P3の原型）、src/renderer.js（新SFX描画分岐）、src/app.js（編集開始、グリフ/線設定、ドラッグ、Undo/Redo）の順に確認。全113要件の完了ではない。各runの数値制御点編集とv14 projectId/pageId保存まで追加。P3〜P8の残作業一覧はADR 0027。既存IndexedDB v2のデータ移行は検証なしで進めない。
+
+
+## 2026-10-14 SFX/プロジェクト永続化の最新引継ぎ
+
+前掲の部分実装・CI赤の記述は当初時点の履歴。H-01/H-02の復元・SAM3再検出を修正し、P1〜P7の残機能と専用回帰を追加した。最新状態は[SOW §0](sow/SOW_20261013_serifu_sfx_glyph_editor.md)、設計は[ADR-0027](adr/0027-sfx-lettering-foundation.md)、試験とUATの対応は[検証記録](sfx-validation.md)を参照する。実装先は `docs/sow-20261013-sfx-glyph-editor`。`main`へ別途指示なくpush・mergeしない。
+
+- `sfx-lettering-model.js` は原文index・本文継承・単独／連続長音・上限検証、`sfx-edit-operations.js` は複数文字の変形・複製・Clipboard・縦横変換、`sfx-editor.js` は選択・Canvasハンドル・タッチ・詳細設定。
+- `sfx-stroke-geometry.js` は実インク接続、de Casteljau分割、結合、点・幅・cap・固定距離。`sfx-outline-groups.js` は自動／手動ロックと合成外周。`renderer.js` は共通描画と変形後の質感・bounded cache。原文indexと描画順indexを混同しない。
+- `project-history.js` はv3の原子的保存・同一read transactionでの復元・履歴・移行・GC。最新と直前履歴の比較を分ける。同じページIDの画像差替では `imageSaved` をfalseにして素材を渡す。
+- `project-lock.js` はdocument別ownerとfencing。再読込のowner引継ぎは新tokenを発行する。タブのprojectIdをsessionStorageで固定し、DBのglobal activeを別タブの復元対象に流用しない。閲覧から編集への昇格は最新を再読込してから。
+- 旧 `drafts/images/masks` は保持。GCで参照破損を発見したら回収中止。Quotaで履歴を自動削除しない。Blob非対応環境は失敗transactionをabortしてからバイト列保存へ切り替える。
+- `bulk-pool.js` の起動・中断はgenerationを持つ。旧操作のcleanupが新Workerのhandlerを消さない。UI一括更新のcacheはページmount時に破棄し、文字サイズ設定もcache keyへ含める。
+- 新moduleを `server.mjs`・`scripts/build.mjs`・`scripts/bulk-smoke.mjs` の許可リストへ追加済み。Playwrightは1.56.1、ChromiumとWebKit、日本語端末書体をCIで準備する。
+
+実機iPhone／iPad SafariとPC主要ブラウザの正式受入は未確認。Chromium／Linux WebKitのモバイル寸法試験と実機合格を区別する。次は専用プロファイルと複製データでSOW UAT-16を確認し、検証記録へ端末・OS・ブラウザ版と結果を追記する。GPU試験は既存の適用条件を維持する。
+
+2026-10-14のCI補正: `browser-wait.mjs`は非同期の保存確認を結果までawaitしてpollする。Promise自体を成功とみなす待機を使わない。元のassert・期待値・30秒の上限は維持。`image-worker.js`はglyph overridesの書体もロードする。最新版の成功／失敗は検証記録冒頭のcode SHAとChecksを照合する。
+
+保存の追従補正: 進行中の保存を履歴照会前に確保し、成功後の追加編集を即時に次の保存へ渡す。画像hash・WebKitバイト変換後の`beforeCommit`でleaseを更新する。`ownerEpoch`は同documentの期限切れで維持し、writer交代・解放後の取得・reloadで変わる。古いtokenは常に拒否し、準備中に他writerが確定したlatestを上書きしない。編集権の再読込は進行中の保存が終わってから開始する。`test:autosave-catchup`で1秒／121秒保留中の追加編集、旧token、writer交代、latest再読込を検証する。
+
+保存開始前にも最後のlease照会からのownerEpoch変更を検査する。別writerが次の心拍前に保存・解放した場合も、保存を拒否してlatestを再読込する。4ケースのautosave専用試験と既存回帰をChecksで実行する。最終コードとCIの照合先は[検証記録](sfx-validation.md)。
+
+Clipboardのguardは`waitForDraft:false`で、同project内のコピー・カット・貼付け・次画像への複製を保存中も適用する。project切替・復元・消去等は保存を待つ。元`paged-smoke.mjs`の500ページ確認を保持し、autosave専用試験で画像hash保留中もClipboard操作が完了することを確認する。
+
+PCブラウザ検証を追加（2026-10-14）: `npm run test:sfx-desktop`はChromium／WebKit／Firefoxで編集・曲線D&D・個別書体・PNG・JSON/.serifu・IndexedDB復元・3タブ排他を確認する。`sfx-test-support.mjs`は既定Chromiumを維持したままengineを切替可能にし、page作成を30秒で打ち切る。結果JSONにOS／ブラウザ版／起動overrideを残す。CIは3 engineを通常設定で実行する。モバイルログはWebKitで未実行のnative長押し／pinchをPASSに含めない。Linux headlessの合格と実機の正式受入は区別する。

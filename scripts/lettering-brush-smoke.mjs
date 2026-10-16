@@ -1,3 +1,4 @@
+import {waitForAsync} from './browser-wait.mjs';
 import assert from 'node:assert/strict';
 import {PROJECT_VERSION} from '../src/model.js';
 import { spawn } from 'node:child_process';
@@ -78,7 +79,7 @@ try {
     }finally{pool.close();}
   },project);assert.equal(workerPNG,exported,'actual Worker PNG matches main and preview');result.actualWorkerPNGDiff=0;
   await page.selectOption('#projectFormat','serifu');downloading=page.waitForEvent('download');await page.click('#projectSave');const binary=await readFile(await (await downloading).path());await writeFile('artifacts/lettering-brush.serifu',binary);await writeFile('artifacts/lettering-brush.json',JSON.stringify(project));
-  await page.click('#temporarySave');await page.waitForFunction(async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[1].brushSeed===0;});
+  await page.click('#temporarySave');await waitForAsync(page,async()=>{const {getDraftMeta}=await import('./src/storage.js');return (await getDraftMeta())?.pages[0].layers[1].brushSeed===0;});
   await page.reload();await page.click('#restoreDraft');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===2&&!document.querySelector('#projectLoad').disabled);assert.equal(await source.locator('[data-kind=sfx] [data-field=rotationJitter]').inputValue(),'15');assert.equal(await source.locator('[data-kind=caption] [data-field=brushTexture]').inputValue(),'80');
   await page.locator('#projectInput').setInputFiles('artifacts/lettering-brush.serifu');await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===4&&!document.querySelector('#projectLoad').disabled);
   await page.setViewportSize({width:430,height:900});await source.locator('[data-kind=caption] .layer-summary').click();await source.locator('[data-kind=caption] .brush-settings').evaluate(d=>d.open=true);await page.screenshot({path:'artifacts/lettering-brush-mobile.png',fullPage:true});assert.deepEqual(errors,[]);
