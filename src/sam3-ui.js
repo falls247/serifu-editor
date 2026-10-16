@@ -29,7 +29,7 @@ function createPanel(panel) {
     <div class="sam3-points" data-sam3-points aria-label="指定ポイント"></div>
     <div class="sam3-candidate-heading"><strong>検出候補</strong><div><button type="button" data-sam3-action="all">全選択</button><button type="button" data-sam3-action="none">全解除</button><label class="sam3-display-toggle"><input data-sam3-display type="checkbox" checked>重ねて表示</label></div></div>
     <div class="sam3-candidates" data-sam3-candidates><p class="sam3-empty">検出結果はまだない。</p></div>
-    <div class="sam3-effect-settings"><label>選択候補の効果<select data-sam3-effect></select></label><label data-sam3-block-wrap>ブロック幅（px）<input data-sam3-block type="number" min="1" max="200" step="1" value="20"></label><label data-sam3-blur-wrap hidden>ぼかし半径（px）<input data-sam3-blur type="number" min="0" max="100" step="1" value="12"></label></div>
+    <div class="sam3-effect-settings"><label>選択候補の効果<select data-sam3-effect></select></label><label data-sam3-block-wrap>ブロック幅（px）<input data-sam3-block type="number" min="1" max="200" step="1" value="12"></label><label data-sam3-blur-wrap hidden>ぼかし半径（px）<input data-sam3-blur type="number" min="0" max="100" step="1" value="12"></label></div>
     <p class="sam3-warning sam3-response-warning" data-sam3-warning role="status" hidden></p>
     <p class="sam3-warning">文字の一括コピー／ペーストは文字専用。SAM3マスクは対象外。</p>
     <p class="sam3-error" data-sam3-error role="alert" hidden></p>
@@ -108,7 +108,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   const events = new AbortController(), requestState = new LatestSam3Request(createSam3RequestNamespace(page.id));
   const draft = page.sam3Draft ||= {
     imageId: null, requestSeq: 0, mode: 'text', prompt: '', threshold: 0.5, points: [], candidates: [], status: 'idle',
-    effect: 'pixelate', blockSize: 20, blurRadius: 12, displayCandidates: true, interaction: 'candidate',
+    effect: 'pixelate', blockSize: 12, blurRadius: 12, displayCandidates: true, interaction: 'candidate',
     lastInput: null, lastGoodInput: null, error: null, connection: 'checking',
   };
   const root = panel, query = selector => root.querySelector(selector), signal = events.signal;
@@ -154,7 +154,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   promptInput.value = draft.prompt || '';
   thresholdInput.value = String(draft.threshold ?? 0.5);
   query('[data-sam3-effect]').value = draft.effect || 'pixelate';
-  query('[data-sam3-block]').value = String(draft.blockSize ?? 20);
+  query('[data-sam3-block]').value = String(draft.blockSize ?? 12);
   query('[data-sam3-blur]').value = String(draft.blurRadius ?? 12);
   query('[data-sam3-display]').checked = draft.displayCandidates !== false;
 

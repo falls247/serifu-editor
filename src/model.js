@@ -106,7 +106,7 @@ export function defaultMaskEffect(asset, { id = crypto.randomUUID(), effect = 'p
   if (!asset?.id || !asset.bbox) throw new Error('マスク素材が不正');
   return {
     id, kind: 'mask-effect', assetId: asset.id, name: name ?? `マスク加工 ${createdOrder + 1}`,
-    createdOrder, visible: true, effect, blockSize: 20, blurRadius: 12, marginPx: 0,
+    createdOrder, visible: true, effect, blockSize: 12, blurRadius: 12, marginPx: 0,
     x: asset.bbox.x, y: asset.bbox.y, w: asset.bbox.width, h: asset.bbox.height,
   };
 }

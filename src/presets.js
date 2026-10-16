@@ -48,7 +48,7 @@ export function defaultPreferences() {
     builtin('sfx-handwritten','荒々しい手描き配置','sfx',{effect:'none',font:'brush',distortion:20,kerningMode:'optical',kerningStrength:90,minimumGlyphGap:1,overlapAllowance:18,glyphOverlap:15,sizeVariation:18,horizontalJitter:12,verticalJitter:8,rotationJitter:18,spacingJitter:15}),
     builtin('caption-handwritten','手描き枠線','caption',{borderStyle:'brush',borderWidth:4,brushRoughness:30,brushPressureVariation:45,brushTexture:25,brushOpacityVariation:15}),
     builtin('balloon-standard','標準の吹き出し','balloon'),
-    builtin('caption-standard','標準のキャプション','caption'),
+    builtin('caption-standard','標準のキャプション','caption',{autoFit:false}),
   ];
   return {version:1,presets,defaults:{dialogue:'dialogue-standard',sfx:'sfx-impact',balloon:'balloon-standard',caption:'caption-standard'},fontSizePreset:70,autosave:{enabled:true,minutes:2}};
 }
