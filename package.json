@@ -8,7 +8,7 @@
     "build": "node scripts/build.mjs",
     "test": "node --test",
     "test:grunge-browser": "node scripts/grunge-smoke.mjs",
-    "test:browser": "node scripts/layer-order-smoke.mjs && node scripts/page-filter-smoke.mjs && node scripts/thumbnail-sidebar-smoke.mjs && node scripts/font-size-preset-smoke.mjs && node scripts/full-preview-smoke.mjs && node scripts/image-edit-smoke.mjs && node scripts/clipboard-state-smoke.mjs && node scripts/drag-duplicate-smoke.mjs && node scripts/preview-layout-smoke.mjs && node scripts/sfx-controls-smoke.mjs && node scripts/lettering-brush-smoke.mjs && node scripts/grunge-smoke.mjs && node scripts/speech-style-smoke.mjs && node scripts/browser-smoke.mjs && node scripts/balloon-smoke.mjs && node scripts/caption-smoke.mjs && node scripts/text-position-smoke.mjs && node scripts/typography-smoke.mjs && node scripts/export-smoke.mjs && node scripts/paged-smoke.mjs && node scripts/editor-regression-smoke.mjs && node scripts/object-shortcuts-smoke.mjs",
+    "test:browser": "node scripts/annotation-drafts-smoke.mjs && node scripts/layer-order-smoke.mjs && node scripts/page-filter-smoke.mjs && node scripts/thumbnail-sidebar-smoke.mjs && node scripts/font-size-preset-smoke.mjs && node scripts/full-preview-smoke.mjs && node scripts/image-edit-smoke.mjs && node scripts/clipboard-state-smoke.mjs && node scripts/drag-duplicate-smoke.mjs && node scripts/preview-layout-smoke.mjs && node scripts/sfx-controls-smoke.mjs && node scripts/lettering-brush-smoke.mjs && node scripts/grunge-smoke.mjs && node scripts/speech-style-smoke.mjs && node scripts/browser-smoke.mjs && node scripts/balloon-smoke.mjs && node scripts/caption-smoke.mjs && node scripts/text-position-smoke.mjs && node scripts/typography-smoke.mjs && node scripts/export-smoke.mjs && node scripts/paged-smoke.mjs && node scripts/editor-regression-smoke.mjs && node scripts/object-shortcuts-smoke.mjs",
     "check": "node scripts/check.mjs",
     "fonts": "node scripts/fetch-font.mjs",
     "test:bulk": "node scripts/bulk-smoke.mjs",
@@ -63,6 +63,7 @@
     "test:sfx-selection": "node scripts/sfx-selection-smoke.mjs",
     "test:sfx-export": "node scripts/sfx-export-smoke.mjs",
     "test:autosave-catchup": "node scripts/autosave-catchup-smoke.mjs",
-    "test:sfx-desktop": "node scripts/sfx-desktop-browser-smoke.mjs"
+    "test:sfx-desktop": "node scripts/sfx-desktop-browser-smoke.mjs",
+    "test:annotation-drafts": "node scripts/annotation-drafts-smoke.mjs"
   }
 }

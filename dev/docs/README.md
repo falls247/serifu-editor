@@ -2,6 +2,8 @@
 
 ローカルリポジトリで作業を継続するエージェント向けの入口。
 
+2026-10-16：画像別JSON下書きの自動取り込み・配置は [ADR-0028](adr/0028-annotation-draft-import.md) を参照。対応する外部ファイル名は `画像のファイル名.jpg.json`。検証は `npm run test:annotation-drafts`。
+
 | 文書 | 用途 |
 |---|---|
 | [JSのsrc移行SOW](sow/SOW_20261011_src_reorganization.md) | 22件の移動・パス整合性・Worker/書体・互換性の受入条件 |

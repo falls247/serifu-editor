@@ -6,7 +6,8 @@ import { sfxVisibleIndices } from './sfx-lettering-model.js';
 import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
 import {validProjectId} from './project-identity.js';
 import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY,validateStrokePresets} from './sfx-lettering-templates.js';
-import { textGlyphs,sfxScene,sfxItemHit } from './renderer.js';
+import { textGlyphs,sfxScene,sfxItemHit,layerBounds } from './renderer.js';
+import { draftFileName,parseAnnotationDraft,createDraftLayers,layoutDraftLayers } from './annotation-drafts.js';
 import { startLettering, defaultGlyph, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
 import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
@@ -2279,7 +2280,8 @@ function decode(src) {
 async function addFiles(entries,task) {
   entries=entries.filter(e=>/\.(png|jpe?g|webp|gif|avif)$/i.test(e.file?.name||e.handle?.name));
   sourceFolderName=uploadedFolderName(entries)||sourceFolderName;
-  let count=0,failures=0,first=null,lastFlush=performance.now(),unflushed=0;
+  let count=0,failures=0,draftCount=0,first=null,lastFlush=performance.now(),unflushed=0;
+  const draftWarnings=[],draftFontLoads=new Map(),measureCanvas=document.createElement('canvas'),measureContext=measureCanvas.getContext('2d');
   const flush=()=>{if(!unflushed)return;if(!activeId&&first)activeId=first.id;dirty();const flushed=performance.now();refreshJump();task.metrics.flushMs=(task.metrics.flushMs||0)+performance.now()-flushed;if(task.metrics.firstEditableMs===null){task.metrics.firstEditableMs=performance.now()-task.started;}unflushed=0;lastFlush=performance.now();};
   if(entries.length>=4)imagePool.resize(4);task.stage('画像準備と表示反映',entries.length);
   try{for(let start=0;start<entries.length;start+=20){
@@ -2290,34 +2292,60 @@ async function addFiles(entries,task) {
     for await(const result of boundedResults(ready,async entry=>{if(entry.metadataError)throw entry.metadataError;return {...entry,prepared:await prepareImage(entry.file,task,entry.expectedSize)};},queueOptions(task,true))){
       checkAbort(task.signal);const entry=ready[result.index],name=entry.file?.name||entry.handle?.name;
       if(result.error){failures++;task.result(name,false);(task.metrics.failures ||= []).push({name,reason:result.error.message});task.update({errorMessage:`${name}: ${result.error.message}`},true);continue;}
-      const {file,directory=null,prepared}=result.value,p=createPage({name:file.name,src:URL.createObjectURL(file),file,directory,prepared});pages.push(p);first ||= p;count++;unflushed++;if(directory)sourceDirectory=directory;
+      const {file,directory=null,prepared}=result.value,draft=await readImageDraft(result.value,task,measureContext,draftFontLoads);
+      checkAbort(task.signal);draftCount+=draft.layers.length;draftWarnings.push(...draft.warnings);
+      const p=createPage({name:file.name,src:URL.createObjectURL(file),file,directory,prepared,layers:draft.layers});pages.push(p);first ||= p;count++;unflushed++;if(directory)sourceDirectory=directory;
       task.result(name);if(unflushed>=10||(count===1&&pages.length===1)||performance.now()-lastFlush>=250){flush();await yieldToBrowser();}
     }
     flush();await yieldToBrowser();
-  }}finally{flush();}
+  }}finally{flush();measureCanvas.width=measureCanvas.height=1;}
 
-  status(`${count} 枚を追加。画像ごとに下へスクロールして編集${failures?` · ${failures} 枚は読込失敗`:''}`);
+  task.metrics.draftLayers=draftCount;task.metrics.draftWarnings=draftWarnings;
+  status(`${count} 枚を追加。画像ごとに下へスクロールして編集${draftCount?` · 下書き${draftCount}件を生成`:''}${failures?` · ${failures} 枚は読込失敗`:''}${draftWarnings.length?` · 下書きの注意: ${draftWarnings.join(' / ')}`:''}`);
+}
+async function readImageDraft(entry,task,context,fontPreparations) {
+  if(!entry.draftFile&&!entry.draftHandle)return {layers:[],warnings:[]};
+  const name=entry.draftFile?.webkitRelativePath||entry.draftFile?.name||entry.draftHandle.name;
+  try{
+    checkAbort(task.signal);
+    const file=entry.draftFile||await awaitWithAbort(entry.draftHandle.getFile(),task.signal);
+    const parsed=parseAnnotationDraft(await awaitWithAbort(file.text(),task.signal),entry.file.name);
+    const layers=createDraftLayers(parsed.annotations,entry.prepared.width,entry.prepared.height,makeLayer);
+    const queries=[...new Set(layers.flatMap(fontLoadQueries))].filter(Boolean);
+    if(document.fonts)for(const query of queries){
+      checkAbort(task.signal);
+      if(!fontPreparations.has(query))fontPreparations.set(query,document.fonts.load(query).then(faces=>{if(!faces.length)throw new Error(`書体を読込できない: ${query}`);fontErrors.delete(query);clearGlyphCache();}));
+      await awaitWithAbort(fontPreparations.get(query),task.signal);
+    }
+    checkAbort(task.signal);
+    const placed=layoutDraftLayers(layers,entry.prepared.width,entry.prepared.height,layer=>layerBounds(context,layer),{signal:task.signal});
+    const warnings=parsed.warnings.map(warning=>`${name}: ${warning}`);
+    if(placed.overflow)warnings.push(`${name}: 最小サイズでも収まらず画像外へ配置した。画像外の部分はPNGに出力されないため位置調整が必要`);
+    return {layers:placed.layers,warnings};
+  }catch(error){if(error.name==='AbortError'||task.signal.aborted)throw error;return {layers:[],warnings:[`${name}: 下書きを生成できなかった (${error.message})`]};}
 }
 $('open').onclick = () => {
   if(busy)return;if (!window.showDirectoryPicker) { $('folderInput').click(); status('フォルダ内の画像を読み込める。直接保存と元画像削除はPC版Chrome / Edgeが対象。'); return; }
   const picked=window.showDirectoryPicker({mode:'readwrite'}).then(parent=>({parent}),error=>({error}));
-  guard(async task=>{const selection=await picked;if(selection.error)throw selection.error;const directory=selection.parent,entries=[];task.stage('フォルダ列挙');
-    for await(const entry of directory.values()){checkAbort(task.signal);if(entry.kind==='file'&&/\.(png|jpe?g|webp|gif|avif)$/i.test(entry.name)){entries.push({handle:entry,directory});task.result(entry.name);}if(entries.length%20===0)await yieldToBrowser();}
+  guard(async task=>{const selection=await picked;if(selection.error)throw selection.error;const directory=selection.parent,entries=[],drafts=new Map();let scanned=0;task.stage('フォルダ列挙');
+    for await(const entry of directory.values()){checkAbort(task.signal);if(entry.kind==='file'){if(/\.(png|jpe?g|webp|gif|avif)$/i.test(entry.name)){entries.push({handle:entry,directory});task.result(entry.name);}else if(/\.json$/i.test(entry.name))drafts.set(entry.name,entry);}if(++scanned%20===0)await yieldToBrowser();}
+    for(const entry of entries)entry.draftHandle=drafts.get(draftFileName(entry.handle.name));
     entries.sort((a,b)=>a.handle.name.localeCompare(b.handle.name,'ja',{numeric:true}));await addFiles(entries,task);
   },'画像追加',2);
 };
 $('files').onclick = () => {if(!busy)$('fileInput').click();};
-function addImageFiles(files) {
+function addImageFiles(files,{withDrafts=false}={}) {
   if(readOnly){status('閲覧専用のプロジェクトには画像を追加できない。');return;}
   if (busy) return;
   const images = [...files].filter(file => /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name))
     .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
   if (!images.length) { status('追加できる画像がない。PNG / JPEG / WebP / GIF / AVIFを選択してほしい。'); return; }
-  return guard(task => addFiles(images.map(file => ({file})), task), '画像追加');
+  const drafts=withDrafts?new Map([...files].map(file=>[file.webkitRelativePath||file.name,file])):new Map();
+  return guard(task => addFiles(images.map(file => ({file,draftFile:drafts.get(draftFileName(file.webkitRelativePath||file.name))})), task), '画像追加');
 }
 for (const id of ['fileInput', 'folderInput']) $(id).onchange = event => {
   const files = [...event.target.files]; event.target.value = '';
-  addImageFiles(files);
+  addImageFiles(files,{withDrafts:id==='folderInput'});
 };
 function isFileDrop(event) {
   return !thumbnailDrag && [...(event.dataTransfer?.types || [])].includes('Files');

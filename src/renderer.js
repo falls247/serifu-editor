@@ -3,8 +3,8 @@ import { strokeGeometry, strokePolygon, strokeBounds } from './sfx-stroke-geomet
 import {unionOuterContour,glyphGroupBounds,resolveOutlineGroups} from './sfx-outline-groups.js';
 import { inkSeed, distressMask, printDistressMask, directionalBlur, dilateMask, adjustInkThickness, glyphVariation } from './ink.js';
 import { glyphFontDescription, clearFontCache } from './fonts.js';
-import { newBalloon, balloonHit, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
-import { newCaption, paintCaption } from './captions.js';
+import { newBalloon, balloonHit, balloonOutline, paintBalloon, clipBalloon, paintOrder, balloonContentBox } from './balloons.js';
+import { newCaption, captionOutline, paintCaption } from './captions.js';
 import { graphemes, verticalRotation, verticalPunctuationOffset } from './typography.js';
 import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
 import { imageMatrix } from './image-edit.js';
@@ -406,6 +406,112 @@ export function paintEditedSfx(ctx,layer){
     if(eligible)for(const item of eligible)joined.add(item);
   }
   for(const item of scene.items){if(item.type==='stroke')paintSfxStroke(ctx,item,scene.positions,layer,{withoutOutline:joined.has(item)});else renderSfxGlyph(ctx,layer,item,{withoutOutline:joined.has(item)});}
+}
+
+function emptyBounds(){return {minX:Infinity,minY:Infinity,maxX:-Infinity,maxY:-Infinity};}
+function includePoint(bounds,x,y){bounds.minX=Math.min(bounds.minX,x);bounds.minY=Math.min(bounds.minY,y);bounds.maxX=Math.max(bounds.maxX,x);bounds.maxY=Math.max(bounds.maxY,y);}
+function includeRect(bounds,x,y,width,height,angle=0){
+  const c=Math.cos(angle),s=Math.sin(angle);
+  for(const dx of [-width/2,width/2])for(const dy of [-height/2,height/2])includePoint(bounds,x+dx*c-dy*s,y+dx*s+dy*c);
+}
+function includePoints(bounds,points){for(const point of points)includePoint(bounds,point.x,point.y);}
+function includeBounds(bounds,other){if(other)includePoint(bounds,other.minX,other.minY),includePoint(bounds,other.maxX,other.maxY);}
+function inflateBounds(bounds,padX,padY=padX){if(!Number.isFinite(bounds.minX))return;bounds.minX-=padX;bounds.maxX+=padX;bounds.minY-=padY;bounds.maxY+=padY;}
+function captionBorderPad(layer,points){
+  const width=layer.borderWidth??0;if(width<=0)return 0;
+  if(['brush','dry-brush'].includes(layer.borderStyle))return width*4+3;
+  const half=width/2,vertices=points.slice(0,-1);let pad=half;
+  for(let i=0;i<vertices.length;i++){
+    const previous=vertices[(i+vertices.length-1)%vertices.length],point=vertices[i],next=vertices[(i+1)%vertices.length];
+    const ax=point.x-previous.x,ay=point.y-previous.y,bx=next.x-point.x,by=next.y-point.y,al=Math.hypot(ax,ay)||1,bl=Math.hypot(bx,by)||1;
+    const turn=Math.acos(clamp((ax*bx+ay*by)/(al*bl),-1,1));
+    pad=Math.max(pad,Math.min(half*10,half/Math.max(.0001,Math.cos(turn/2))));
+  }
+  return pad+2;
+}
+function rotateBounds(bounds,angle){
+  const rotated=emptyBounds(),c=Math.cos(angle),s=Math.sin(angle);
+  for(const x of [bounds.minX,bounds.maxX])for(const y of [bounds.minY,bounds.maxY])includePoint(rotated,x*c-y*s,x*s+y*c);
+  return rotated;
+}
+function textMetrics(ctx,layer,glyph){
+  const sized=layer.size===glyph.size?layer:{...layer,size:glyph.size};
+  const description=glyphFontDescription(ctx,sized,glyph.char);ctx.font=`${description.weight} ${glyph.size}px ${description.family}`;
+  ctx.textAlign='center';ctx.textBaseline='middle';
+  const metrics=ctx.measureText(glyph.char),width=metrics.width||glyph.size,height=glyph.size;
+  return {left:-(metrics.actualBoundingBoxLeft??width/2),right:metrics.actualBoundingBoxRight??width/2,top:-(metrics.actualBoundingBoxAscent??height*.8),bottom:metrics.actualBoundingBoxDescent??height*.2};
+}
+function includeTextGlyph(bounds,ctx,layer,glyph){
+  const metrics=textMetrics(ctx,layer,glyph),corner=verticalPunctuationOffset(ctx,glyph.char,glyph.size,layer.vertical);
+  const pad=Math.max(0,layer.outline??0)+Math.max(0,layer.thickness??0),angle=glyph.angle??0,c=Math.cos(angle),s=Math.sin(angle);
+  for(const x of [metrics.left-pad,metrics.right+pad])for(const y of [metrics.top-pad,metrics.bottom+pad]){
+    const px=corner.x+x,py=corner.y+y;
+    includePoint(bounds,glyph.x+px*c-py*s,glyph.y+px*s+py*c);
+  }
+}
+function sfxGlyphEnvelope(layer,glyph){
+  const size=glyph.size??layer.size,sx=Math.abs((layer.stretchX??100)/100),sy=Math.abs((layer.stretchY??100)/100),shear=Math.abs(Math.tan((layer.skew??0)*Math.PI/180));
+  const tails=size*(layer.brushTails??0)/100*.65;
+  const base=size*(2.5*Math.max(sx,sy)+shear*sy)+Math.max(0,layer.outline??0)*6+Math.max(0,layer.thickness??0)*6+tails*2;
+  return {width:Math.ceil(base+Math.max(0,layer.blurX??0)*3.5),height:Math.ceil(base+Math.max(0,layer.blurY??0)*3.5)};
+}
+function includeEditedSfx(bounds,ctx,layer){
+  const scene=sfxScene(ctx,layer);
+  for(const item of scene.items){
+    if(item.type==='stroke')includeBounds(bounds,item.bounds);
+    else{
+      const width=item.surface.drawWidth,height=item.surface.drawHeight;
+      const corners=[{x:-width/2,y:-height/2},{x:-width/2,y:height/2},{x:width/2,y:-height/2},{x:width/2,y:height/2}];
+      for(const point of corners){const local=itemToLocal(item,point);includePoint(bounds,local.x,local.y);}
+    }
+  }
+  if(!scene.items.length)return;
+  const strokePad=Math.max(0,...layer.lettering.strokes.map(stroke=>Math.max(stroke.lookOverride?.outlineWidth??layer.outline,0)*3));
+  const unionWidth=Math.max(layer.outline,...layer.lettering.outlineGroups.map(group=>group.styleOverride?.width??layer.outline));
+  const unionPad=layer.lettering.outlineMode==='union'?Math.ceil(unionWidth+layer.blur+layer.motionBlur+5):0;
+  const pad=Math.max(strokePad,unionPad,layer.blur*3+layer.motionBlur,layer.blurX*4,layer.blurY*4,layer.size*.8*(layer.brushTails||0)/100,8);
+  inflateBounds(bounds,pad);
+}
+
+// Returns painted content bounds relative to the layer origin, after its rotation.
+// Selection handles stay out of this measurement; the selection box itself remains included.
+export function layerBounds(ctx,layer){
+  ctx.save();
+  try{
+    const bounds=emptyBounds();
+    includeRect(bounds,0,0,layer.w,layer.h);
+    if(layer.kind==='balloon'){
+      const outline=balloonOutline(layer);includePoints(bounds,outline);
+      const borderPad=layer.borderStyle==='brush'||layer.borderStyle==='dry-brush'?(layer.borderWidth??0)*4+3:(layer.borderWidth??0)/2+2;
+      inflateBounds(bounds,borderPad);
+      if(layer.shadowEnabled){
+        const shadow=emptyBounds();includePoints(shadow,outline.map(p=>({x:p.x+(layer.shadowOffsetX??0),y:p.y+(layer.shadowOffsetY??0)})));
+        inflateBounds(shadow,Math.max(1,(layer.shadowBlur??0)*3));includeBounds(bounds,shadow);
+      }
+    }else if(layer.kind==='caption'){
+      const outline=captionOutline(layer);includePoints(bounds,outline);
+      inflateBounds(bounds,captionBorderPad(layer,outline));
+    }else if(layer.kind==='sfx'&&layer.lettering?.enabled){
+      includeEditedSfx(bounds,ctx,layer);
+    }else{
+      const glyphs=textGlyphs(ctx,layer);
+      if(layer.kind==='sfx'){
+        const filterPad=(layer.motionBlur??0)+Math.max(0,layer.blur??0)*3;
+        for(const glyph of glyphs){
+          const envelope=sfxGlyphEnvelope(layer,glyph),shift=(glyph.shift??0)*glyph.baseSize*(layer.stretchX/100),rumble=layer.effect==='rumble';
+          const x=glyph.x+shift+(rumble?Math.sin(glyph.index*2.3)*layer.size*.06:0),y=glyph.y+(rumble?Math.cos(glyph.index*1.9)*layer.size*.04:0);
+          const angle=(glyph.angle??0)+(rumble?(glyph.index%2?1:-1)*.07:0),scale=glyph.drawScale??1;
+          includeRect(bounds,x,y,envelope.width*scale+filterPad*2,envelope.height*scale+filterPad*2,angle);
+        }
+      }else{
+        for(const glyph of glyphs)includeTextGlyph(bounds,ctx,layer,glyph);
+      }
+    }
+    if(layer.kind==='sfx'&&['burst','speed','rumble'].includes(layer.effect))inflateBounds(bounds,Math.max(2,layer.size*.07));
+    return rotateBounds(bounds,(layer.rotation??0)*Math.PI/180);
+  }finally{
+    ctx.restore();
+  }
 }
 
 function hasMaskWork(options) {

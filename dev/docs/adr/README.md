@@ -40,3 +40,4 @@
 - [ADR-0026: 原寸プレビュー操作中の背景描画を遅延する](0026-preview-interaction-priority.md)
 
 - [ADR-0027: SFX文字単位編集とプロジェクト別の永続化](0027-sfx-lettering-foundation.md)
+- [ADR-0028: 画像別JSON下書きの取り込みと自動配置](0028-annotation-draft-import.md)
