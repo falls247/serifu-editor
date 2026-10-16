@@ -51,6 +51,10 @@ export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify
       mode.strokeRuns=[];mode.editMode='glyph';mode.pointSelection=[];
     }else if(picked?.type==='stroke'){
       mode.strokeRun=picked.stroke.runStart;mode.strokeRuns=event.shiftKey?[...new Set([...(mode.strokeRuns||[]),picked.stroke.runStart])]:[picked.stroke.runStart];mode.indices=[];mode.selected=null;mode.editMode='glyph';mode.pointSelection=[];operation='move';
+    }else if(mode.editMode==='glyph'&&selectedBounds&&
+      point.x>=selectedBounds.minX-3/scale&&point.x<=selectedBounds.maxX+3/scale&&
+      point.y>=selectedBounds.minY-3/scale&&point.y<=selectedBounds.maxY+3/scale){
+      operation='move';
     }else{operation=event.pointerType==='touch'&&mode.selectionTool!=='lasso'&&mode.selectionTool!=='rectangle'?'pan':mode.selectionTool==='lasso'?'lasso':'rectangle';if(!event.shiftKey){mode.indices=[];mode.selected=null;mode.strokeRuns=[];}}
   }
   const strokeRuns=mode.editMode==='glyph'?[...(mode.strokeRuns||[])]:[];

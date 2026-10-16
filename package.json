@@ -42,6 +42,7 @@
     "test:sfx-stroke": "node scripts/sfx-stroke-smoke.mjs",
     "test:sfx-curve-add": "node scripts/sfx-curve-add-smoke.mjs",
     "test:sfx-movement": "node scripts/sfx-glyph-movement-smoke.mjs",
+    "test:sfx-selection-drag": "node scripts/sfx-selection-drag-smoke.mjs",
     "test:sfx-scroll": "node scripts/sfx-scroll-smoke.mjs",
     "test:sfx-magnifier": "node scripts/sfx-magnifier-smoke.mjs",
     "test:sfx-point-overlay": "node scripts/sfx-point-overlay-smoke.mjs",
