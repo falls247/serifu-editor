@@ -43,6 +43,7 @@
     "test:project-history": "node scripts/project-history-smoke.mjs",
     "test:sfx-stroke": "node scripts/sfx-stroke-smoke.mjs",
     "test:sfx-stroke-size": "node scripts/sfx-stroke-size-smoke.mjs",
+    "test:sfx-stroke-numeric-drag": "node scripts/sfx-stroke-numeric-drag-smoke.mjs",
     "test:sfx-curve-add": "node scripts/sfx-curve-add-smoke.mjs",
     "test:sfx-movement": "node scripts/sfx-glyph-movement-smoke.mjs",
     "test:sfx-selection-drag": "node scripts/sfx-selection-drag-smoke.mjs",

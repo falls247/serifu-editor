@@ -301,6 +301,8 @@ html{scroll-padding-top:140px;scroll-padding-bottom:110px}
 .preview-focus-pan[aria-pressed=true]{background:#35422a;border-color:var(--lime);color:var(--lime);box-shadow:0 0 0 1px #c8ee9166,0 2px 8px #0009}
 .preview-focus-pan:active{cursor:grabbing}
 @media(max-width:520px){.preview-focus-zoom input{width:54px}.preview-focus-pan{width:40px;height:40px;top:6px;right:6px}}
+.sfx-stroke-panel input[data-glyph-stroke-width],.sfx-stroke-panel input[data-glyph-stroke-width-scale]{cursor:ns-resize;touch-action:none}
+.sfx-stroke-panel input.stroke-numeric-dragging{user-select:none}
 .image-row.sfx-editing .original-pane{display:none}
 .image-row.sfx-editing .dialogue-pane{
   grid-column:1;grid-row:1;max-height:max(320px,calc(100dvh - 180px));

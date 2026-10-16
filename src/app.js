@@ -711,7 +711,7 @@ function updateControls(p) {
       if(layer.lettering?.enabled&&layer.lettering.strokes.length){
         const requestedRun=Number(card.querySelector('[data-glyph-stroke-run]')?.value),run=layer.lettering.strokes.find(item=>item.runStart===requestedRun)??layer.lettering.strokes[0],widthScale=strokeWidthScale(run,layer.size);
         for(const [field,index] of [['start',0],['end',run.widths.length-1]]){
-          const input=card.querySelector(`[data-glyph-stroke-width=${field}]`);if(input&&input!==document.activeElement){input.max=String(500*widthScale);input.value=String(Number((run.widths[index].w*widthScale).toFixed(4)));}
+          const input=card.querySelector(`[data-glyph-stroke-width=${field}]`);if(input&&input!==document.activeElement){input.max=String(500*widthScale);input.value=strokeWidthControlDisplay(run,index,layer.size);}
         }
         const multiplier=card.querySelector('[data-glyph-stroke-width-scale]');if(multiplier&&multiplier!==document.activeElement)multiplier.value=String(Number((run.widthMultiplier*100).toFixed(4)));
         const mode=activeGlyphEdit(p,layer),advancedWidth=card.querySelector('[data-sfx-editor=widthW]');
@@ -1130,6 +1130,60 @@ const letteringFields={dx:['横位置',-30000,30000],dy:['縦位置',-30000,3000
   rotation:['回転',-3600,3600],scaleX:['横倍率',.01,20],scaleY:['縦倍率',.01,20],
   shear:['せん断',-5,5],z:['重なり順',-100000,100000]};
 const activeGlyphEdit=(p,l)=>l?.kind==='sfx'&&l.lettering?.enabled&&p.glyphEdit?.id===l.id?p.glyphEdit:null;
+const strokeWidthControlDisplay=(run,index,size)=>{
+  const scale=strokeWidthScale(run,size),max=Math.floor((500*scale+1e-8)*10)/10;
+  return Math.min(Number((run.widths[index].w*scale).toFixed(1)),max).toFixed(1);
+};
+function connectStrokeNumericDrag(input,p,l,run,field,index=null){
+  let gesture=null,suppressClick=false;
+  const isMultiplier=field==='scale';
+  const currentValue=()=>isMultiplier?run.widthMultiplier*100:run.widths[index].w*strokeWidthScale(run,l.size);
+  const displayValue=value=>isMultiplier?String(Number(value.toFixed(4))):value.toFixed(1);
+  const rollback=drag=>{
+    if(!drag.checkpointed)return;
+    if(!restore(p,'undo'))return;
+    p.undo=drag.undoBefore;p.redo=drag.redoBefore;
+    dirty();scheduleThumbnailRefresh(p);renderCards(p);drawPage(p);updateGlobal();
+  };
+  input.addEventListener('pointerdown',event=>{
+    if(editLocked()||!event.isPrimary||event.button!==0||gesture)return;
+    const entered=Number(input.value),startValue=input.value.trim()!==''&&Number.isFinite(entered)?entered:currentValue();
+    gesture={pointerId:event.pointerId,startY:event.clientY,startValue,checkpointed:false};
+    input.setPointerCapture(event.pointerId);
+  });
+  input.addEventListener('pointermove',event=>{
+    const drag=gesture;if(!drag||drag.pointerId!==event.pointerId)return;
+    if(editLocked())return;
+    const verticalDelta=drag.startY-event.clientY;
+    if(!drag.active){if(Math.abs(verticalDelta)<4)return;drag.active=true;input.classList.add('stroke-numeric-dragging');}
+    event.preventDefault();
+    const max=isMultiplier?500:Math.floor((500*strokeWidthScale(run,l.size)+1e-8)*10)/10;
+    const increment=isMultiplier?Math.round(verticalDelta):Number((verticalDelta*.1).toFixed(1));
+    const bounded=clamp(drag.startValue+increment,isMultiplier?1:0,max);
+    const next=isMultiplier?bounded:Math.min(Number(bounded.toFixed(1)),max);
+    if(next===Number(input.value))return;
+    if(!drag.checkpointed){drag.undoBefore=p.undo.slice();drag.redoBefore=p.redo.slice();checkpoint(p);drag.checkpointed=true;}
+    if(isMultiplier)run.widthMultiplier=next/100;
+    else run.widths[index].w=next/strokeWidthScale(run,l.size);
+    input.value=displayValue(next);
+    markChanged(p);drawPage(p);updateControls(p);
+  });
+  const finish=event=>{
+    const drag=gesture;if(drag?.pointerId!==event.pointerId)return;
+    gesture=null;input.classList.remove('stroke-numeric-dragging');
+    if(event.type==='pointerup'&&drag.active){
+      suppressClick=true;setTimeout(()=>{suppressClick=false;},0);
+      if(drag.checkpointed&&Math.abs(currentValue()-drag.startValue)<1e-6)rollback(drag);
+      else if(drag.checkpointed){updateControls(p);drawPage(p);updateGlobal();}
+    }else if(drag.checkpointed)rollback(drag);
+  };
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])input.addEventListener(type,finish);
+  input.addEventListener('click',event=>{
+    if(!suppressClick)return;
+    suppressClick=false;event.preventDefault();event.stopPropagation();
+  });
+}
+
 function sfxLetteringPanel(p,l){
   const panel=element('section','sfx-lettering-panel'),mode=activeGlyphEdit(p,l);
   panel.append(button(mode?'sfx-glyph-exit':'sfx-glyph-enter',mode?'文字編集を終了':'文字単位編集'));
@@ -1205,9 +1259,9 @@ function sfxLetteringPanel(p,l){
     select.value=run.mode;modeLabel.append(select);fieldset.append(modeLabel);
     for(const [field,title,index] of [['start','始点の線幅',0],['end','終点の線幅',run.widths.length-1]]){
       const label=element('label','',title),input=element('input');input.type='number';input.min='0';input.max='500';
-      input.dataset.glyphStrokeWidth=field;input.max=String(500*strokeWidthScale(run,l.size));input.value=String(Number((run.widths[index].w*strokeWidthScale(run,l.size)).toFixed(4)));label.append(input);fieldset.append(label);
+      input.step='0.1';input.dataset.glyphStrokeWidth=field;input.max=String(500*strokeWidthScale(run,l.size));input.value=strokeWidthControlDisplay(run,index,l.size);input.title='上下にドラッグして線幅を調整。上で太く、下で細く。';label.append(input);fieldset.append(label);connectStrokeNumericDrag(input,p,l,run,field,index);
     }
-    const widthScaleLabel=element('label','','長音の太さ倍率（%）'),widthScale=element('input');widthScale.type='number';widthScale.min='1';widthScale.max='500';widthScale.step='1';widthScale.dataset.glyphStrokeWidthScale='true';widthScale.value=String(Number((run.widthMultiplier*100).toFixed(4)));widthScaleLabel.append(widthScale);fieldset.append(widthScaleLabel);
+    const widthScaleLabel=element('label','','長音の太さ倍率（%）'),widthScale=element('input');widthScale.type='number';widthScale.min='1';widthScale.max='500';widthScale.step='1';widthScale.dataset.glyphStrokeWidthScale='true';widthScale.value=String(Number((run.widthMultiplier*100).toFixed(4)));widthScale.title='上下にドラッグして倍率を調整。上で増加、下で減少。';widthScaleLabel.append(widthScale);fieldset.append(widthScaleLabel);connectStrokeNumericDrag(widthScale,p,l,run,'scale');
     const label=element('label','','曲線'),shape=element('select');shape.dataset.glyphStrokeShape='true';
     for(const [name,title] of [['straight','直線'],['arc','円弧'],['s','S字'],['wave','波形']]){const option=element('option','',title);option.value=name;shape.append(option);}
     shape.value=run.shape;label.append(shape);fieldset.append(label);
@@ -1707,6 +1761,12 @@ $('deck').addEventListener('change',event=>{
     if(input.matches('[data-glyph-stroke-point-axis]')&&(!input.value||!Number.isFinite(Number(input.value))||Math.abs(Number(input.value))>10))return;
     if(input.matches('[data-glyph-stroke-width]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<0||Number(input.value)>500*strokeWidthScale(run,l.size)))return;
     if(input.matches('[data-glyph-stroke-width-scale]')&&(!Number.isFinite(Number(input.value))||Number(input.value)<1||Number(input.value)>500))return;
+    if(input.matches('[data-glyph-stroke-width]')){
+      const index=input.dataset.glyphStrokeWidth==='start'?0:run.widths.length-1,scale=strokeWidthScale(run,l.size),max=500*scale;
+      const effective=Math.min(Number(Number(input.value).toFixed(1)),Math.floor((max+1e-8)*10)/10);
+      if(run.widths[index].w===effective/scale){input.value=effective.toFixed(1);return;}
+    }
+    if(input.matches('[data-glyph-stroke-width-scale]')&&run.widthMultiplier===Number(input.value)/100)return;
     edit(p,()=>{
       if(input.matches('[data-glyph-stroke-cap]'))run[input.dataset.glyphStrokeCap].cap=input.value;
       if(input.matches('[data-glyph-stroke-detach]')){const side=input.dataset.glyphStrokeDetach,frame=strokeFrame(run,sceneFor(p,l).positions,{vertical:l.vertical,size:l.size});if(input.checked&&frame)run[side].fixedPosition={...(side==='start'?frame.start:frame.end)};else delete run[side].fixedPosition;run[side].detached=input.checked;}
@@ -1716,7 +1776,10 @@ $('deck').addEventListener('change',event=>{
       }
       if(input.matches('[data-glyph-stroke-mode]'))run.mode=input.value;
       if(input.matches('[data-glyph-stroke-shape]')){run.shape=input.value;run.path.points=strokeShapePoints(input.value);}
-      if(input.matches('[data-glyph-stroke-width]'))run.widths[input.dataset.glyphStrokeWidth==='start'?0:run.widths.length-1].w=Number(input.value)/strokeWidthScale(run,l.size);
+      if(input.matches('[data-glyph-stroke-width]')){
+        const index=input.dataset.glyphStrokeWidth==='start'?0:run.widths.length-1,max=500*strokeWidthScale(run,l.size),effective=Math.min(Number(Number(input.value).toFixed(1)),Math.floor((max+1e-8)*10)/10);
+        run.widths[index].w=effective/strokeWidthScale(run,l.size);
+      }
       if(input.matches('[data-glyph-stroke-width-scale]'))run.widthMultiplier=Number(input.value)/100;
     });return;
   }
