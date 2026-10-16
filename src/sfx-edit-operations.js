@@ -39,7 +39,7 @@ export function pasteLetteringSelection(layer,clipboard,{after=null,position={x:
     const run=next.lettering.strokes.find(s=>s.runStart===insert+original.runStart);if(!run)continue;
     const value=structuredClone(original);
     if(strokePart==='all'||strokePart==='shape'){run.mode=value.mode;run.path=value.path;run.shape=value.shape;run.start=value.start;run.end=value.end;delete run.start.fixedPosition;delete run.end.fixedPosition;run.start.detached=false;run.end.detached=false;}
-    if(strokePart==='all'||strokePart==='width')run.widths=value.widths;
+    if(strokePart==='all'||strokePart==='width'){run.widths=value.widths;run.sizeReference=value.sizeReference??layer.size;run.widthMultiplier=value.widthMultiplier??1;}
     if(same&&(strokePart==='all'||strokePart==='look'))run.lookOverride=value.lookOverride;
     else run.lookOverride=null;
   }
@@ -117,5 +117,5 @@ export function scaleLetteringData(layer,sx,sy){
   const l=layer.lettering;if(!l)return;
   const factor=Math.min(sx,sy);if(l.baseBox){l.baseBox.w=Math.max(30,Math.min(30000,l.baseBox.w*sx));l.baseBox.h=Math.max(30,Math.min(30000,l.baseBox.h*sy));}
   for(const g of l.glyphs){g.dx*=sx;g.dy*=sy;if(g.origin){g.origin.x*=sx;g.origin.y*=sy;}if(g.pivot.preset==='custom'){g.pivot.x*=sx;g.pivot.y*=sy;}}
-  for(const stroke of l.strokes){if(stroke.lockedLength)stroke.lockedLength*=factor;for(const knot of stroke.widths){knot.w=Math.min(500,knot.w*factor);if(knot.distance)knot.distance*=factor;}for(const side of ['start','end']){const p=stroke[side].fixedPosition;if(p){p.x*=sx;p.y*=sy;}}}
+  for(const stroke of l.strokes){if(stroke.lockedLength)stroke.lockedLength*=factor;for(const knot of stroke.widths)if(knot.distance)knot.distance*=factor;for(const side of ['start','end']){const p=stroke[side].fixedPosition;if(p){p.x*=sx;p.y*=sy;}}}
 }

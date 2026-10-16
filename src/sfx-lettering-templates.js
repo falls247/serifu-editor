@@ -90,8 +90,8 @@ export function applySfxTemplate(layer,template,{mode='all',reuseSeed=false}={})
     for(let i=0;i<runs.length;i++){
       if(!design.strokes.length)break;
       const sample=design.strokes[Math.min(design.strokes.length-1,Math.round((runs.length<2?0:i/(runs.length-1))*(design.strokes.length-1)))].value;
-      lettering.strokes[i]={...structuredClone(sample),runStart:runs[i].runStart,runLength:runs[i].runLength,
-        widths:sample.widths.map(p=>({...p,w:clamp(p.w*base.size/design.baseSize,0,500)}))};
+      lettering.strokes[i]={...structuredClone(sample),sizeReference:sample.sizeReference??design.baseSize,widthMultiplier:sample.widthMultiplier??1,runStart:runs[i].runStart,runLength:runs[i].runLength,
+        widths:structuredClone(sample.widths)};
     }
     if(!reuseSeed){
       lettering.layoutSeed=crypto.getRandomValues(new Uint32Array(1))[0];
@@ -140,6 +140,8 @@ export function validateStrokePresets(records){
   if(!Array.isArray(records)||records.length>100)throw new Error('線プリセットは100件まで');
   const seen=new Set();return records.map(record=>{
     if(!record||typeof record.name!=='string'||!record.name.trim()||record.name.length>100||seen.has(record.name)||!record.value)throw new Error('線プリセットの名前が不正');seen.add(record.name);
-    const value=normalizeLettering({schemaVersion:1,enabled:true,strokes:[{...record.value,runStart:0,runLength:2}]},'ーー',{size:80}).strokes[0];return {name:record.name,value};
+    const value=normalizeLettering({schemaVersion:1,enabled:true,strokes:[{...record.value,runStart:0,runLength:2}]},'ーー',{size:80}).strokes[0];
+    if(!Object.hasOwn(record.value,'sizeReference'))delete value.sizeReference;
+    return {name:record.name,value};
   });
 }

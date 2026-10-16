@@ -8,6 +8,14 @@ test('遅延移行: 旧SFXを変更せず新letteringだけ生成',()=>{
   assert.deepEqual(lettering.strokes.map(x=>[x.runStart,x.runLength]),[[1,4]]);
   assert.deepEqual(sfxRuns('ーー\nー\nーー').map(x=>[x.runStart,x.runLength]),[[0,2],[5,2]]);
 });
+test('旧幅データは読込時の文字サイズを基準に保存し、その後のサイズ変更で追従',()=>{
+  const old=layer('ーー'),lettering=startLettering(old),stroke=lettering.strokes[0];
+  delete stroke.sizeReference;delete stroke.widthMultiplier;
+  const normalized=normalizeLettering(lettering,old.text,old).strokes[0];
+  assert.equal(normalized.sizeReference,old.size);assert.equal(normalized.widthMultiplier,1);
+  const restored=normalizeLettering({...lettering,strokes:[normalized]},old.text,{...old,size:160}).strokes[0];
+  assert.equal(restored.sizeReference,old.size,'saved reference size survives project reload after resizing');
+});
 test('grapheme indexはUTF-16長ではなく結合文字を1文字として数える',()=>{
   const text='あ👨‍👩‍👧‍👦か\u3099\nッ';assert.deepEqual(sfxVisibleIndices(text),[0,1,2,4]);
   assert.equal(startLettering(layer(text)).glyphs.length,4);
@@ -37,6 +45,16 @@ test('連続長音線の長さとstyleを本文変更後も継承',()=>{
   assert.deepEqual(next.lettering.strokes.map(s=>s.runLength),[5]);
   assert.equal(next.lettering.strokes[0].shape,'s');
   assert.equal(next.lettering.strokes[0].widths[0].w,35);
+});
+test('異なる基準サイズの長音線を本文変更で結合しても実幅を保つ',()=>{
+  const base=layer('ーーあーー');base.lettering=startLettering(base);
+  const [first,second]=base.lettering.strokes;
+  first.sizeReference=80;first.widthMultiplier=2;first.widths=[{t:0,w:10,interpolation:'linear'},{t:1,w:10,interpolation:'linear'}];
+  second.sizeReference=40;second.widthMultiplier=1;second.widths=[{t:0,w:20,interpolation:'linear'},{t:1,w:20,interpolation:'linear'}];
+  const merged=replaceLetteringText(base,'ーーーー','character').lettering.strokes[0];
+  assert.equal(merged.sizeReference,40);assert.equal(merged.widthMultiplier,2);
+  assert.equal(merged.widths[0].w*merged.widthMultiplier*base.size/merged.sizeReference,20);
+  assert.equal(merged.widths.at(-1).w*merged.widthMultiplier*base.size/merged.sizeReference,40);
 });
 test('文字複製/削除は原文とglyphs数を同時更新、複製seed継承',()=>{
   const base=layer('ドン');base.lettering=startLettering(base);

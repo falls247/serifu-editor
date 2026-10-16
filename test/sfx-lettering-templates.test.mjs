@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates} from '../src/sfx-lettering-templates.js';
+import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,validateStrokePresets} from '../src/sfx-lettering-templates.js';
+import {strokeGeometry} from '../src/sfx-stroke-geometry.js';
+import {defaultStroke} from '../src/sfx-lettering-model.js';
 const layer={kind:'sfx',text:'ザーーーッ',id:'original',x:210,y:240,w:400,h:320,size:80,vertical:false,font:'hand',color:'#123456',outline:2};
 test('templates retain position/text invariants and adapt to different glyph counts',()=>{
   const template=createSfxTemplate(layer,'密集');
@@ -23,4 +25,18 @@ test('template JSON validates and conflicts support three explicit policies',()=
   const renamed=mergeSfxTemplates([template],[template],{conflict:'rename'});
   assert.equal(renamed.length,2);assert.notEqual(renamed[0].id,renamed[1].id);
   assert.throws(()=>decodeSfxTemplates('{"version":999}'),/未対応/);
+});
+test('テンプレート適用後も長音幅倍率が文字サイズ比で追従',()=>{
+  const source={...layer,text:'ーー',lettering:undefined};
+  const template=createSfxTemplate(source,'太さ');template.design.strokes[0].value.widthMultiplier=2;
+  const target={...layer,text:'ーー',size:40,id:'target'};
+  const result=applySfxTemplate(target,template,{mode:'layout'}),stroke=result.lettering.strokes[0];
+  const widths=strokeGeometry(stroke,new Map([[0,{x:0,y:0}],[1,{x:80,y:0}]]),{size:result.size});
+  assert.equal(stroke.sizeReference,80);assert.equal(stroke.widthMultiplier,2);
+  assert.equal(widths[0].w,24);
+});
+test('旧線プリセットは適用先の文字サイズを基準に移行',()=>{
+  const legacy=defaultStroke(0,2,80);delete legacy.sizeReference;delete legacy.widthMultiplier;
+  const validated=validateStrokePresets([{name:'legacy',value:legacy}])[0].value;
+  assert.equal(validated.sizeReference,undefined);assert.equal(validated.widthMultiplier,1);
 });

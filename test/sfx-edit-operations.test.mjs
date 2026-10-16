@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {startLettering,replaceLetteringText} from '../src/sfx-lettering-model.js';
-import {addCurvePoint,removeCurvePoint,splitCubic,bezierPoint,sliceStroke,joinStrokes,addWidthPoint} from '../src/sfx-stroke-geometry.js';
-import {copyLetteringSelection,pasteLetteringSelection,rotateLetteringOrientation,duplicateSelectedGlyphs} from '../src/sfx-edit-operations.js';
+import {addCurvePoint,removeCurvePoint,splitCubic,bezierPoint,sliceStroke,joinStrokes,addWidthPoint,strokeGeometry} from '../src/sfx-stroke-geometry.js';
+import {copyLetteringSelection,pasteLetteringSelection,rotateLetteringOrientation,duplicateSelectedGlyphs,scaleLetteringData} from '../src/sfx-edit-operations.js';
 const layer=text=>{const l={id:'sfx1',kind:'sfx',text,size:80,w:800,h:600,vertical:false,glyphSeed:2,textureSeed:3};l.lettering=startLettering(l);return l;};
 test('ベジェ分割は全パラメータで原形状を保持、点追加/削除は有限',()=>{
  const l=layer('ザーーーーッ'),s=l.lettering.strokes[0];s.path.points=[{x:0,y:0},{x:.3,y:.4},{x:.7,y:-.4},{x:1,y:0}];
@@ -24,6 +24,18 @@ test('別SFXの文字貼付けは本文に挿入し変形を保持、外観は�
  const clip=copyLetteringSelection(source,{indices:[0],selected:0},scene),result=pasteLetteringSelection(target,clip,{after:0,position:{x:30,y:15}});
  assert.equal(result.layer.text,'ガドッ');const inserted=result.layer.lettering.glyphs[1];assert.equal(inserted.rotation,25);assert.equal(inserted.overrides.fill,null);assert.deepEqual(inserted.origin,{x:30,y:15});
  const duplicate=duplicateSelectedGlyphs(source,[0,1],scene,{offset:0});assert.equal(duplicate.text,'ドドンン');assert.equal(duplicate.lettering.glyphs[0].inkVariantSeed,duplicate.lettering.glyphs[1].inkVariantSeed);
+});
+test('長音を含む文字のコピーは基準サイズと個別太さ倍率を保つ',()=>{
+ const source=layer('ドーーン'),target=layer('ガッ');target.id='sfx2';
+ const stroke=source.lettering.strokes[0];stroke.sizeReference=40;stroke.widthMultiplier=1.75;
+ const scene={glyphs:source.lettering.glyphs.map(g=>({index:g.index,x:g.index*80,y:0,letter:{size:80}}))};
+ const clip=copyLetteringSelection(source,{indices:[1,2],selected:1},scene),result=pasteLetteringSelection(target,clip,{after:0,position:{x:30,y:15}}),pasted=result.layer.lettering.strokes[0];
+ assert.equal(result.layer.text,'ガーーッ');assert.equal(pasted.sizeReference,40);assert.equal(pasted.widthMultiplier,1.75);
+});
+test('レイヤーの拡縮は幅点を二重に拡大しない',()=>{
+ const l=layer('ー'),stroke=l.lettering.strokes[0],positions=new Map([[0,{x:0,y:0}]]),before=strokeGeometry(stroke,positions,{size:l.size})[0].w,stored=stroke.widths[0].w;
+ scaleLetteringData(l,2,2);l.size*=2;
+ assert.equal(stroke.widths[0].w,stored);assert.equal(strokeGeometry(stroke,positions,{size:l.size})[0].w,before*2);
 });
 test('縦横の往復は手動位置/回転/倍率と固定端点を保持',()=>{
  const l=layer('ドーーン');l.lettering.glyphs[0].origin={x:12,y:13};l.lettering.glyphs[0].dx=3;l.lettering.glyphs[0].dy=4;l.lettering.glyphs[0].rotation=18;l.lettering.strokes[0].start.fixedPosition={x:21,y:22};

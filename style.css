@@ -283,6 +283,23 @@ html{scroll-padding-top:140px;scroll-padding-bottom:110px}
 .image-row.sfx-editing .row-columns{
   display:grid;grid-template-columns:minmax(260px,1fr) minmax(0,1.4fr);align-items:start;
 }
+
+.preview-focus-zoom{display:flex;align-items:center;gap:4px;color:#b8c7a5;font:10px monospace}
+.preview-focus-zoom[hidden],.preview-focus-pan[hidden]{display:none}
+.preview-focus-zoom input{width:64px;margin:0;padding:5px 6px;text-align:right}
+.preview-actions [data-action=preview-focus][aria-pressed=true]{background:#35422a;border-color:#93af6f;color:var(--lime)}
+.preview-frame.preview-focus-mode{overflow:hidden;justify-content:flex-start;align-items:flex-start;overscroll-behavior:contain}
+.preview-frame.preview-focus-mode canvas.preview{flex:0 0 auto;max-width:none;max-height:none;object-fit:fill;transform-origin:0 0;will-change:transform}
+.preview-frame.preview-pan-mode{cursor:grab;touch-action:none}
+.preview-frame.preview-pan-mode:active{cursor:grabbing}
+.preview-frame.preview-pan-mode canvas.preview{cursor:grab!important}
+.preview-frame.preview-pan-mode canvas.preview:active{cursor:grabbing!important}
+.image-row.sfx-editing .preview-frame.preview-focus-mode{overflow:hidden;justify-content:flex-start;align-items:flex-start}
+.preview-focus-pan{position:absolute;z-index:3;top:7px;right:7px;width:34px;height:34px;padding:0;border:1px solid #62666d;border-radius:8px;background:#27292d;color:#b8bcc4;font-size:21px;line-height:1;touch-action:none;user-select:none;cursor:grab;box-shadow:0 2px 8px #0009}
+.preview-focus-pan:hover{background:#373a40}
+.preview-focus-pan[aria-pressed=true]{background:#35422a;border-color:var(--lime);color:var(--lime);box-shadow:0 0 0 1px #c8ee9166,0 2px 8px #0009}
+.preview-focus-pan:active{cursor:grabbing}
+@media(max-width:520px){.preview-focus-zoom input{width:54px}.preview-focus-pan{width:40px;height:40px;top:6px;right:6px}}
 .image-row.sfx-editing .original-pane{display:none}
 .image-row.sfx-editing .dialogue-pane{
   grid-column:1;grid-row:1;max-height:max(320px,calc(100dvh - 180px));

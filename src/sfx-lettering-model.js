@@ -37,6 +37,7 @@ export function defaultGlyph(index,seed=0){
 export function defaultStroke(runStart,runLength,size=40){
   return {runStart,runLength,mode:runLength===1?'font':'continuous',shape:'straight',
     path:{type:'bezier',points:[{x:0,y:0},{x:1/3,y:0},{x:2/3,y:0},{x:1,y:0}]},
+    sizeReference:size,widthMultiplier:1,
     widths:[{t:0,w:size*.3,interpolation:'smooth'},{t:1,w:size*.08,interpolation:'smooth'}],
     start:{attach:'previous',relation:'touch',offset:0,detached:false,cap:'round',sharpness:50,angle:0,length:0},
     end:{attach:'next',relation:'touch',offset:0,detached:false,cap:'taper',sharpness:50,angle:0,length:0},
@@ -93,7 +94,8 @@ function normalizeStroke(input,expected,size,inkSeed=0){
   if(widths[0].t!==0||widths.at(-1).t!==1||widths.some((p,i)=>i&&p.t<=widths[i-1].t))throw new Error('SFX 線幅点の順序が不正');
   const look=input.lookOverride??null;
   if(look!==null){plain(look,'線style');color(look.fill??null,'線色');color(look.outlineColor??null,'線輪郭色');if(look.outlineWidth!=null)finite(look.outlineWidth,0,80,'線輪郭幅');}
-  return {inkVariantSeed:integer(input.inkVariantSeed??((inkSeed+Math.imul(runStart+1,2654435761))>>>0),0,4294967295,'線seed'),runStart,runLength,mode,shape,path:{type:'bezier',points,handleMode:enumValue(raw.handleMode??'independent',['smooth','sharp','independent'],'ハンドル')},widths,
+  return {inkVariantSeed:integer(input.inkVariantSeed??((inkSeed+Math.imul(runStart+1,2654435761))>>>0),0,4294967295,'線seed'),runStart,runLength,mode,shape,path:{type:'bezier',points,handleMode:enumValue(raw.handleMode??'independent',['smooth','sharp','independent'],'ハンドル')},
+    sizeReference:finite(input.sizeReference??size,8,500,'線幅基準サイズ'),widthMultiplier:finite(input.widthMultiplier??1,.01,5,'線幅倍率'),widths,
     start:normalizeEndpoint(input.start,base.start),end:normalizeEndpoint(input.end,base.end),
     lookOverride:look===null?null:{fill:look.fill??null,outlineColor:look.outlineColor??null,outlineWidth:look.outlineWidth??null},
     manualLengthLocked:!!input.manualLengthLocked,lockedLength:input.lockedLength==null?null:finite(input.lockedLength,0,30000,'固定長')};
@@ -164,9 +166,13 @@ export function replaceLetteringText(layer,newText,mode='position'){
       let part=inherited.at(-1);
       if(!part||part.stroke!==stroke){part={stroke,start:source,end:source};inherited.push(part);}else part.end=source;
     }
+    const widthSources=inherited.map(part=>part.stroke),widthReference=Math.min(...widthSources.map(stroke=>stroke.sizeReference)),widthMultiplier=Math.max(...widthSources.map(stroke=>stroke.widthMultiplier));
     let combined=null,total=0;
     for(const part of inherited){
       const count=part.end-part.start+1,fragment=sliceStroke(part.stroke,(part.start-part.stroke.runStart)/part.stroke.runLength,(part.end-part.stroke.runStart+1)/part.stroke.runLength);
+      const widthFactor=widthReference/part.stroke.sizeReference*part.stroke.widthMultiplier/widthMultiplier;
+      fragment.sizeReference=widthReference;fragment.widthMultiplier=widthMultiplier;
+      fragment.widths=fragment.widths.map(point=>({...point,w:point.w*widthFactor}));
       combined=combined?joinStrokes(combined,fragment,total/(total+count)):fragment;total+=count;
     }
     const result=combined??defaultStroke(run.runStart,run.runLength,layer.size);

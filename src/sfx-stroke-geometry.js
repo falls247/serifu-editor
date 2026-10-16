@@ -13,6 +13,11 @@ function sampleWidth(knots,t){
   const v=a.interpolation==='smooth'?u*u*(3-2*u):u;
   return a.w+(b.w-a.w)*v;
 }
+export function strokeWidthScale(stroke,size=40){
+  const reference=Number.isFinite(stroke?.sizeReference)&&stroke.sizeReference>0?stroke.sizeReference:size;
+  const multiplier=Number.isFinite(stroke?.widthMultiplier)&&stroke.widthMultiplier>0?stroke.widthMultiplier:1;
+  return size/reference*multiplier;
+}
 export function bezierPoint(points,t){
   if(points.length===4){
     const s=1-t;return {x:s*s*s*points[0].x+3*s*s*t*points[1].x+3*s*t*t*points[2].x+t*t*t*points[3].x,
@@ -45,13 +50,13 @@ export function strokeGeometry(stroke,positions,{vertical=false,size=40,samples=
   const fallback=stroke.runLength*size*.65;
   if(length<size*.1){end.x=start.x+axis.x*fallback;end.y=start.y+axis.y*fallback;}
   const vx=end.x-start.x,vy=end.y-start.y,dist=Math.hypot(vx,vy),nx=-vy/dist,ny=vx/dist;
-  const n=Math.max(16,Math.min(128,Math.round(samples))),result=[];
+  const widthScale=strokeWidthScale(stroke,size),n=Math.max(16,Math.min(128,Math.round(samples))),result=[];
   for(let i=0;i<=n;i++){
     const t=i/n,p=bezierPoint(stroke.path.points,t);
     // x: interpolation along line, y: perpendicular deviation measured in line lengths
     let x=start.x+vx*p.x+nx*dist*p.y,y=start.y+vy*p.x+ny*dist*p.y;
     for(const side of ['start','end']){const cap=stroke[side],u=Math.min(1,(side==='start'?t:1-t)*dist/Math.max(1,cap.length||dist*.05));const shift=u*(1-u)*Math.sin((cap.angle||0)*Math.PI/180)*(cap.length||size*.15);x+=nx*shift;y+=ny*shift;}
-    const knots=stroke.widths.map(p=>p.fixed&&Number.isFinite(p.distance)?{...p,t:Math.min(1,p.distance/dist)}:p).sort((a,b)=>a.t-b.t);
+    const knots=stroke.widths.map(p=>({...p,w:p.w*widthScale,...(p.fixed&&Number.isFinite(p.distance)?{t:Math.min(1,p.distance/dist)}:{})})).sort((a,b)=>a.t-b.t);
     let w=sampleWidth(knots,t);
     for(const side of ['start','end']){const cap=stroke[side],u=Math.min(1,(side==='start'?t:1-t)*dist/Math.max(1,cap.length||dist*.05));if(['taper','brush'].includes(cap.cap)){w*=Math.pow(u,cap.cap==='brush'?.5+(cap.sharpness??50)/200:1+(cap.sharpness??50)/50);} }
     w*=1;

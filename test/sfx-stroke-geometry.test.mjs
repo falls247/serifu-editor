@@ -15,3 +15,11 @@ test('幅制御点のstepとtaperは左端/右端の太さを制御',()=>{
   const p=strokeGeometry(s,new Map([[0,{x:0,y:0}],[1,{x:80,y:0}]]),{size:50});
   assert.equal(p[0].w,0);assert.equal(p.at(-1).w,0);assert.ok(p[20].w>0);
 });
+test('長音の幅は文字サイズと線ごとの倍率に追従',()=>{
+  const s=defaultStroke(0,2,40),positions=new Map([[0,{x:0,y:0}],[1,{x:80,y:0}]]);
+  s.widths=[{t:0,w:12,interpolation:'linear'},{t:1,w:8,interpolation:'linear'}];
+  assert.equal(strokeGeometry(s,positions,{size:40})[0].w,12);
+  assert.equal(strokeGeometry(s,positions,{size:80})[0].w,24);
+  s.widthMultiplier=2;
+  assert.equal(strokeGeometry(s,positions,{size:80})[0].w,48);
+});

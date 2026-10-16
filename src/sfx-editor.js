@@ -1,5 +1,5 @@
 import {sfxScene,sfxItemHit,sfxResolvedGroups,paintEditedSfx} from './renderer.js';
-import {strokeGeometry,strokeFrame,pathToLocal,localToPath,bezierPoint,moveCurvePoint,addCurvePoint,removeCurvePoint,addWidthPoint,removeWidthPoint} from './sfx-stroke-geometry.js';
+import {strokeGeometry,strokeWidthScale,strokeFrame,pathToLocal,localToPath,bezierPoint,moveCurvePoint,addCurvePoint,removeCurvePoint,addWidthPoint,removeWidthPoint} from './sfx-stroke-geometry.js';
 import {glyphSelection,selectGlyph,freezeGlyphOrigins,duplicateSelectedGlyphs,transformGlyphSelection,transformStrokeSelection,selectionRegion} from './sfx-edit-operations.js';
 
 export const sceneFor=(p,l)=>sfxScene(p.canvas.getContext('2d'),l);
@@ -15,17 +15,17 @@ export function strokeHandles(scene,l,mode){
   const frame=strokeFrame(run,scene.positions,{vertical:l.vertical,size:l.size});if(!frame)return [];
   const list=[];
   if(mode.editMode!=='width')run.path.points.forEach((p,i)=>list.push({kind:'curve',index:i,run:run.runStart,...pathToLocal(frame,p)}));
-  if(mode.editMode!=='curve')for(let i=0;i<run.widths.length;i++){const knot=run.widths[i],p=pathToLocal(frame,bezierPoint(run.path.points,knot.t));list.push({kind:'width',index:i,run:run.runStart,x:p.x+frame.nx*knot.w/2,y:p.y+frame.ny*knot.w/2});}
+  if(mode.editMode!=='curve')for(let i=0;i<run.widths.length;i++){const knot=run.widths[i],p=pathToLocal(frame,bezierPoint(run.path.points,knot.t)),width=knot.w*strokeWidthScale(run,l.size);list.push({kind:'width',index:i,run:run.runStart,x:p.x+frame.nx*width/2,y:p.y+frame.ny*width/2});}
   return list;
 }
-export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify}={}){
+export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify,focusZoom,focusPoint}={}){
   mode.touches??=new Map();
   if(event.pointerType==='touch'){
     mode.touches.set(event.pointerId,{x:event.clientX,y:event.clientY});
     if(mode.touches.size===2){
       if(p.glyphDrag){Object.assign(l,p.glyphDrag.before);if(p.glyphDrag.changed)p.undo.length=p.glyphDrag.undo;p.redo=p.glyphDrag.redo;clearTimeout(p.glyphDrag.longPress);p.glyphDrag=null;}
-      const points=[...mode.touches.values()],frame=p.canvas.parentElement;
-      mode.pan={zoom:p.sfxZoom||1,distance:Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y),x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2,width:parseFloat(p.canvas.style.width),scrollX:frame.scrollLeft,scrollY:frame.scrollTop};
+      const points=[...mode.touches.values()],frame=p.canvas.parentElement,midpoint={x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2},focused=!!p.previewFocus?.enabled;
+      mode.pan={zoom:focused?p.previewFocus.zoomPercent/100:p.sfxZoom||1,distance:Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y),x:midpoint.x,y:midpoint.y,width:parseFloat(p.canvas.style.width),scrollX:frame.scrollLeft,scrollY:frame.scrollTop,focus:focused,focusPoint:focused?focusPoint?.(midpoint):null};
       p.canvas.setPointerCapture(event.pointerId);return true;
     }
   }
@@ -62,10 +62,11 @@ export function beginLetteringGesture(p,l,mode,event,point,scale,{render,magnify
   if(event.pointerType==='touch')gesture.longPress=setTimeout(()=>{if(p.glyphDrag===gesture&&!gesture.changed)magnify?.();},450);
   p.canvas.setPointerCapture(event.pointerId);p.canvas.focus({preventScroll:true});render?.();return true;
 }
-export function moveLetteringGesture(p,l,mode,event,point,{checkpoint,render}={}){
+export function moveLetteringGesture(p,l,mode,event,point,{checkpoint,render,focusZoom}={}){
   if(event.pointerType==='touch'&&mode.touches?.has(event.pointerId)){
     mode.touches.set(event.pointerId,{x:event.clientX,y:event.clientY});
     if(mode.pan&&mode.touches.size===2){const points=[...mode.touches.values()],frame=p.canvas.parentElement,ratio=Math.max(.5,Math.min(4,Math.hypot(points[0].x-points[1].x,points[0].y-points[1].y)/mode.pan.distance));
+      if(mode.pan.focus){focusZoom?.(mode.pan.zoom*ratio*100,{anchorClient:{x:(points[0].x+points[1].x)/2,y:(points[0].y+points[1].y)/2},sourcePoint:mode.pan.focusPoint,recenter:false});return true;}
       p.sfxZoom=Math.max(.5,Math.min(4,mode.pan.zoom*ratio));p.canvas.style.width=mode.pan.width*ratio+'px';p.canvas.style.height=mode.pan.width*ratio*p.canvas.height/p.canvas.width+'px';frame.scrollLeft=mode.pan.scrollX+mode.pan.x-(points[0].x+points[1].x)/2;frame.scrollTop=mode.pan.scrollY+mode.pan.y-(points[0].y+points[1].y)/2;return true;}
   }
   const g=p.glyphDrag;if(g?.id!==event.pointerId)return false;
@@ -103,7 +104,7 @@ export function moveLetteringGesture(p,l,mode,event,point,{checkpoint,render}={}
         const knot=run.widths[handle.index],target={x:handle.x+dx,y:handle.y+dy};let best={distance:Infinity,t:knot.t};
         for(let i=0;i<=100;i++){const t=i/100,p=pathToLocal(frame,bezierPoint(run.path.points,t)),distance=Math.hypot(target.x-p.x,target.y-p.y);if(distance<best.distance)best={distance,t};}
         if(handle.index>0&&handle.index<run.widths.length-1)knot.t=Math.max(run.widths[handle.index-1].t+.001,Math.min(run.widths[handle.index+1].t-.001,best.t));
-        knot.w=Math.max(0,Math.min(500,best.distance*2));if(knot.fixed)knot.distance=knot.t*frame.length;
+        knot.w=Math.max(0,Math.min(500,best.distance*2/strokeWidthScale(run,l.size)));if(knot.fixed)knot.distance=knot.t*frame.length;
       }
     }
   }
@@ -143,7 +144,7 @@ const node=(tag,text)=>{const n=document.createElement(tag);if(text)n.textConten
 export function advancedLetteringPanel(p,l,mode,{edit,render,fonts,copyStroke,pasteStroke,saveStroke,loadStroke}={}){
   const panel=node('details');panel.className='sfx-advanced-panel';panel.append(node('summary','選択・文字の外観・線の制御点'));
   const select=(title,key,values,value,change)=>{const label=node('label',title),control=node('select');control.dataset.sfxEditor=key;for(const [id,name] of values)control.add(new Option(name,id));control.value=String(value);control.onchange=()=>change(control.value);label.append(control);panel.append(label);return control;};
-  const numeric=(title,key,value,min,max,change)=>{const label=node('label',title),control=node('input');control.type='number';control.dataset.sfxEditor=key;control.min=min;control.max=max;control.step='any';control.value=value??'';control.placeholder=value==null?'混在':'';control.onchange=()=>{const value=Number(control.value);if(control.value!==''&&Number.isFinite(value)&&value>=min&&value<=max)change(value);};label.append(control);panel.append(label);};
+  const numeric=(title,key,value,min,max,change)=>{const label=node('label',title),control=node('input'),rangeValue=range=>typeof range==='function'?range():range;control.type='number';control.dataset.sfxEditor=key;control.min=String(rangeValue(min));control.max=String(rangeValue(max));control.step='any';control.value=value??'';control.placeholder=value==null?'混在':'';control.onchange=()=>{const value=Number(control.value),low=rangeValue(min),high=rangeValue(max);if(control.value!==''&&Number.isFinite(value)&&value>=low&&value<=high)change(value);};label.append(control);panel.append(label);};
   const action=(title,key,callback)=>{const button=node('button',title);button.type='button';button.dataset.sfxEditorAction=key;button.onclick=event=>{event.stopPropagation();callback();};panel.append(button);};
   select('選択方法','selectionTool',[['click','クリック'],['rectangle','矩形'],['lasso','なげなわ']],mode.selectionTool||'click',value=>{mode.selectionTool=value;render();});
   select('選択優先','priority',[['glyph','文字'],['stroke','線'],['point','制御点'],['group','輪郭グループ']],mode.priority||'glyph',value=>{mode.priority=value;render();});
@@ -195,7 +196,8 @@ export function advancedLetteringPanel(p,l,mode,{edit,render,fonts,copyStroke,pa
     select('線幅点','widthIndex',run.widths.map((_,i)=>[String(i),String(i+1)+'番']),mode.widthIndex??0,value=>{mode.widthIndex=Number(value);mode.pointSelection=[{kind:'width',index:mode.widthIndex,run:run.runStart}];if(mode.editMode!=='both')mode.editMode='width';render();});
     const currentKnot=()=>run.widths[Math.min(mode.widthIndex??0,run.widths.length-1)],knot=currentKnot();
     numeric('線幅点の位置','widthT',knot.t,0,1,value=>edit(()=>{const knot=currentKnot(),i=run.widths.indexOf(knot);if(i>0&&i<run.widths.length-1)knot.t=Math.max(run.widths[i-1].t+.001,Math.min(run.widths[i+1].t-.001,value));mode.widthT=value;}));
-    numeric('線幅点の太さ','widthW',knot.w,0,500,value=>edit(()=>{currentKnot().w=value;}));
+    const currentWidthScale=()=>strokeWidthScale(run,l.size),widthScale=currentWidthScale();
+    numeric('線幅点の太さ','widthW',Number((knot.w*widthScale).toFixed(4)),()=>0,()=>500*currentWidthScale(),value=>edit(()=>{currentKnot().w=value/currentWidthScale();}));
     select('線幅の補間','widthInterpolation',[['smooth','滑らか'],['linear','直線'],['step','段階']],knot.interpolation,value=>edit(()=>{currentKnot().interpolation=value;}));
     select('線幅点の位置固定','widthFixed',[['false','比例追従'],['true','始点から固定']],knot.fixed,value=>edit(()=>{const knot=currentKnot();knot.fixed=value==='true';knot.distance=knot.t*(strokeFrame(run,sceneFor(p,l).positions,{vertical:l.vertical,size:l.size})?.length??0);}));
     for(const side of ['start','end']){
