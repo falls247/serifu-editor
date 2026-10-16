@@ -9,6 +9,7 @@ import { graphemes, verticalRotation, verticalPunctuationOffset } from './typogr
 import { PLACEMENT_DEFAULTS, opticalTextGlyphs, glyphInkSurface, clearLayoutCache, createSurface } from './glyph-layout.js';
 import { imageMatrix } from './image-edit.js';
 import { applyMaskEffectsToImageData, maskEffectPatch } from './mask-effects.js';
+import { TRANSPARENT } from './colors.js';
 export { paintOrder } from './balloons.js';
 export { FONT_CHOICES } from './fonts.js';
 export const DIALOGUE_COLORS = Object.freeze({ male: '#111111', female: '#ef4b91' });
@@ -101,16 +102,28 @@ const glyphCache = new Map();
 let cachePixels = 0;
 export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; clearLayoutCache(); clearFontCache(); }
 function drawInk(ctx, l, char, x, y) {
+  const color=l.kind==='sfx'?l.color:dialogueColor(l);
+  if(color===TRANSPARENT){
+    if(l.outline<=0)return;
+    const size=Math.ceil((l.size*3+l.outline*4)/2)*2,surface=createSurface(ctx,size,size),c=surface.getContext('2d');
+    c.font=ctx.font;c.textAlign=ctx.textAlign;c.textBaseline=ctx.textBaseline;c.lineJoin='round';
+    c.strokeStyle=l.textOutlineColor??'#ffffff';c.lineWidth=l.outline*2;
+    c.strokeText(char,size/2,size/2);
+    c.globalCompositeOperation='destination-out';c.fillText(char,size/2,size/2);
+    ctx.drawImage(surface,x-size/2,y-size/2);return;
+  }
   if (l.kind === 'sfx' && !['none','taper','tension'].includes(l.effect)) {
     const depth = l.size * (l.effect === 'impact' || l.effect === 'burst' ? .13 : .05);
     ctx.strokeStyle = '#111111'; ctx.fillStyle = '#111111'; ctx.lineWidth = l.outline * 2 + l.size * .05;
     ctx.strokeText(char, x + depth, y + depth); ctx.fillText(char, x + depth, y + depth);
   }
   if(l.outline>0){ctx.strokeStyle=l.textOutlineColor??'#ffffff';ctx.lineWidth=l.outline*2;ctx.strokeText(char,x,y);}
-  ctx.fillStyle = l.kind === 'sfx' ? l.color : dialogueColor(l); ctx.fillText(char, x, y);
+  ctx.fillStyle = color; ctx.fillText(char, x, y);
 }
 function tintedMask(ctx, alpha, width, height, color, strength=1) {
-  const surface=createSurface(ctx,width,height),c=surface.getContext('2d'),pixels=c.createImageData(width,height);
+  const surface=createSurface(ctx,width,height);
+  if(color===TRANSPARENT)return surface;
+  const c=surface.getContext('2d'),pixels=c.createImageData(width,height);
   const rgb=[1,3,5].map(start=>parseInt(color.slice(start,start+2),16));
   for(let i=0;i<alpha.length;i++){pixels.data[i*4]=rgb[0];pixels.data[i*4+1]=rgb[1];pixels.data[i*4+2]=rgb[2];pixels.data[i*4+3]=Math.min(255,alpha[i]*strength);}
   c.putImageData(pixels,0,0);return surface;
@@ -156,6 +169,11 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
     // Carve ink defects through keyline and cast shadow, never paint them white.
     out.globalCompositeOperation='destination-out';out.globalAlpha=1;
     out.drawImage(tintedMask(ctx,texture.knockout,width,height,'#000000'),0,0);
+    out.globalCompositeOperation='source-over';
+  }
+  if(l.color===TRANSPARENT){
+    out.globalCompositeOperation='destination-out';out.globalAlpha=1;
+    out.drawImage(tintedMask(ctx,thickened,width,height,'#000000'),0,0);
     out.globalCompositeOperation='source-over';
   }
   const value={surface:result,drawWidth,drawHeight,width,height};
@@ -246,7 +264,9 @@ function paintSfxStroke(ctx,item,positions,layer,{withoutOutline=false,silhouett
     c.setTransform(1,0,0,1,0,0);c.clearRect(0,0,width,height);
     if(outline>0)c.drawImage(tintedMask(ctx,dilateMask(body,width,height,Math.min(80,outline*quality)),width,height,style.outlineColor??layer.textOutlineColor??'#ffffff'),0,0);
     if(layer.blurX||layer.blurY)c.drawImage(tintedMask(ctx,directionalBlur(alpha,width,height,layer.blurX*quality,layer.blurY*quality),width,height,color,(layer.blurStrength??200)/100),0,0);
-    c.drawImage(tintedMask(ctx,alpha,width,height,color),0,0);value={surface:canvas,width,height};glyphCache.set(key,value);cachePixels+=width*height;
+    c.drawImage(tintedMask(ctx,alpha,width,height,color),0,0);
+    if(color===TRANSPARENT){c.globalCompositeOperation='destination-out';c.drawImage(tintedMask(ctx,body,width,height,'#000000'),0,0);c.globalCompositeOperation='source-over';}
+    value={surface:canvas,width,height};glyphCache.set(key,value);cachePixels+=width*height;
     while(cachePixels>5000000&&glyphCache.size>1){const first=glyphCache.keys().next().value,old=glyphCache.get(first);cachePixels-=old.width*old.height;glyphCache.delete(first);}
   }
   ctx.save();if(layer.blur>0)ctx.filter=`blur(${layer.blur}px)`;ctx.drawImage(value.surface,left,top,width/quality,height/quality);ctx.restore();
@@ -255,7 +275,7 @@ function editedGlyphSurface(ctx,layer,item){
   const g=item.glyph,letter=item.letter,style={...layer,size:letter.size,font:g.overrides.font??layer.font,color:g.overrides.fill??layer.color,textOutlineColor:g.overrides.outlineColor??layer.textOutlineColor};
   const key='edited:'+JSON.stringify([letter.char,letter.angle,...['size','font','color','textOutlineColor','outline','stretchX','stretchY','thickness','effect','distortion','skew','warp','roughness','dryInk','brushTails','inkTexture','grungeAmount','spatterAmount','scratchLength','scratchAngle','blurX','blurY','blurStrength','inkCore'].map(k=>style[k]),g.scaleX,g.scaleY,g.shear,g.inkVariantSeed,layer.lettering.outlineScale,g.overrides.outlineWidth]);
   if(glyphCache.has(key))return glyphCache.get(key);
-  const source=warpedGlyph(ctx,{...style,outline:0,roughness:0,dryInk:0,brushTails:0,inkTexture:'none',blurX:0,blurY:0},letter.char,letter.angle,0);
+  const source=warpedGlyph(ctx,{...style,color:'#ffffff',outline:0,roughness:0,dryInk:0,brushTails:0,inkTexture:'none',blurX:0,blurY:0},letter.char,letter.angle,0);
   const outline=(g.overrides.outlineWidth??layer.outline)*(layer.lettering.outlineScale?Math.min(g.scaleX,g.scaleY):1);
   const pad=Math.max(outline*3,letter.size*.8*(layer.brushTails||0)/100,(layer.blurX||0)*4,(layer.blurY||0)*4,8);
   const drawWidth=Math.ceil(source.drawWidth*g.scaleX+source.drawHeight*Math.abs(g.shear)+pad*2),drawHeight=Math.ceil(source.drawHeight*g.scaleY+pad*2);
@@ -275,6 +295,7 @@ function editedGlyphSurface(ctx,layer,item){
   if(layer.blurX||layer.blurY){out.drawImage(tintedMask(ctx,directionalBlur(alpha,width,height,layer.blurX*quality,layer.blurY*quality),width,height,style.color,(layer.blurStrength??200)/100),0,0);}
   out.drawImage(tintedMask(ctx,alpha,width,height,style.color),0,0);
   const fill=surface,border=tintedMask(ctx,edge,width,height,style.textOutlineColor??'#ffffff');
+  if(style.color===TRANSPARENT){const b=border.getContext('2d');b.globalCompositeOperation='destination-out';b.drawImage(tintedMask(ctx,body,width,height,'#000000'),0,0);b.globalCompositeOperation='source-over';}
   const value={surface,fill,border,body,width,height,drawWidth:width/quality,drawHeight:height/quality,quality,outline,
     bounds:{minX:(minX-width/2)/quality,minY:(minY-height/2)/quality,maxX:(maxX-width/2+1)/quality,maxY:(maxY-height/2+1)/quality}};
   glyphCache.set(key,value);cachePixels+=width*height;

@@ -1,6 +1,8 @@
 import { brushDefaults, paintBrushStroke } from './brush-stroke.js';
 import { fontDescription, glyphFontDescription } from './fonts.js';
 import { graphemes, verticalRotation, punctuationCenter } from './typography.js';
+import { createSurface } from './glyph-layout.js';
+import { TRANSPARENT } from './colors.js';
 
 export const CAPTION_LIMITS=Object.freeze({textOffsetX:[-30000,30000],textOffsetY:[-30000,30000],transparency:[0,100],borderWidth:[0,80],padding:[0,2000],size:[8,500],textOutlineWidth:[0,80]});
 export const CAPTION_ALIGNMENTS=Object.freeze({alignX:{left:'左',center:'中央',right:'右'},alignY:{top:'上',center:'中央',bottom:'下'}});
@@ -109,15 +111,22 @@ export function paintCaption(ctx,layer) {
   }
   const layout=captionLayout(ctx,layer);
   ctx.save();captionPath(ctx,{...layer,w:Math.max(1,layer.w-layer.borderWidth),h:Math.max(1,layer.h-layer.borderWidth)});ctx.clip();
-  ctx.font=layout.font;ctx.textAlign='left';ctx.textBaseline='alphabetic';ctx.fillStyle=layer.textColor;
+  const hollow=layer.textColor===TRANSPARENT;
+  const quality=hollow?Math.min(1,Math.sqrt(2000000/(layer.w*layer.h))):1;
+  const surface=hollow?createSurface(ctx,Math.max(1,Math.ceil(layer.w*quality)),Math.max(1,Math.ceil(layer.h*quality))):null;
+  const text=surface?surface.getContext('2d'):ctx;
+  if(hollow){text.scale(quality,quality);text.translate(layer.w/2,layer.h/2);}
+  text.font=layout.font;text.textAlign='left';text.textBaseline='alphabetic';text.fillStyle=hollow?'#000000':layer.textColor;
   const outline=layer.textOutlineWidth??0;
-  ctx.strokeStyle=layer.textOutlineColor??'#ffffff';ctx.lineWidth=outline*2;ctx.lineJoin='round';
+  text.strokeStyle=layer.textOutlineColor??'#ffffff';text.lineWidth=outline*2;text.lineJoin='round';
   for(const stroke of outline>0?[true,false]:[false])for(const glyph of layout.glyphs){
-    ctx.font=glyph.font;
-    ctx.save();ctx.translate(glyph.x,glyph.y);if(glyph.rotate)ctx.rotate(Math.PI/2);
+    text.font=glyph.font;
+    if(hollow)text.globalCompositeOperation=stroke?'source-over':'destination-out';
+    text.save();text.translate(glyph.x,glyph.y);if(glyph.rotate)text.rotate(Math.PI/2);
     const x=(glyph.left-glyph.right)/2,y=(glyph.ascent-glyph.descent)/2;
-    if(stroke)ctx.strokeText(glyph.char,x,y);else ctx.fillText(glyph.char,x,y);
-    ctx.restore();
+    if(stroke)text.strokeText(glyph.char,x,y);else text.fillText(glyph.char,x,y);
+    text.restore();
   }
+  if(surface)ctx.drawImage(surface,-layer.w/2,-layer.h/2,surface.width/quality,surface.height/quality);
   ctx.restore();
 }

@@ -1,8 +1,8 @@
 import {sliceStroke,joinStrokes} from './sfx-stroke-geometry.js';
 import {graphemes} from './typography.js';
+import {isTextColor} from './colors.js';
 
 const MAX_GRAPHEMES=1024,MAX_STROKES=256,MAX_POINTS=64;
-const COLOR=/^#[0-9a-f]{6}$/i;
 const MODES=['readable','overlap'],ORIENTATIONS=['vertical','horizontal'];
 const ROTATION_MODES=['auto','upright','sideways','tate-chu-yoko'];
 const CAPS=['round','flat','taper','brush'];
@@ -12,7 +12,7 @@ const has=(o,k)=>o&&OWN(o,k);
 const finite=(v,min,max,label)=>{if(typeof v!=='number'||!Number.isFinite(v)||v<min||v>max)throw new Error('SFX '+label+'が不正');return v;};
 const integer=(v,min,max,label)=>{if(!Number.isSafeInteger(v)||v<min||v>max)throw new Error('SFX '+label+'が不正');return v;};
 const enumValue=(v,values,label)=>{if(!values.includes(v))throw new Error('SFX '+label+'が不正');return v;};
-const color=(v,label)=>{if(v!==null&&(typeof v!=='string'||!COLOR.test(v)))throw new Error('SFX '+label+'が不正');return v;};
+const color=(v,label)=>{if(v!==null&&!isTextColor(v))throw new Error('SFX '+label+'が不正');return v;};
 const plain=(v,label)=>{if(!v||typeof v!=='object'||Array.isArray(v))throw new Error('SFX '+label+'が不正');return v;};
 const uint=v=>v>>>0;
 const glyphText=text=>{if(typeof text!=='string')throw new Error('SFX 本文が不正');const chars=graphemes(text);if(chars.length>MAX_GRAPHEMES)throw new Error('SFX 本文は1024字まで');return chars;};

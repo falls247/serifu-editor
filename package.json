@@ -14,6 +14,7 @@
     "test:bulk": "node scripts/bulk-smoke.mjs",
     "benchmark:bulk": "node scripts/bulk-benchmark.mjs",
     "test:speech-browser": "node scripts/speech-style-smoke.mjs",
+    "test:transparent-color-browser": "node scripts/transparent-color-smoke.mjs",
     "test:lettering-browser": "node scripts/lettering-brush-smoke.mjs",
     "test:sfx-controls-browser": "node scripts/sfx-controls-smoke.mjs",
     "test:sfx-lettering-browser": "node scripts/sfx-lettering-smoke.mjs",

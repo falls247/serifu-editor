@@ -1,6 +1,7 @@
 import {sfxScene,sfxItemHit,sfxResolvedGroups,paintEditedSfx} from './renderer.js';
 import {strokeGeometry,strokeWidthScale,strokeFrame,pathToLocal,localToPath,bezierPoint,moveCurvePoint,addCurvePoint,removeCurvePoint,addWidthPoint,removeWidthPoint} from './sfx-stroke-geometry.js';
 import {glyphSelection,selectGlyph,freezeGlyphOrigins,duplicateSelectedGlyphs,transformGlyphSelection,transformStrokeSelection,selectionRegion} from './sfx-edit-operations.js';
+import {enhanceColorInput} from './colors.js';
 
 export const sceneFor=(p,l)=>sfxScene(p.canvas.getContext('2d'),l);
 const boundsOf=items=>items.length?{minX:Math.min(...items.map(i=>i.bounds.minX)),maxX:Math.max(...items.map(i=>i.bounds.maxX)),minY:Math.min(...items.map(i=>i.bounds.minY)),maxY:Math.max(...items.map(i=>i.bounds.maxY))}:null;
@@ -164,7 +165,12 @@ export function advancedLetteringPanel(p,l,mode,{edit,render,fonts,copyStroke,pa
     select('回転・倍率の中心','pivot',[...['center','top-left','top','top-right','left','right','bottom-left','bottom','bottom-right','custom']].map((key,i)=>[key,['中央','左上','上','右上','左','右','左下','下','右下','指定'][i]]),first.pivot.preset,value=>edit(()=>glyphs.forEach(g=>g.pivot.preset=value)));
     for(const axis of ['x','y'])numeric('中心 '+axis,'pivot-'+axis,first.pivot[axis],-30000,30000,value=>edit(()=>glyphs.forEach(g=>{g.pivot.preset='custom';g.pivot[axis]=value;})));
     select('文字の書体','font',[['','SFX共通'],...Object.entries(fonts).map(([key,value])=>[key,value.label])],first.overrides.font??'',value=>edit(()=>glyphs.forEach(g=>{g.overrides.font=value||null;g.manual.style=true;})));
-    for(const [key,title,fallback] of [['fill','文字色',l.color],['outlineColor','輪郭色',l.textOutlineColor??'#ffffff']]){const label=node('label',title),input=node('input');input.type='color';input.dataset.sfxEditor=key;input.value=first.overrides[key]??fallback;input.onchange=()=>edit(()=>glyphs.forEach(g=>{g.overrides[key]=input.value;g.manual.style=true;}));label.append(input);panel.append(label);}
+    for(const [key,title,fallback] of [['fill','文字色',l.color],['outlineColor','輪郭色',l.textOutlineColor??'#ffffff']]){
+      const label=node('label',title),input=node('input'),value=first.overrides[key]??fallback;
+      const change=value=>edit(()=>glyphs.forEach(g=>{g.overrides[key]=value;g.manual.style=true;}));
+      input.type='color';input.dataset.sfxEditor=key;input.value=value;input.onchange=()=>change(input.value);
+      label.append(input);panel.append(label);enhanceColorInput(input,value,change);
+    }
     numeric('文字の輪郭幅','outlineWidth',first.overrides.outlineWidth??l.outline,0,80,value=>edit(()=>glyphs.forEach(g=>{g.overrides.outlineWidth=value;g.manual.style=true;})));
   }
   const variants=[];

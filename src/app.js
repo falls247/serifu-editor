@@ -34,6 +34,7 @@ import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderNam
 import { FONT_CATALOG, FONT_STYLES, fontLoadQueries,registerSessionFont,hasSessionFont,missingLayerFonts,sessionFontChoices } from './fonts.js';
 import { Sam3Client } from './sam3-client.js';
 import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
+import { enhanceColorInput, syncColorInput, colorInputValue } from './colors.js';
 
 const $ = id => document.getElementById(id);
 const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
@@ -386,7 +387,7 @@ function persistControlValue(p,input) {
   if(!p?.row||!input?.matches(CONTROL_SELECTOR))return;
   const field=controlField(input),card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
   if(!layer)return;
-  let value=input.value;
+  let value=input.type==='color'?colorInputValue(input):input.value;
   const limits={size:[8,500],thickness:THICKNESS_LIMIT,rotation:[-180,180],w:[30,30000],h:[30,30000],outline:[0,80],shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS,...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS};
   if(field==='vertical')value=value==='true';
   else if(input.type==='checkbox')value=input.checked;
@@ -744,6 +745,18 @@ function layerFieldValue(layer,field) {
   return field==='textColor'&&['dialogue','balloon'].includes(layer?.kind)?dialogueColor(layer):layer?.[field];
 }
 
+function addTextColorControls(root,p,layer) {
+  for(const input of root.querySelectorAll('input[type=color][data-field]')){
+    const field=input.dataset.field;
+    if(!['textColor','textOutlineColor'].includes(field)&&!(field==='color'&&layer?.kind==='sfx'))continue;
+    enhanceColorInput(input,layerFieldValue(layer,field),value=>{
+      const target=p.layers.find(item=>item.id===(input.closest('.layer-card')?.dataset.layerId||p.selectedId));
+      if(!target)return;
+      edit(p,()=>{target[field]=value;target.presetId=null;},false);refreshPresetMenus(p);
+    });
+  }
+}
+
 function speechStyleControls(layer) {
   const grid=element('div','effect-grid speech-style-controls');
   for(const [field,title,type] of [['textColor','文字色','color'],['textOutlineColor','文字の輪郭色','color'],['outline','文字の輪郭の太さ（px）','number']]){
@@ -1024,6 +1037,7 @@ function numericStep(field){return INTEGER_FIELDS.has(field)?'1':'0.1';}
 function controlField(input){return input.dataset.field??input.dataset.numericField;}
 function syncControlValue(input,value,p){
   const field=controlField(input);
+  if(input.type==='color'){syncColorInput(input,value);return;}
   if(input.type==='range'&&['textOffsetX','textOffsetY'].includes(field)){
     const dimension=field==='textOffsetY'?p.img.height:p.img.width;
     input.min=String(Math.max(-30000,Math.min(-dimension,value??0)));
@@ -1244,6 +1258,10 @@ function sfxLetteringPanel(p,l){
     const color=element('input');color.type='color';color.dataset.sfxGroupColor='true';color.value=currentGroup.styleOverride?.color??l.textOutlineColor??'#ffffff';
     const widthLabel=element('label','','輪郭の太さ'),colorLabel=element('label','','輪郭の色');
     widthLabel.append(width);colorLabel.append(color);groups.append(widthLabel,colorLabel);
+    enhanceColorInput(color,currentGroup.styleOverride?.color??l.textOutlineColor??'#ffffff',value=>edit(p,()=>{
+      currentGroup.locked=true;currentGroup.mode='manual';
+      currentGroup.styleOverride={...currentGroup.styleOverride,color:value,width:currentGroup.styleOverride?.width??l.outline};
+    }));
   }
   panel.append(groups);
   if(l.lettering.strokes.length){
@@ -1356,6 +1374,7 @@ function renderCards(p) {
   p.row.querySelector('.no-layers').hidden = p.layers.length > 0 || p.maskEffects.length > 0;
   const appendCard=(card,layer)=>{
     addNumericControls(card,p);
+    addTextColorControls(card,p,layer);
     for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${layer.id}:${details.querySelector('summary').textContent}`)??false;
     container.append(card);
   };
@@ -1468,6 +1487,7 @@ function mountPage(p) {
   const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;delete p.globalUIState;
   row.querySelector('[data-page-destination]').value=p.moveAfterPage??'';
   addNumericControls(row.querySelector('.position-controls'),p);
+  addTextColorControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
   row.querySelector('.dimensions').textContent = `${p.img.width} × ${p.img.height}`;
   const original = row.querySelector('.original'); original.src = p.src; original.alt = `元画像 ${p.name}`;
@@ -1709,7 +1729,7 @@ $('deck').addEventListener('input', event => {
     }catch(error){status('効果音テキストのプレビューに失敗: '+error.message);}
     return; // IME/未確定テキストは正本を更新しない。
   }
-  let value = input.value;
+  let value = input.type==='color'?colorInputValue(input):input.value;
   const limits = { size: [8, 500], thickness: THICKNESS_LIMIT, rotation: [-180, 180], w: [30, 30000], h: [30, 30000], outline: [0, 80], shapeSeed:[0,4294967295],brushSeed:[0,4294967295],glyphSeed:[0,4294967295],...BRUSH_LIMITS, ...EFFECT_LIMITS,...BALLOON_LIMITS,...CAPTION_LIMITS };
   if (['x', 'y', ...Object.keys(limits)].includes(field)) {
     if (value === '' || !Number.isFinite(Number(value))) return;

@@ -6,14 +6,14 @@ import { BALLOON_LIMITS, BALLOON_SHAPES, balloonSeedFromId, defaultSpikeCount } 
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS } from './captions.js';
 import { PLACEMENT_DEFAULTS, PLACEMENT_LIMITS } from './glyph-layout.js';
 import { normalizeBrush } from './brush-stroke.js';
+import { isTextColor } from './colors.js';
 export const PROJECT_VERSION=14;
 export const THICKNESS_LIMIT = Object.freeze([-10,30]);
 export const EFFECT_LIMITS = Object.freeze({ ...PLACEMENT_LIMITS, taperRate:[0,100], sizeVariation:[0,30], horizontalJitter:[0,20], blur: [0,30], motionBlur: [0,300], blurAngle: [-180,180], blurX:[0,150], blurY:[0,300], blurStrength:[0,400], inkCore:[0,100], roughness:[0,100], dryInk:[0,100], brushTails:[0,100], grungeAmount:[0,100], scratchLength:[0,100], scratchAngle:[-180,180], spatterAmount:[0,100], distortion: [0,100], skew: [-45,45], stretchX: [30,250], stretchY: [30,250] });
 
 function speechColors(input) {
   const textColor=input.textColor===undefined?null:input.textColor,textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
-  const validColor=value=>typeof value==='string'&&/^#[0-9a-f]{6}$/i.test(value);
-  if(textColor!==null&&!validColor(textColor)||!validColor(textOutlineColor))throw new Error('セリフの文字色・輪郭色が不正');
+  if(textColor!==null&&!isTextColor(textColor)||!isTextColor(textOutlineColor))throw new Error('セリフの文字色・輪郭色が不正');
   return {textColor,textOutlineColor};
 }
 
@@ -33,7 +33,8 @@ function normalizeTextLayer(input, version) {
     if(version<5)throw new Error('キャプションはバージョン5以降の編集データに対応');
     for(const key of ['x','y','w','h','rotation'])if(!Number.isFinite(input[key]))throw new Error('キャプションの座標・サイズが不正');
     if(input.w<30||input.w>30000||input.h<30||input.h>30000||Math.abs(input.rotation)>180)throw new Error('キャプションの座標・サイズが範囲外');
-    for(const key of ['color','borderColor','textColor','textOutlineColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('キャプションの色が不正');
+    for(const key of ['color','borderColor'])if(!/^#[0-9a-f]{6}$/i.test(input[key]))throw new Error('キャプションの色が不正');
+    for(const key of ['textColor','textOutlineColor'])if(!isTextColor(input[key]))throw new Error('キャプションの文字色が不正');
     for(const [key,[min,max]] of Object.entries(CAPTION_LIMITS))if(!Number.isFinite(input[key])||input[key]<min||input[key]>max)throw new Error('キャプションの設定が範囲外');
     if(typeof input.text!=='string'||typeof input.autoFit!=='boolean'||typeof input.vertical!=='boolean'||!(Object.hasOwn(FONT_CHOICES,input.font)||hasSessionFont(input.font)))throw new Error('キャプションの本文・書体設定が不正');
     const alignX=input.alignX===undefined?(version<6?'right':'center'):input.alignX,alignY=input.alignY===undefined?(version<6?'top':'center'):input.alignY;
@@ -74,9 +75,9 @@ function normalizeTextLayer(input, version) {
   const outline = legacy ? Math.max(2, Math.round(input.size * .15)) : input.outline;
   if (!Object.hasOwn(DIALOGUE_COLORS, speaker) || !Object.hasOwn(EFFECTS, effect)) throw new Error('話者または効果音設定が不正');
   if (!Number.isFinite(outline) || outline < 0 || outline > 80) throw new Error('文字の輪郭の太さが不正');
-  if (!/^#[0-9a-f]{6}$/i.test(input.color)) throw new Error('文字色が不正');
+  if (!isTextColor(input.color)) throw new Error('文字色が不正');
   const textOutlineColor=input.textOutlineColor===undefined?'#ffffff':input.textOutlineColor;
-  if(typeof textOutlineColor!=='string'||!/^#[0-9a-f]{6}$/i.test(textOutlineColor))throw new Error('文字の輪郭色が不正');
+  if(!isTextColor(textOutlineColor))throw new Error('文字の輪郭色が不正');
   const extras = { ...PLACEMENT_DEFAULTS, taperRate:10, sizeVariation:0, horizontalJitter:0, thickness:0, lineAlign:'top', font: kind==='sfx'?'comic':'sans', warp:'taper', blur:0, motionBlur:0, blurAngle:90, blurX:0, blurY:0, blurStrength:200, inkCore:80, roughness:0, dryInk:0, brushTails:0, grungeAmount:65, scratchLength:55, scratchAngle:90, spatterAmount:40, distortion:0, skew:0, stretchX:100, stretchY:100 };
   for (const key of Object.keys(extras)) if (input[key] !== undefined) extras[key] = input[key];
   if(!['standard','optical'].includes(extras.kerningMode))throw new Error('文字配置方式が不正');

@@ -2,6 +2,7 @@ import {WARP_CHOICES,EFFECTS} from './renderer.js';
 import {EFFECT_LIMITS,THICKNESS_LIMIT} from './model.js';
 import {PLACEMENT_LIMITS} from './glyph-layout.js';
 import {startLettering,normalizeLettering,sfxRuns} from './sfx-lettering-model.js';
+import {isTextColor} from './colors.js';
 
 export const TEMPLATE_VERSION=1;
 export const SFX_TEMPLATE_KEY='serifu.sfx.templates.v1';
@@ -33,7 +34,7 @@ export function validateSfxTemplate(template){
   const limits={...EFFECT_LIMITS,...PLACEMENT_LIMITS,size:[8,500],outline:[0,80],thickness:THICKNESS_LIMIT,stretchX:[10,300],stretchY:[10,300],blur:[0,80],motionBlur:[0,500],blurAngle:[-360,360],textureSeed:[0,4294967295],kerningStrength:[0,100],glyphOverlap:[0,100]};
   for(const [key,value] of Object.entries(data.style)){
     if(enums[key]&&!enums[key].includes(value))throw new Error('SFXテンプレートのstyleが不正');
-    if(['color','textOutlineColor'].includes(key)&&!/^#[0-9a-f]{6}$/i.test(value))throw new Error('SFXテンプレートの色が不正');
+    if(['color','textOutlineColor'].includes(key)&&!isTextColor(value))throw new Error('SFXテンプレートの色が不正');
     if(key==='font'&&(typeof value!=='string'||value.length>128||!value))throw new Error('SFXテンプレートの書体が不正');
     if(!enums[key]&&!['font','color','textOutlineColor'].includes(key)){const [min,max]=limits[key]??[-3600,4294967295];if(typeof value!=='number'||!Number.isFinite(value)||value<min||value>max)throw new Error('SFXテンプレートの数値が不正');}
   }
