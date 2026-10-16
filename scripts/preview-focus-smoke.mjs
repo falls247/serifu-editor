@@ -79,6 +79,20 @@ function assertPan(before,after,dx,dy,message){
  assert.ok(Math.abs(after.frame.width-before.frame.width)<1&&Math.abs(after.frame.height-before.frame.height)<1,'pan mode preserves preview frame size');
 }
 
+async function zoomFieldPoint(zoom){
+ const rect=await zoom.boundingBox();
+ return {x:rect.x+rect.width*.35,y:rect.y+rect.height/2};
+}
+
+async function assertFocusZoom(page,row,target,frame,expected){
+ assert.equal(Number(await row.locator('[data-focus-zoom]').inputValue()),expected,'drag updates the numeric zoom value');
+ const current=await geometry(page,target);
+ assert.ok(Math.abs(current.canvas.width-expected*10)<1,'drag applies zoom to the preview in real time');
+ assert.ok(Math.abs(current.frame.width-frame.width)<1&&Math.abs(current.frame.height-frame.height)<1,'zoom dragging preserves frame size');
+ assert.ok(Math.abs(current.target.x-(current.frame.x+current.frame.clientLeft+current.frame.clientWidth/2))<1,'zoom dragging keeps selected glyph horizontally centered');
+ assert.ok(Math.abs(current.target.y-(current.frame.y+current.frame.clientTop+current.frame.clientHeight/2))<1,'zoom dragging keeps selected glyph vertically centered');
+}
+
 await sfxTest(5325,async({page,row})=>{
  const before=await exportJson(page),layer=before.pages[0].layers.find(item=>item.kind==='sfx');
  assert.ok(layer,'SFX fixture exists');
@@ -98,6 +112,42 @@ await sfxTest(5325,async({page,row})=>{
  assert.ok(Math.abs(focused.frame.width-beforeFrame.width)<1&&Math.abs(focused.frame.height-beforeFrame.height)<1,'numeric zoom preserves preview frame size');
  assert.ok(Math.abs(focused.target.x-(focused.frame.x+focused.frame.clientLeft+focused.frame.clientWidth/2))<1,'zoom change recenters selected glyph');
  assert.ok(Math.abs(focused.target.y-(focused.frame.y+focused.frame.clientTop+focused.frame.clientHeight/2))<1,'zoom change recenters selected glyph vertically');
+
+ let zoomStart=await zoomFieldPoint(zoom);
+ await page.mouse.move(zoomStart.x,zoomStart.y);await page.mouse.down();
+ await page.mouse.move(zoomStart.x,zoomStart.y-30,{steps:4});
+ await assertFocusZoom(page,row,target,beforeFrame,230);
+ await page.mouse.up();
+ await dragPreview(page,await zoomFieldPoint(zoom),0,55);
+ await assertFocusZoom(page,row,target,beforeFrame,175);
+ await dragPreview(page,await zoomFieldPoint(zoom),60,0);
+ await assertFocusZoom(page,row,target,beforeFrame,175);
+ await dragPreview(page,await zoomFieldPoint(zoom),0,-2);
+ await assertFocusZoom(page,row,target,beforeFrame,175);
+ await dragPreview(page,await zoomFieldPoint(zoom),0,200);
+ await assertFocusZoom(page,row,target,beforeFrame,1);
+ await zoom.fill('137.5');await zoom.press('Enter');
+ await dragPreview(page,await zoomFieldPoint(zoom),0,-12);
+ await assertFocusZoom(page,row,target,beforeFrame,149.5);
+ await zoom.fill('4995');await zoom.press('Enter');
+ await dragPreview(page,await zoomFieldPoint(zoom),0,-15);
+ await assertFocusZoom(page,row,target,beforeFrame,5000);
+ await zoom.click();
+ assert.equal(await zoom.evaluate(node=>node===document.activeElement),true,'clicking the zoom field still allows normal text editing');
+ await assertFocusZoom(page,row,target,beforeFrame,5000);
+ await zoom.fill('200');await zoom.press('Tab');
+ const zoomTouch=await page.context().newCDPSession(page);
+ zoomStart=await zoomFieldPoint(zoom);
+ await zoomTouch.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[zoomStart]});
+ await zoomTouch.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:zoomStart.x,y:zoomStart.y-15}]});
+ await assertFocusZoom(page,row,target,beforeFrame,215);
+ await zoomTouch.send('Input.dispatchTouchEvent',{type:'touchCancel',touchPoints:[]});
+ await zoomTouch.detach();
+ const cancelledZoom=Number(await zoom.inputValue());
+ await page.mouse.move(zoomStart.x,zoomStart.y-35);
+ await assertFocusZoom(page,row,target,beforeFrame,cancelledZoom);
+ await zoom.fill('200');await zoom.press('Tab');
+ focused=await geometry(page,target);
 
  const handle=row.locator('[data-focus-pan]'),handleBox=await handle.boundingBox(),beforePan=focused;
  await page.mouse.move(handleBox.x+handleBox.width/2,handleBox.y+handleBox.height/2);await page.mouse.down();

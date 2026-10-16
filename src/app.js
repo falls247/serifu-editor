@@ -1437,6 +1437,32 @@ function mountPage(p) {
     setPreviewFocusZoom(p,zoom,{recenter:true});
   });
   focusZoom.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();focusZoom.blur();}});
+  let focusZoomDrag=null,focusZoomSuppressClick=false;
+  focusZoom.addEventListener('pointerdown',event=>{
+    if(!p.previewFocus.enabled||!event.isPrimary||event.button!==0)return;
+    focusZoomDrag={pointerId:event.pointerId,startY:event.clientY,startZoom:normalizePreviewFocusZoom(focusZoom.value)??p.previewFocus.zoomPercent,active:false};
+    focusZoom.setPointerCapture(event.pointerId);
+  });
+  focusZoom.addEventListener('pointermove',event=>{
+    const drag=focusZoomDrag;if(!drag||drag.pointerId!==event.pointerId)return;
+    const verticalDelta=drag.startY-event.clientY;
+    if(!drag.active){if(Math.abs(verticalDelta)<4)return;drag.active=true;focusZoom.classList.add('focus-zoom-dragging');}
+    event.preventDefault();
+    const zoom=normalizePreviewFocusZoom(drag.startZoom+Math.round(verticalDelta));
+    if(zoom!==null&&zoom!==p.previewFocus.zoomPercent)setPreviewFocusZoom(p,zoom,{recenter:true});
+  });
+  const finishFocusZoomDrag=event=>{
+    const drag=focusZoomDrag;if(drag?.pointerId!==event.pointerId)return;
+    focusZoomDrag=null;focusZoom.classList.remove('focus-zoom-dragging');
+    if(event.type==='pointerup'&&drag.active){
+      focusZoomSuppressClick=true;setTimeout(()=>{focusZoomSuppressClick=false;},0);
+    }else if(drag.active&&p.previewFocus.enabled)setPreviewFocusZoom(p,drag.startZoom,{recenter:true});
+  };
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])focusZoom.addEventListener(type,finishFocusZoomDrag);
+  focusZoom.addEventListener('click',event=>{
+    if(!focusZoomSuppressClick)return;
+    focusZoomSuppressClick=false;event.preventDefault();
+  });
   connectCanvas(p); sizePreview(p);
   p.sam3UI=createSam3UI({
     page:p,panel:row.querySelector('.sam3-panel'),overlay:row.querySelector('.sam3-overlay'),image:original,client:sam3Client,

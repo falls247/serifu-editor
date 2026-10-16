@@ -286,7 +286,8 @@ html{scroll-padding-top:140px;scroll-padding-bottom:110px}
 
 .preview-focus-zoom{display:flex;align-items:center;gap:4px;color:#b8c7a5;font:10px monospace}
 .preview-focus-zoom[hidden],.preview-focus-pan[hidden]{display:none}
-.preview-focus-zoom input{width:64px;margin:0;padding:5px 6px;text-align:right}
+.preview-focus-zoom input{width:64px;margin:0;padding:5px 6px;text-align:right;cursor:ns-resize;touch-action:none}
+.preview-focus-zoom input.focus-zoom-dragging{user-select:none}
 .preview-actions [data-action=preview-focus][aria-pressed=true]{background:#35422a;border-color:#93af6f;color:var(--lime)}
 .preview-frame.preview-focus-mode{overflow:hidden;justify-content:flex-start;align-items:flex-start;overscroll-behavior:contain}
 .preview-frame.preview-focus-mode canvas.preview{flex:0 0 auto;max-width:none;max-height:none;object-fit:fill;transform-origin:0 0;will-change:transform}
