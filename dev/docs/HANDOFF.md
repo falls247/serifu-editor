@@ -7,6 +7,14 @@
 
 ## 1. 現在地と作業方針
 
+2026-10-17追加：プリセット適用時のカード保持・描画集約、インクマスク処理範囲の縮小、選択ページを優先する段階的な表示準備を実装した。[ADR-0031](adr/0031-selected-page-priority-and-preview-updates.md)と[性能・検証報告](editor-interaction-performance.md)を参照。回帰は`npm run test:editor-interaction`、計測は`npm run benchmark:editor-interaction`／`npm run benchmark:glyph-render`。プレビュー選択による文字サイズ70→81は未再現。
+
+同日追補：長距離のサムネイル移動は直接スクロールし、背景準備・画像load・ResizeObserver後も移動先の位置を保つ。位置保持は新しい利用者操作や表示範囲の世代変更で解除する。初回`prepareMountedPage()`は`renderCards({restoreWindow:false})`を使い、文書スクロールを古い値へ戻さない。再利用した行の有効なload/resize callbackは現在の世代を参照する。選択済み入力欄への`focusin`は再選択・再描画を省く。候補表示前の待ちと最終停止位置の計測は`npm run benchmark:navigation-menu`。
+
+2026-10-16追加：吹き出しの多角形モードを追加した。頂点数3〜60（既定6）の指定・ランダム生成、歪み度・seedの調整、Undo・プリセット・コピー・各保存形式に対応する。現在の `PROJECT_VERSION=15`、`RENDER_VERSION=12`。仕様は [ADR-0029](adr/0029-polygon-balloons.md)、ブラウザ検証は `npm run test:polygon-browser`。
+
+2026-10-16追加：フォルダ内の `画像名.jpg.json`（`schemaVersion: 1`）から下書きを自動生成する。既定プリセットで右上から左、次に下段へ配置し、必要なら縮小する。最小サイズでも収まらない分は画像外へ配置して警告する。仕様は [ADR-0028](adr/0028-annotation-draft-import.md)、ブラウザ検証は `npm run test:annotation-drafts`。外部下書き形式とアプリの編集データ形式は別物。
+
 複数画像へ台詞・効果音・吹き出し・キャプションを配置する、ブラウザ内処理の静的Webアプリ。元画像／入力／ライブプレビューの3列を画像ごとに縦へ並べる。これまでの依頼機能は上記コミットで実装・公開済み。
 
 ユーザーは以後、ローカル側リポジトリで開発を継続する方針。次のエージェントはローカルの実ファイルとGit差分を起点に作業する。クラウド側の作業ディレクトリや過去のアップロード先には依存しない。コミット、push、公開の範囲は、その時点のユーザー指示に従う。この文書は新たな追加機能や公開指示を定義しない。
@@ -126,6 +134,8 @@ Workerの `import.meta.url` 基準のフォントURLは `../assets/fonts/`、`sr
 新規追加の実際の既定値は、`newLayer` だけでなく `app.js` の `makeLayer` → `applyPreset` も確認する。ユーザーが記憶したプリセットが上書きされるため、コンストラクター変更だけでは既定の見た目が変わらない場合がある。
 
 全ページに `row`／`canvas` があると仮定しない。範囲外はnullまたは未作成。`renderCards`・`updateControls`・`drawPage` は非表示を許容し、`activate` が対象範囲をマウントする。元画像Imageは寸法を持つが非表示時はsrcを外し、PNG保存では `imageBlob` が読み直す。コピー・削除・順序変更・復元は範囲の境界を確認する。
+
+段階的マウントでは`row`が存在しても、画像・カード・イベントの準備が未完了の場合がある。`mountPage`は軽い枠を作り、`prepareMountedPage`が重い準備を行って`mountReady`を立てる。準備世代と`mountToken`の確認を維持し、古い読込みや通知を新しい表示へ反映しない。`sizePreview`／`updateImageView`／`renderCards`の`draw:false`は呼出し側で描画をまとめるための指定で、全呼出しを無条件に描画抑制しない。
 
 ## 5. 変更時に確認する範囲
 

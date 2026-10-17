@@ -12,7 +12,7 @@ const ratioKeys = {w:'wRatio',h:'hRatio',size:'sizeRatio',thickness:'thicknessRa
 const dimension = (key,width,height) => ['y','h','blurY'].includes(key)?height:width;
 const boxRatioKeys={w:'wRatio',h:'hRatio',borderWidth:'borderWidthRatio',textOffsetX:'textOffsetXRatio',textOffsetY:'textOffsetYRatio'};
 const boxStyles={
-  balloon:['speaker','shape','shapeSeed','spikeCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','vertical','lineAlign','font'],
+  balloon:['speaker','shape','shapeSeed','spikeCount','polygonCount','distortion','rotation','color','borderColor','textColor','textOutlineColor','shadowEnabled','shadowColor','shadowOpacity','borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'transparency','tail','tailAngle','vertical','lineAlign','font'],
   caption:['borderStyle','brushEngine','brushSeed',...Object.keys(BRUSH_LIMITS),'rotation','color','borderColor','transparency','textColor','textOutlineColor','font','vertical','autoFit','alignX','alignY','shape','distortion'],
 };
 function presetFields(kind) {
@@ -46,11 +46,9 @@ export function defaultPreferences() {
     builtin('sfx-grunge-print','かすれ印刷・荒れインク（参考画像風）','sfx',{effect:'none',inkTexture:'grunge',color:'#14305f',outline:0,font:'comic',grungeAmount:70,scratchLength:60,scratchAngle:90,spatterAmount:35,roughness:15,dryInk:10,brushTails:5}),
     builtin('sfx-dense','密集レタリング','sfx',{effect:'none',distortion:12,skew:-5,kerningMode:'optical',kerningStrength:85,minimumGlyphGap:2,sizeVariation:5,horizontalJitter:2,rotationJitter:4,verticalJitter:2,spacingJitter:3}),
     builtin('sfx-handwritten','荒々しい手描き配置','sfx',{effect:'none',font:'brush',distortion:20,kerningMode:'optical',kerningStrength:90,minimumGlyphGap:1,overlapAllowance:18,glyphOverlap:15,sizeVariation:18,horizontalJitter:12,verticalJitter:8,rotationJitter:18,spacingJitter:15}),
-    builtin('balloon-pen','手描きペン','balloon',{borderStyle:'brush',brushRoughness:25,brushPressureVariation:40,brushTexture:15,brushOpacityVariation:10}),
-    builtin('balloon-dry-brush','掠れ筆','balloon',{borderStyle:'dry-brush',borderWidth:7,brushRoughness:55,brushPressureVariation:65,brushTexture:75,brushOpacityVariation:35}),
     builtin('caption-handwritten','手描き枠線','caption',{borderStyle:'brush',borderWidth:4,brushRoughness:30,brushPressureVariation:45,brushTexture:25,brushOpacityVariation:15}),
     builtin('balloon-standard','標準の吹き出し','balloon'),
-    builtin('caption-standard','標準のキャプション','caption'),
+    builtin('caption-standard','標準のキャプション','caption',{autoFit:false}),
   ];
   return {version:1,presets,defaults:{dialogue:'dialogue-standard',sfx:'sfx-impact',balloon:'balloon-standard',caption:'caption-standard'},fontSizePreset:70,autosave:{enabled:true,minutes:2}};
 }

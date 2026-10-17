@@ -6,10 +6,11 @@ import { sfxVisibleIndices } from './sfx-lettering-model.js';
 import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
 import {validProjectId} from './project-identity.js';
 import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY,validateStrokePresets} from './sfx-lettering-templates.js';
-import { textGlyphs,sfxScene,sfxItemHit } from './renderer.js';
+import { textGlyphs,sfxScene,sfxItemHit,layerBounds } from './renderer.js';
+import { draftFileName,parseAnnotationDraft,createDraftLayers,layoutDraftLayers } from './annotation-drafts.js';
 import { startLettering, defaultGlyph, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
-import { BALLOON_LIMITS, BALLOON_SHAPES } from './balloons.js';
+import { BALLOON_LIMITS, BALLOON_SHAPES, randomPolygonCount } from './balloons.js';
 import { BRUSH_LIMITS, BRUSH_MODES } from './brush-stroke.js';
 import { PLACEMENT_LIMITS } from './glyph-layout.js';
 import { CAPTION_LIMITS, CAPTION_ALIGNMENTS, captionLayout } from './captions.js';
@@ -35,6 +36,9 @@ import { FONT_CATALOG, FONT_STYLES, fontLoadQueries,registerSessionFont,hasSessi
 import { Sam3Client } from './sam3-client.js';
 import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
 import { enhanceColorInput, syncColorInput, colorInputValue } from './colors.js';
+import { setupAppMenu } from './app-menu.js';
+
+setupAppMenu(document.getElementById('appMenu'));
 
 const $ = id => document.getElementById(id);
 const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
@@ -106,6 +110,10 @@ function releasePage(p){previewDeferredThumbnails.delete(p);disposeSam3UI(p);unm
 const VIEW_KEY = 'serifu.view.v1';
 const PAGE_FILTERS = ['all', 'unedited', 'edited', 'pending', 'done'];
 let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null, filter: 'all' }, batchStart = 0, syncingView = false;
+let pageMountGeneration=0,pageMountQueue=[],pageMountTimer=null,thumbnailNavigationAnchor=null;
+window.addEventListener('wheel',()=>{thumbnailNavigationAnchor=null;},{passive:true});
+window.addEventListener('touchstart',()=>{thumbnailNavigationAnchor=null;},{passive:true});
+window.addEventListener('pointerdown',()=>{thumbnailNavigationAnchor=null;},{passive:true});
 let displayedOrder = '';
 try {
   const saved = JSON.parse(localStorage.getItem(VIEW_KEY));
@@ -314,14 +322,26 @@ function updateGlobal() {
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=cut-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=paste-all]').disabled = busy || !pageClipboard?.layers.length;
-    p.row.querySelector('.batch-copy-hint').textContent = pageClipboard
+    const batchCopyHint = p.row.querySelector('.batch-copy-hint');
+    batchCopyHint.hidden = !pageClipboard;
+    batchCopyHint.textContent = pageClipboard
       ? `${pageClipboard.cut?'カット':'コピー'}済み：${pageClipboard.name} · ${pageClipboard.layers.length}件。この画像に追加。カット・貼付けは各画像の「戻す」で取り消せる。`
-      : '台詞・効果音・吹き出し・キャプションをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。';
+      : '';
   });
 }
 
 function previewImageEdit(p) {
   return p.cropDraft ? uncroppedImageEdit(p.img.width,p.img.height,p.imageEdit) : p.imageEdit;
+}
+
+function previewRenderGeometry(p) {
+  if(!p?.canvas||!p.row)return null;
+  const frame=p.row.querySelector('.preview-frame'),rect=p.canvas.getBoundingClientRect(),focus=p.previewFocus;
+  return JSON.stringify([
+    p.canvas.width,p.canvas.height,rect.width,rect.height,p.canvas.style.transform||'',
+    frame?.clientWidth,frame?.clientHeight,!!focus?.enabled,
+    focus?.enabled?focus.zoomPercent:null,focus?.enabled?focus.panX:null,focus?.enabled?focus.panY:null,
+  ]);
 }
 
 function drawPage(p) {
@@ -337,6 +357,7 @@ function drawPage(p) {
     maskEffects:p.maskEffects,maskAssets:p.maskAssets,draft:p.sam3Draft,
     maskSelection:p.id===activeId?p.maskEffects.find(effect=>effect.id===p.selectedMaskId)??null:null,
   });
+  if(p.mountReady){p.firstMountDrawToken=p.mountToken;p.firstMountDrawGeometry=previewRenderGeometry(p);}
   const current=selected(p),glyphMode=activeGlyphEdit(p,current);
   if(glyphMode&&!p.cropDraft){
     const scene=sceneFor(p,current);
@@ -370,7 +391,7 @@ function drawPage(p) {
 }
 
 function layerSummary(layer) {
-  if(layer.kind==='balloon')return `吹き出し：${layer.shape==='distorted-rect'?'歪み長方形':layer.shape==='spiky'?'尖り形':'楕円'}`;
+  if(layer.kind==='balloon')return `吹き出し：${BALLOON_SHAPES[layer.shape]??'楕円'}`;
   return layer.text||'（未入力）';
 }
 
@@ -384,7 +405,7 @@ function renderLayerSummary(layer,button) {
 }
 
 function persistControlValue(p,input) {
-  if(!p?.row||!input?.matches(CONTROL_SELECTOR))return;
+  if(!p?.row||!p.mountReady||!input?.matches(CONTROL_SELECTOR))return;
   const field=controlField(input),card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
   if(!layer)return;
   let value=input.type==='color'?colorInputValue(input):input.value;
@@ -567,7 +588,7 @@ function connectPreviewFocusPan(p) {
   for(const type of ['pointerup','pointercancel','lostpointercapture'])handle.addEventListener(type,end);
 }
 
-function sizePreview(p) {
+function sizePreview(p,{draw=true}={}) {
   if (!p.row) return;
   const frame=p.row.querySelector('.preview-frame'),originalFrame=p.row.querySelector('.original-frame');
   const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
@@ -594,10 +615,10 @@ function sizePreview(p) {
   }
   syncPreviewFocusUI(p);
   p.row.querySelector('.original-toolbar').style.height=`${p.row.querySelector('.preview-toolbar:not(.original-toolbar)').getBoundingClientRect().height}px`;
-  drawPage(p);
+  if(draw)drawPage(p);
 }
 
-function updateImageView(p) {
+function updateImageView(p,{draw=true}={}) {
   if(!p?.row)return;
   const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),scale=Math.min(1,1400/Math.max(size.width,size.height));
   const width=Math.max(1,Math.round(size.width*scale)),height=Math.max(1,Math.round(size.height*scale));
@@ -611,7 +632,7 @@ function updateImageView(p) {
     const field=input.dataset.cropField;if(input!==document.activeElement)input.value=String(p.cropDraft[field]);
     input.max=String(field==='x'?size.width-1:field==='y'?size.height-1:field==='width'?size.width-p.cropDraft.x:size.height-p.cropDraft.y);
   }
-  sizePreview(p);
+  sizePreview(p,{draw});
 }
 
 function cancelCrop(p) {
@@ -635,7 +656,7 @@ function selectMask(p,id) {
 
 function discardSam3Draft(p) {
   if(!p)return;
-  if(p.sam3UI)p.sam3UI.discard({notify:false});
+  if(p.sam3UI)p.sam3UI.discard({notify:false,preview:false});
   else p.sam3Draft=null;
 }
 
@@ -651,6 +672,21 @@ function updateFontSizeButtons(p) {
     const button=p.row.querySelector(`[data-action=${action}]`);if(!button)continue;
     button.disabled=busy||!layer||autoFit;
     button.title=autoFit?'文字サイズの自動調整をOFFにすると使える':action==='apply-font-size'?`記憶した${preferences.fontSizePreset}pxを反映`:'現在の文字サイズを記憶';
+  }
+}
+
+function syncCardSpeaker(layer,card) {
+  if(!['dialogue','balloon'].includes(layer.kind)||card.dataset.speaker===layer.speaker)return;
+  const female=layer.speaker==='female',speaker=female?'female':'male';
+  card.dataset.speaker=speaker;
+  if(layer.kind==='dialogue')card.querySelector('.kind-label').textContent=female?'● 女性セリフ':'● 男性セリフ';
+  renderLayerSummary(layer,card.querySelector('.layer-summary'));
+  card.querySelector('textarea[data-field=text]')?.setAttribute('aria-label',layer.kind==='balloon'
+    ?female?'女性の吹き出しセリフ':'男性の吹き出しセリフ'
+    :female?'女性セリフ':'男性セリフ');
+  for(const button of card.querySelectorAll('.role-switch [data-action]')){
+    const chosen=button.dataset.action===`speaker-${speaker}`;
+    button.classList.toggle('chosen',chosen);button.setAttribute('aria-pressed',String(chosen));
   }
 }
 
@@ -672,12 +708,13 @@ function updateControls(p) {
   const shapeControl=controls.querySelector('.balloon-shape-control'),shapeSelect=shapeControl.querySelector('select');
   shapeControl.hidden=!balloon&&!caption;
   shapeControl.firstChild.textContent=caption?'キャプション形状':'吹き出し形状';
-  for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!['ellipse','distorted-rect','spiky'].includes(option.value);
-  const showDistortion=balloon?['distorted-rect','spiky'].includes(l.shape):caption&&l.shape==='spiky';
+  for(const option of shapeSelect.options)option.hidden=caption?!['rect','spiky'].includes(option.value):!Object.hasOwn(BALLOON_SHAPES,option.value);
+  const showDistortion=balloon?['distorted-rect','spiky','polygon'].includes(l.shape):caption&&l.shape==='spiky';
   controls.querySelector('.balloon-distortion-control').hidden=!showDistortion;
-  const showSeed=balloon&&['distorted-rect','spiky'].includes(l.shape);
+  const showSeed=balloon&&['distorted-rect','spiky','polygon'].includes(l.shape);
   for(const node of controls.querySelectorAll('[data-shape-seed-control]'))node.hidden=!showSeed;
   controls.querySelector('.balloon-spike-count-control').hidden=!balloon||l.shape!=='spiky';
+  for(const node of controls.querySelectorAll('[data-polygon-control]'))node.hidden=!balloon||l.shape!=='polygon';
   controls.querySelector('.balloon-distortion-control output').value=`${numericValue(l?.distortion??55,'distortion')}%`;
   controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
@@ -705,6 +742,7 @@ function updateControls(p) {
     const included=p.id===activeId&&p.selectedIds?.includes(card.dataset.layerId);card.classList.toggle('multi-selected',!!included);
     card.querySelector('.layer-summary')?.setAttribute('aria-pressed',String(!!included));
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
+    if(layer)syncCardSpeaker(layer,card);
     if(layer?.kind==='sfx'){
       card.querySelector('.taper-controls').hidden=layer.effect!=='taper';
        card.querySelector('.grunge-controls').hidden=layer.inkTexture!=='grunge';
@@ -723,8 +761,9 @@ function updateControls(p) {
       }
     }
     if(layer?.kind==='balloon'){
-      card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky'].includes(layer.shape);
+      card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky','polygon'].includes(layer.shape);
       card.querySelector('.balloon-spike-count-control').hidden=layer.shape!=='spiky';
+      for(const node of card.querySelectorAll('[data-polygon-control]'))node.hidden=layer.shape!=='polygon';
     }
     if(layer)for(const input of card.querySelectorAll(CONTROL_SELECTOR)){
       if(input===document.activeElement)continue;
@@ -774,6 +813,7 @@ function activate(p, id = p.selectedId, scroll = false) {
     if (!p) { activeId = null;refreshJump();return; }
     id = p.selectedId;
   }
+  if(thumbnailNavigationAnchor&&thumbnailNavigationAnchor.pageId!==p.id)thumbnailNavigationAnchor=null;
   const previous = active();
   if(previous&&previous!==p)persistPageControl(previous);
   if(previous&&previous!==p)discardSam3Draft(previous);
@@ -783,18 +823,31 @@ function activate(p, id = p.selectedId, scroll = false) {
   }else selectObject(p,id);
   const index = displayedPages().indexOf(p);
   const nextStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
-  if (!p.row || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
-  if (previous && previous !== p) { updateControls(previous); drawPage(previous); }
-  updateControls(p); drawPage(p); updateGlobal();
-  if (scroll) p.row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const wasMountReady=!!p.mountReady;
+  if (!p.row || !p.mountReady || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
+  if (previous && previous !== p && previous.row) { updateControls(previous); drawPage(previous); }
+  updateControls(p);if(wasMountReady||p.firstMountDrawToken!==p.mountToken)drawPage(p);updateGlobal();
+  if (scroll) scrollToThumbnailPage(p);
+}
+
+function scrollToThumbnailPage(p){
+  if(!p?.row)return;
+  const toolbarHeight=document.querySelector('.collection-bar').getBoundingClientRect().height;
+  // Avoid adding the root scroll padding and the row scroll margin together.
+  window.scrollBy({top:p.row.getBoundingClientRect().top-toolbarHeight,behavior:'instant'});
+  thumbnailNavigationAnchor={
+    pageId:p.id,generation:pageMountGeneration,top:p.row.getBoundingClientRect().top,
+  };
 }
 
 function unmountPage(p) {
+  p.mountToken=(p.mountToken||0)+1;
   previewDeferredDraws.delete(p);
   closeMagnifier(p);
-  if (!p.row) { disposeSam3UI(p); return; }
+  if (!p.row) { p.mountReady=false;disposeSam3UI(p); return; }
   disposeSam3UI(p);
   persistPageControl(p);
+  p.mountReady=false;
   rememberCardDetails(p);
   p.resizeObserver?.disconnect();
   p.canvas.width = 1; p.canvas.height = 1;
@@ -802,19 +855,57 @@ function unmountPage(p) {
   p.img.src = '';
 }
 
+function cancelPageMountQueue() {
+  pageMountGeneration++;
+  thumbnailNavigationAnchor=null;
+  pageMountQueue=[];
+  if(pageMountTimer!==null){clearTimeout(pageMountTimer);pageMountTimer=null;}
+  return pageMountGeneration;
+}
+
+function retainThumbnailNavigationPosition(generation){
+  const anchor=thumbnailNavigationAnchor;
+  if(!anchor)return;
+  if(anchor.generation!==generation)return;
+  if(generation!==pageMountGeneration){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
+  if(activeId!==anchor.pageId){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
+  const target=pages.find(page=>page.id===anchor.pageId);
+  if(!target?.row){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
+  const top=target.row.getBoundingClientRect().top,delta=top-anchor.top;
+  if(Math.abs(delta)>0.5)window.scrollBy({top:delta,behavior:'instant'});
+}
+
+function schedulePageMounts(queue,generation) {
+  pageMountQueue=queue;
+  const prepareNext=()=>{
+    pageMountTimer=null;
+    if(generation!==pageMountGeneration)return;
+    while(pageMountQueue.length){
+      const p=pageMountQueue.shift();
+      if(pages.includes(p)&&p.row&&!p.mountReady){prepareMountedPage(p,generation);retainThumbnailNavigationPosition(generation);break;}
+    }
+    if(pageMountQueue.length&&generation===pageMountGeneration)pageMountTimer=setTimeout(prepareNext,0);
+  };
+  if(pageMountQueue.length)pageMountTimer=setTimeout(prepareNext,0);
+}
+
 function syncVisiblePages() {
   const displayed = displayedPages();
   const count = view.pageSize === 'all' ? Math.max(1, displayed.length) : view.pageSize;
   const activeIndex = displayed.findIndex(p => p.id === activeId);
   batchStart = activeIndex < 0 ? 0 : Math.floor(activeIndex / count) * count;
-  const visible = new Set(displayed.slice(batchStart, batchStart + count));
+  const ordered=displayed.slice(batchStart,batchStart+count),visible = new Set(ordered);
+  const generation=cancelPageMountQueue();
   const wasSyncing=syncingView;syncingView = true;
   try {
     for (const p of pages) if (!visible.has(p)) unmountPage(p);
-    let position=0;for (const p of visible) {
-      if (!p.row) mountPage(p);
+    const priority=ordered.find(p=>p.id===activeId)||ordered[0];
+    if(priority){if(!priority.row)mountPage(priority);if(!priority.mountReady)prepareMountedPage(priority,generation);}
+    for (const p of ordered) if(p!==priority&&!p.row)mountPage(p);
+    let position=0;for (const p of ordered) {
       const existing=$('deck').children[position++];if(existing!==p.row)$('deck').insertBefore(p.row,existing||null);
     }
+    schedulePageMounts(ordered.filter(p=>p!==priority&&!p.mountReady),generation);
   } finally { syncingView = wasSyncing; }
   updateGlobal();
 }
@@ -1028,7 +1119,7 @@ function textPositionControls(layer){
   return grid;
 }
 const CONTROL_SELECTOR='[data-field], [data-numeric-field]';
-const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','brushSeed','glyphSeed',
+const INTEGER_FIELDS=new Set(['shapeSeed','spikeCount','polygonCount','brushSeed','glyphSeed',
   'x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth',
   'textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth',
   'shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY']);
@@ -1336,7 +1427,7 @@ function captureCardViewport(p) {
   };
 }
 
-function restoreCardViewport(p,view) {
+function restoreCardViewport(p,view,{window:restoreWindow=true}={}) {
   if(!view||!p.row)return;
   const pane=p.row.querySelector('.dialogue-pane'),container=p.row.querySelector('.layer-cards');
   const cards=new Map([...container.querySelectorAll('.layer-card')].map(card=>[card.dataset.layerId,card]));
@@ -1359,15 +1450,15 @@ function restoreCardViewport(p,view) {
     const list=cards.get(saved.layerId)?.querySelector('.sfx-glyph-list');
     if(list){list.scrollLeft=saved.left;list.scrollTop=saved.top;}
   }
-  document.scrollingElement.scrollLeft=view.windowX;document.scrollingElement.scrollTop=view.windowY;
+  if(restoreWindow){document.scrollingElement.scrollLeft=view.windowX;document.scrollingElement.scrollTop=view.windowY;}
 }
 
-function renderCards(p) {
+function renderCards(p,{draw=true,restoreWindow=true}={}) {
   if(p.renderingCards)return;p.renderingCards=true;
   try{
   const viewport=captureCardViewport(p);
   syncSelection(p);p.row?.classList.toggle('sfx-editing',!!activeGlyphEdit(p,selected(p)));
-  updateImageView(p);
+  updateImageView(p,{draw});
   if (!p.row) return;
   rememberCardDetails(p);
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
@@ -1398,19 +1489,21 @@ function renderCards(p) {
     presetLine.append(presetSelect,button('save-preset','保存','この設定に名前を付けてプリセットを保存'),button('delete-preset','削除','選択中の保存プリセットを削除'));card.append(presetLine);
     if(l.kind==='balloon'){
       const text=element('textarea');text.dataset.field='text';text.value=l.text;text.wrap='off';fitTextInput(text);text.placeholder='吹き出しのセリフを入力';text.setAttribute('aria-label',l.speaker==='female'?'女性の吹き出しセリフ':'男性の吹き出しセリフ');card.append(text);
-      card.append(speechStyleControls(l),textPositionControls(l),element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。枠は動かさず本文を移動。余白を減らすと改行までの長さが広がる。'));
+      card.append(speechStyleControls(l),textPositionControls(l),element('p','effect-note','文字位置：横は＋で右／−で左、縦は＋で下／−で上。枠は動かさず本文を移動。余白を減らすと改行までの長さが広がる。本文は枠外も表示。'));
       const grid=element('div','effect-grid');
       for(const [field,labelText,type] of [['color','吹き出しの色','color'],['transparency','透過率（%）','number'],['borderColor','枠線の色','color'],['borderWidth','枠線の太さ（px）','number'],['shadowColor','影の色','color'],['shadowBlur','影のぼかし（px）','number'],['shadowOffsetX','影の横ずれ（px）','number'],['shadowOffsetY','影の縦ずれ（px）','number'],['shadowOpacity','影の濃さ（%）','number']]){
         const label=element('label','',labelText),input=element('input');input.type=type;input.dataset.field=field;input.value=String(l[field]);
         if(type==='number'){[input.min,input.max]=BALLOON_LIMITS[field];input.step=field==='borderWidth'?'0.5':'1';}label.append(input);grid.append(label);
       }
       card.append(grid,brushControls(l));
-      const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky'].includes(l.shape);
-      for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount]]){
+      const shapeControls=element('div','balloon-seed-controls effect-grid');shapeControls.hidden=!['distorted-rect','spiky','polygon'].includes(l.shape);
+      for(const [field,title,min,max] of [['shapeSeed','形状seed',0,4294967295],['spikeCount','尖りの頂点数',...BALLOON_LIMITS.spikeCount],['polygonCount','多角形の頂点数',...BALLOON_LIMITS.polygonCount]]){
         const label=element('label',field==='spikeCount'?'balloon-spike-count-control':'',title),input=element('input');input.type='number';input.dataset.field=field;input.min=String(min);input.max=String(max);input.step='1';input.value=String(l[field]);
-        label.hidden=field==='spikeCount'&&l.shape!=='spiky';label.append(input);shapeControls.append(label);
+        if(field==='polygonCount')label.dataset.polygonControl='';
+        label.hidden=field==='spikeCount'&&l.shape!=='spiky'||field==='polygonCount'&&l.shape!=='polygon';label.append(input);shapeControls.append(label);
       }
-      shapeControls.append(button('regenerate-shape','形状を再生成','形状seedを変更して別の歪み・尖り方にする'));card.append(shapeControls);
+      const randomCount=button('randomize-polygon-count','頂点数をランダム生成','3〜60の範囲で現在と異なる頂点数にする');randomCount.dataset.polygonControl='';randomCount.hidden=l.shape!=='polygon';
+      shapeControls.append(randomCount,button('regenerate-shape','形状を再生成','形状seedを変更して別の歪み・尖り方にする'));card.append(shapeControls);
        const shadowLabel=element('label','tail-toggle','影を付ける'),shadowToggle=element('input');
        shadowToggle.type='checkbox';shadowToggle.dataset.field='shadowEnabled';shadowToggle.checked=l.shadowEnabled??false;
        shadowLabel.prepend(shadowToggle);card.append(shadowLabel);
@@ -1479,27 +1572,48 @@ function renderCards(p) {
   const cards=new Map([...container.children].map(card=>[card.dataset.layerId,card]));
   for(const [index,effect] of p.maskEffects.entries())cards.set(effect.id,createMaskEffectCard(effect,p.maskAssets[effect.assetId],index,p.id===activeId&&p.selectedMaskId===effect.id,p.img.width,p.img.height));
   for(const object of paintOrder(p.layers,p.maskEffects))container.append(cards.get(object.id));
-  refreshPresetMenus(p); updateControls(p);restoreCardViewport(p,viewport);
+  refreshPresetMenus(p); updateControls(p);restoreCardViewport(p,viewport,{window:restoreWindow});
   }finally{p.renderingCards=false;}
 }
 
 function mountPage(p) {
-  const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;delete p.globalUIState;
+  const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;p.mountReady=false;delete p.globalUIState;
   row.querySelector('[data-page-destination]').value=p.moveAfterPage??'';
-  addNumericControls(row.querySelector('.position-controls'),p);
-  addTextColorControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
   row.querySelector('.dimensions').textContent = `${p.img.width} × ${p.img.height}`;
-  const original = row.querySelector('.original'); original.src = p.src; original.alt = `元画像 ${p.name}`;
+  const original = row.querySelector('.original'); original.alt = `元画像 ${p.name}`;original.style.aspectRatio=`${p.img.width}/${p.img.height}`;
   row.querySelector('[data-action=delete]').disabled = !p.directory;
   row.querySelector('.source-note').textContent = p.directory ? '元ファイルは上書きしない。削除は確認後に完全削除。' : '元ファイルとの接続なし。元画像削除は無効。';
   const copy = button('copy-next', '文字を次の画像へ複製 →'); copy.className = 'copy-next'; row.querySelector('.dialogue-pane').append(copy);
   p.canvas = row.querySelector('canvas.preview'); p.canvas.tabIndex = 0;
-  p.img.onload = () => { if (p.row) { sizePreview(p); updateControls(p); } };
-  p.img.onerror = () => { if (p.row) status(`「${p.name}」のプレビュー画像を読み込めなかった。`); };
+  const previewSize=imageSize(p.img.width,p.img.height,previewImageEdit(p)),previewScale=Math.min(1,1400/Math.max(previewSize.width,previewSize.height));
+  p.canvas.width=Math.max(1,Math.round(previewSize.width*previewScale));p.canvas.height=Math.max(1,Math.round(previewSize.height*previewScale));
+  $('deck').append(row);
+}
+
+function prepareMountedPage(p,generation) {
+  if(generation!==pageMountGeneration||!pages.includes(p)||!p.row||p.mountReady)return;
+  const row=p.row,token=p.mountToken=(p.mountToken||0)+1,original=row.querySelector('.original');
+  delete p.globalUIState;
+  addNumericControls(row.querySelector('.position-controls'),p);
+  addTextColorControls(row.querySelector('.position-controls'),p);
+  p.img.onload = () => {
+    if(p.row!==row||p.mountToken!==token)return;
+    sizePreview(p,{draw:false});updateControls(p);
+    if(p.firstMountDrawToken!==token)drawPage(p);
+    retainThumbnailNavigationPosition(pageMountGeneration);
+  };
+  p.img.onerror = () => { if (p.row===row&&p.mountToken===token) {status(`「${p.name}」のプレビュー画像を読み込めなかった。`);retainThumbnailNavigationPosition(pageMountGeneration);} };
+  original.src=p.src;
   p.img.src = p.src;
-  $('deck').append(row); renderCards(p);
-  p.resizeObserver = new ResizeObserver(() => sizePreview(p)); p.resizeObserver.observe(row.querySelector('.preview-frame'));
+  renderCards(p,{draw:false,restoreWindow:false});
+  p.resizeObserver = new ResizeObserver(() => {
+    if(p.row!==row||p.mountToken!==token)return;
+    const hadDraw=p.firstMountDrawToken===token;
+    sizePreview(p,{draw:false});
+    if(!hadDraw||p.firstMountDrawToken!==token||p.firstMountDrawGeometry!==previewRenderGeometry(p))drawPage(p);
+    retainThumbnailNavigationPosition(pageMountGeneration);
+  }); p.resizeObserver.observe(row.querySelector('.preview-frame'));
   p.resizeObserver.observe(row.querySelector('.original-frame'));p.resizeObserver.observe(row.querySelector('.preview-toolbar:not(.original-toolbar)'));
   connectPreviewFocusPan(p);
   const focusZoom=row.querySelector('[data-focus-zoom]');
@@ -1537,13 +1651,15 @@ function mountPage(p) {
     if(!focusZoomSuppressClick)return;
     focusZoomSuppressClick=false;event.preventDefault();
   });
-  connectCanvas(p); sizePreview(p);
+  connectCanvas(p);
   p.sam3UI=createSam3UI({
     page:p,panel:row.querySelector('.sam3-panel'),overlay:row.querySelector('.sam3-overlay'),image:original,client:sam3Client,
-    getOriginalBlob:()=>originalBlob(p),getRetainedMaskDecodedBytes:retainedMaskDecodedBytes,onPreview:()=>drawPage(p),
+    getOriginalBlob:()=>originalBlob(p),getRetainedMaskDecodedBytes:retainedMaskDecodedBytes,onPreview:()=>drawPage(p),initialPreview:false,
     onCommit:(candidates,settings)=>commitSam3Candidates(p,candidates,settings),
     onCancel:()=>drawPage(p),
   });
+  p.mountReady=true;p.firstMountDrawToken=null;
+  if(p.img.complete&&p.img.naturalWidth){updateControls(p);drawPage(p);}
 }
 
 function refreshJump() {
@@ -1682,6 +1798,7 @@ $('deck').addEventListener('focusin', event => {
   const p = pageFrom(event.target); if (!p) return;
   const maskCard=event.target.closest('.mask-effect-card');if(maskCard){if(p.id!==activeId||p.selectedMaskId!==maskCard.dataset.maskId)selectMask(p,maskCard.dataset.maskId);return;}
   const id = event.target.closest('.layer-card')?.dataset.layerId;
+  if(p===active()&&p.mountReady&&p.selectedId===(id||p.selectedId)&&!p.selectedMaskId)return;
   activate(p, id || p.selectedId);
 });
 $('deck').addEventListener('focusout', event => {
@@ -1813,8 +1930,9 @@ $('deck').addEventListener('click', async event => {
   const p = pageFrom(event.target); if (!p) return;
   const action = event.target.closest('[data-action]')?.dataset.action;
   if(action==='preview-full'){
-    persistPageControl(p);closeMagnifier();void openFullPreview(p,event.target.closest('button'));
-    if(p.id!==activeId)activate(p);
+    persistPageControl(p);closeMagnifier();
+    if(p.id!==activeId||!p.mountReady)activate(p);
+    void openFullPreview(p,event.target.closest('button'));
     return;
   }
   const maskCard=event.target.closest('.mask-effect-card');
@@ -1930,6 +2048,8 @@ $('deck').addEventListener('click', async event => {
     edit(p,()=>{l.textureSeed=(Math.imul(l.textureSeed??0,1664525)+1013904223)>>>0;l.presetId=null;});
   } else if (action === 'regenerate-shape' && l?.kind==='balloon') {
     edit(p,()=>{l.shapeSeed=(Math.imul(l.shapeSeed,1664525)+1013904223)>>>0;l.presetId=null;});
+  } else if (action === 'randomize-polygon-count' && l?.kind==='balloon' && l.shape==='polygon') {
+    edit(p,()=>{l.polygonCount=randomPolygonCount(l.polygonCount);l.presetId=null;});
   } else if (action === 'reset-text-color' && ['dialogue','balloon'].includes(l?.kind)) {
     edit(p,()=>{l.textColor=null;l.presetId=null;});
   } else if (action === 'duplicate' && l) {
@@ -2173,6 +2293,7 @@ function connectCanvas(p) {
 }
 
 window.addEventListener('keydown', event => {
+  thumbnailNavigationAnchor=null;
   if(previewIsOpen())return;
   if(event.key==='Escape'&&active()?.cropDraft&&!event.isComposing&&!editLocked()){event.preventDefault();cancelCrop(active());return;}
   if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable || event.isComposing || editLocked()) return;
@@ -2279,7 +2400,8 @@ function decode(src) {
 async function addFiles(entries,task) {
   entries=entries.filter(e=>/\.(png|jpe?g|webp|gif|avif)$/i.test(e.file?.name||e.handle?.name));
   sourceFolderName=uploadedFolderName(entries)||sourceFolderName;
-  let count=0,failures=0,first=null,lastFlush=performance.now(),unflushed=0;
+  let count=0,failures=0,draftCount=0,first=null,lastFlush=performance.now(),unflushed=0;
+  const draftWarnings=[],draftFontLoads=new Map(),measureCanvas=document.createElement('canvas'),measureContext=measureCanvas.getContext('2d');
   const flush=()=>{if(!unflushed)return;if(!activeId&&first)activeId=first.id;dirty();const flushed=performance.now();refreshJump();task.metrics.flushMs=(task.metrics.flushMs||0)+performance.now()-flushed;if(task.metrics.firstEditableMs===null){task.metrics.firstEditableMs=performance.now()-task.started;}unflushed=0;lastFlush=performance.now();};
   if(entries.length>=4)imagePool.resize(4);task.stage('画像準備と表示反映',entries.length);
   try{for(let start=0;start<entries.length;start+=20){
@@ -2290,34 +2412,60 @@ async function addFiles(entries,task) {
     for await(const result of boundedResults(ready,async entry=>{if(entry.metadataError)throw entry.metadataError;return {...entry,prepared:await prepareImage(entry.file,task,entry.expectedSize)};},queueOptions(task,true))){
       checkAbort(task.signal);const entry=ready[result.index],name=entry.file?.name||entry.handle?.name;
       if(result.error){failures++;task.result(name,false);(task.metrics.failures ||= []).push({name,reason:result.error.message});task.update({errorMessage:`${name}: ${result.error.message}`},true);continue;}
-      const {file,directory=null,prepared}=result.value,p=createPage({name:file.name,src:URL.createObjectURL(file),file,directory,prepared});pages.push(p);first ||= p;count++;unflushed++;if(directory)sourceDirectory=directory;
+      const {file,directory=null,prepared}=result.value,draft=await readImageDraft(result.value,task,measureContext,draftFontLoads);
+      checkAbort(task.signal);draftCount+=draft.layers.length;draftWarnings.push(...draft.warnings);
+      const p=createPage({name:file.name,src:URL.createObjectURL(file),file,directory,prepared,layers:draft.layers});pages.push(p);first ||= p;count++;unflushed++;if(directory)sourceDirectory=directory;
       task.result(name);if(unflushed>=10||(count===1&&pages.length===1)||performance.now()-lastFlush>=250){flush();await yieldToBrowser();}
     }
     flush();await yieldToBrowser();
-  }}finally{flush();}
+  }}finally{flush();measureCanvas.width=measureCanvas.height=1;}
 
-  status(`${count} 枚を追加。画像ごとに下へスクロールして編集${failures?` · ${failures} 枚は読込失敗`:''}`);
+  task.metrics.draftLayers=draftCount;task.metrics.draftWarnings=draftWarnings;
+  status(`${count} 枚を追加。画像ごとに下へスクロールして編集${draftCount?` · 下書き${draftCount}件を生成`:''}${failures?` · ${failures} 枚は読込失敗`:''}${draftWarnings.length?` · 下書きの注意: ${draftWarnings.join(' / ')}`:''}`);
+}
+async function readImageDraft(entry,task,context,fontPreparations) {
+  if(!entry.draftFile&&!entry.draftHandle)return {layers:[],warnings:[]};
+  const name=entry.draftFile?.webkitRelativePath||entry.draftFile?.name||entry.draftHandle.name;
+  try{
+    checkAbort(task.signal);
+    const file=entry.draftFile||await awaitWithAbort(entry.draftHandle.getFile(),task.signal);
+    const parsed=parseAnnotationDraft(await awaitWithAbort(file.text(),task.signal),entry.file.name);
+    const layers=createDraftLayers(parsed.annotations,entry.prepared.width,entry.prepared.height,makeLayer);
+    const queries=[...new Set(layers.flatMap(fontLoadQueries))].filter(Boolean);
+    if(document.fonts)for(const query of queries){
+      checkAbort(task.signal);
+      if(!fontPreparations.has(query))fontPreparations.set(query,document.fonts.load(query).then(faces=>{if(!faces.length)throw new Error(`書体を読込できない: ${query}`);fontErrors.delete(query);clearGlyphCache();}));
+      await awaitWithAbort(fontPreparations.get(query),task.signal);
+    }
+    checkAbort(task.signal);
+    const placed=layoutDraftLayers(layers,entry.prepared.width,entry.prepared.height,layer=>layerBounds(context,layer),{signal:task.signal});
+    const warnings=parsed.warnings.map(warning=>`${name}: ${warning}`);
+    if(placed.overflow)warnings.push(`${name}: 最小サイズでも収まらず画像外へ配置した。画像外の部分はPNGに出力されないため位置調整が必要`);
+    return {layers:placed.layers,warnings};
+  }catch(error){if(error.name==='AbortError'||task.signal.aborted)throw error;return {layers:[],warnings:[`${name}: 下書きを生成できなかった (${error.message})`]};}
 }
 $('open').onclick = () => {
   if(busy)return;if (!window.showDirectoryPicker) { $('folderInput').click(); status('フォルダ内の画像を読み込める。直接保存と元画像削除はPC版Chrome / Edgeが対象。'); return; }
   const picked=window.showDirectoryPicker({mode:'readwrite'}).then(parent=>({parent}),error=>({error}));
-  guard(async task=>{const selection=await picked;if(selection.error)throw selection.error;const directory=selection.parent,entries=[];task.stage('フォルダ列挙');
-    for await(const entry of directory.values()){checkAbort(task.signal);if(entry.kind==='file'&&/\.(png|jpe?g|webp|gif|avif)$/i.test(entry.name)){entries.push({handle:entry,directory});task.result(entry.name);}if(entries.length%20===0)await yieldToBrowser();}
+  guard(async task=>{const selection=await picked;if(selection.error)throw selection.error;const directory=selection.parent,entries=[],drafts=new Map();let scanned=0;task.stage('フォルダ列挙');
+    for await(const entry of directory.values()){checkAbort(task.signal);if(entry.kind==='file'){if(/\.(png|jpe?g|webp|gif|avif)$/i.test(entry.name)){entries.push({handle:entry,directory});task.result(entry.name);}else if(/\.json$/i.test(entry.name))drafts.set(entry.name,entry);}if(++scanned%20===0)await yieldToBrowser();}
+    for(const entry of entries)entry.draftHandle=drafts.get(draftFileName(entry.handle.name));
     entries.sort((a,b)=>a.handle.name.localeCompare(b.handle.name,'ja',{numeric:true}));await addFiles(entries,task);
   },'画像追加',2);
 };
 $('files').onclick = () => {if(!busy)$('fileInput').click();};
-function addImageFiles(files) {
+function addImageFiles(files,{withDrafts=false}={}) {
   if(readOnly){status('閲覧専用のプロジェクトには画像を追加できない。');return;}
   if (busy) return;
   const images = [...files].filter(file => /\.(png|jpe?g|webp|gif|avif)$/i.test(file.name))
     .sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }));
   if (!images.length) { status('追加できる画像がない。PNG / JPEG / WebP / GIF / AVIFを選択してほしい。'); return; }
-  return guard(task => addFiles(images.map(file => ({file})), task), '画像追加');
+  const drafts=withDrafts?new Map([...files].map(file=>[file.webkitRelativePath||file.name,file])):new Map();
+  return guard(task => addFiles(images.map(file => ({file,draftFile:drafts.get(draftFileName(file.webkitRelativePath||file.name))})), task), '画像追加');
 }
 for (const id of ['fileInput', 'folderInput']) $(id).onchange = event => {
   const files = [...event.target.files]; event.target.value = '';
-  addImageFiles(files);
+  addImageFiles(files,{withDrafts:id==='folderInput'});
 };
 function isFileDrop(event) {
   return !thumbnailDrag && [...(event.dataTransfer?.types || [])].includes('Files');
@@ -2625,7 +2773,9 @@ function alignLayerText(p,layer,alignment) {
   edit(p,()=>Object.assign(layer,changes,{presetId:null}),false);refreshPresetMenus();
 }
 function applyLayerPreset(p,layer,preset) {
-  edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height));preferences.defaults[layer.kind]=preset.id;persistPreferences();
+  edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height),false);
+  preferences.defaults[layer.kind]=preset.id;
+  persistPreferences({target:p,layerId:layer.id,defaultKind:layer.kind});
 }
 function fillPresetSelect(select,kind,current,custom=false) {
   if(select===document.activeElement)return;
@@ -2634,9 +2784,11 @@ function fillPresetSelect(select,kind,current,custom=false) {
   for(const preset of preferences.presets.filter(p=>p.kind===kind)){const option=element('option','',preset.name);option.value=preset.id;select.append(option);}
   select.value=current||'';
 }
-function refreshPresetMenus(target=null) {
-  if(!target)for(const [id,kind] of presetControls)fillPresetSelect($(id),kind,preferences.defaults[kind]);
+function refreshPresetMenus(target=null,{layerId=null,defaultKind=null}={}) {
+  if(defaultKind){const [id,kind]=presetControls.find(([,kind])=>kind===defaultKind)||[];if(id)fillPresetSelect($(id),kind,preferences.defaults[kind]);}
+  else if(!target)for(const [id,kind] of presetControls)fillPresetSelect($(id),kind,preferences.defaults[kind]);
   for(const p of target?[target]:pages)if(p.row)for(const card of p.row.querySelectorAll('.layer-card')){
+    if(layerId&&card.dataset.layerId!==layerId)continue;
     const layer=p.layers.find(l=>l.id===card.dataset.layerId),select=card.querySelector('[data-preset-select]');
     if(layer&&select){
       fillPresetSelect(select,layer.kind,layer.presetId,true);
@@ -2644,13 +2796,13 @@ function refreshPresetMenus(target=null) {
       card.querySelector('[data-action=delete-preset]').disabled=busy||!preset||preset.builtin;
     }
   }
-  for(const b of document.querySelectorAll('[data-delete-preset]'))b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
+  for(const b of document.querySelectorAll('[data-delete-preset]'))if(!defaultKind||b.dataset.deletePreset===defaultKind)b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
 }
-function persistPreferences() {
+function persistPreferences({target=null,layerId=null,defaultKind=null}={}) {
   let remembered=true;
   try {localStorage.setItem(PREFS_KEY,JSON.stringify(preferences));}
   catch(error){remembered=false;status(`設定をブラウザに記憶できなかった: ${error.message}`);}
-  refreshPresetMenus();
+  refreshPresetMenus(target,{layerId,defaultKind});
   return remembered;
 }
 function mergePresets(input) {

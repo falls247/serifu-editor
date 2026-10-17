@@ -4,7 +4,7 @@ const root = new URL('../', import.meta.url);
 const output = new URL('_site/', root);
 const assets = ['index.html', 'favicon-32.png', 'apple-touch-icon.png', 'src/app.js', 'src/export.js', 'src/project-identity.js','src/project-history.js','src/project-lock.js','src/project-conflict.js','src/sfx-lettering-templates.js','src/sfx-outline-groups.js','src/sfx-lettering-model.js','src/sfx-stroke-geometry.js','src/sfx-edit-operations.js','src/sfx-editor.js','src/renderer.js','src/glyph-layout.js','src/brush-stroke.js', 'src/balloons.js', 'src/captions.js', 'src/typography.js', 'src/ink.js', 'src/fonts.js', 'src/model.js','src/image-edit.js','src/preview-modal.js','src/preview-render.js','src/preview-magnifier.js','src/preview-focus.js', 'src/presets.js', 'src/storage.js','src/bulk-task.js','src/bulk-pool.js','src/image-worker.js','src/image-metadata.js','src/export-cache.js','src/project-io.js','src/project-filenames.js','src/project-worker.js','src/zip.js', 'src/mask-codec.js', 'src/mask-geometry.js', 'src/mask-effects.js', 'src/sam3-client.js', 'src/sam3-ui.js', 'style.css'];
 
-assets.push('src/colors.js');
+assets.push('src/colors.js','src/annotation-drafts.js','src/app-menu.js');
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 await mkdir(new URL('src/', output), { recursive: true });

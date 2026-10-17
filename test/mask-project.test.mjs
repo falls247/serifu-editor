@@ -60,12 +60,10 @@ test('serifu container v2 keeps mask bytes outside the manifest and rejects corr
   const manifestLength = new DataView(bytes.buffer).getUint32(8, true);
   const manifest = JSON.parse(new TextDecoder().decode(bytes.subarray(12, 12 + manifestLength)));
   assert.equal(manifest.containerVersion, 2);
-  assert.ok(!JSON.stringify(manifest).includes(maskAssetData(source.maskAssets['mask-1'])));
+  for(const asset of manifest.maskAssets)assert.equal(Object.hasOwn(asset,'data'),false);
   bytes[bytes.length - 1] ^= 1;
   await assert.rejects(readProject(new Blob([bytes])), /checksum|bitpack|RLE/);
 });
-
-function maskAssetData(asset) { return Array.from(asset.data).join(','); }
 
 test('legacy JSON versions load without mask state', async () => {
   const legacy = new Blob([JSON.stringify({ version: 11, preferences: {}, pages: [{ name: 'old.png', src: 'data:image/png;base64,iVBORw==', layers: [], done: true }] })], { type: 'application/json' });

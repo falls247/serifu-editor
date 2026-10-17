@@ -58,7 +58,17 @@ try {
     const fitted=captionLayout(ctx,{...caption,autoFit:true}),shiftedFit=captionLayout(ctx,{...caption,autoFit:true,textOffsetX:30,textOffsetY:-20});
     const balloon={...newLayer('balloon',600,600),text:'あいうえおか',w:140,h:140,size:20,borderWidth:0,outline:0};
     const columns=new Set(textGlyphs(ctx,balloon).map(g=>g.x)).size,paddedColumns=new Set(textGlyphs(ctx,{...balloon,padding:10}).map(g=>g.x)).size;
-    const workerLayers=[{...balloon,x:200,y:230,w:280,h:250,size:50,text:'位置',lineAlign:'center',textOffsetX:12,textOffsetY:10},{...caption,x:400,y:350,textOffsetX:-20,textOffsetY:15}];
+    const overflow=[];
+    for(const shape of ['ellipse','distorted-rect','spiky','polygon'])for(const vertical of [true,false])for(const rotation of [0,90]){
+      const layer={...balloon,shape,shapeSeed:12345,x:300,y:300,w:140,h:140,size:40,text:'位置',vertical,rotation,lineAlign:'center',textColor:'#cc3300'};
+      const original=bounds(render(layer));
+      for(const direction of [-1,1]){
+        const shifted=bounds(render({...layer,textOffsetX:direction*160}));
+        overflow.push({shape,vertical,rotation,direction,original,shifted});
+      }
+    }
+    const wrapped=bounds(render({...balloon,x:300,y:300,w:80,h:80,size:40,text:'位\n位\n位\n位\n位',vertical:false,textColor:'#cc3300'}));
+    const workerLayers=[{...balloon,x:200,y:230,w:140,h:140,size:50,text:'位置',lineAlign:'center',textOffsetX:180,textOffsetY:10},{...caption,x:400,y:350,textOffsetX:-20,textOffsetY:15}];
     const html=render(workerLayers[0]);const offscreen=new OffscreenCanvas(600,600);draw(offscreen.getContext('2d'),base,[workerLayers[0]]);
     const offscreenBytes=offscreen.getContext('2d').getImageData(0,0,600,600).data;
     let offscreenDiff=0;for(let i=0;i<html.length;i++)if(html[i]!==offscreenBytes[i])offscreenDiff++;
@@ -68,9 +78,16 @@ try {
     const bitmap=await createImageBitmap(png);offscreen.getContext('2d').drawImage(bitmap,0,0);bitmap.close();
     draw(ctx,base,workerLayers);const preview=ctx.getImageData(0,0,600,600).data,exported=offscreen.getContext('2d').getImageData(0,0,600,600).data;
     let workerDiff=0;for(let i=0;i<preview.length;i++)if(preview[i]!==exported[i])workerDiff++;
-    return {samples,inPadding,fitSize:fitted.size,shiftedFitSize:shiftedFit.size,columns,paddedColumns,offscreenDiff,workerDiff};
+    return {samples,overflow,wrapped,inPadding,fitSize:fitted.size,shiftedFitSize:shiftedFit.size,columns,paddedColumns,offscreenDiff,workerDiff};
   });
   for(const sample of pixels.samples){assert.ok(sample.original.count>30);assert.equal(sample.shifted.count,sample.original.count);assert.equal(sample.shifted.left-sample.original.left,sample.textOffsetX);assert.equal(sample.shifted.top-sample.original.top,sample.textOffsetY);}
+  for(const {shape,vertical,rotation,direction,original,shifted} of pixels.overflow){
+    assert.ok(original.count>30);assert.equal(shifted.count,original.count,`${shape}, vertical=${vertical}, rotation=${rotation}: 枠外でも本文全体を表示する`);
+    assert.equal(shifted.left-original.left,rotation===0?direction*160:0);
+    assert.equal(shifted.top-original.top,rotation===90?direction*160:0);
+    assert.ok(rotation===0?(direction>0?shifted.left>370:shifted.right<230):(direction>0?shifted.top>370:shifted.bottom<230));
+  }
+  assert.ok(pixels.wrapped.bottom>400,'折り返し後に枠の高さを超えた行も表示する');
   assert.ok(pixels.inPadding.count>30);assert.ok(pixels.inPadding.right>350,'本文を元の余白領域へ移動しても枠内なら表示する');
   assert.equal(pixels.fitSize,pixels.shiftedFitSize);assert.equal(pixels.columns,1);assert.equal(pixels.paddedColumns,2);assert.equal(pixels.offscreenDiff,0,'HTML Canvas/OffscreenCanvas must match');assert.equal(pixels.workerDiff,0,'HTML Canvas/Worker must match');
   await target.locator('canvas.preview').focus();await page.evaluate(()=>document.fonts.ready);const preview=await source.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL());
@@ -92,6 +109,6 @@ try {
   for(const kind of ['balloon','caption'])assert.equal(await source.locator(`[data-kind=${kind}] [data-field=textOffsetY]`).inputValue(),'34');
   const balloonCard=source.locator('[data-kind=balloon]');if(!await balloonCard.evaluate(card=>card.classList.contains('selected')))await balloonCard.locator('.layer-summary').click();await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/text-position-desktop.png'});
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);await page.screenshot({path:'artifacts/text-position-mobile.png'});
-  assert.deepEqual(errors,[]);console.log('Text position browser smoke passed: signed integer pixel offsets, fractional input rounding and sliders, undo/redo, padding and wrapping, presets, aspect-ratio copying, auto-fit, frame clipping, pixel translation, OffscreenCanvas/Worker parity, PNG, project/draft recovery and mobile layout.');
+  assert.deepEqual(errors,[]);console.log('Text position browser smoke passed: signed integer pixel offsets, fractional input rounding and sliders, undo/redo, padding and wrapping, presets, aspect-ratio copying, auto-fit, balloon text overflow across shapes and rotations, caption frame clipping, pixel translation, OffscreenCanvas/Worker parity, PNG, project/draft recovery and mobile layout.');
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/text-position-failure.png',fullPage:true}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}

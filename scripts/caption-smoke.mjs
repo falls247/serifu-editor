@@ -20,7 +20,7 @@ try {
   assert.equal(await source.locator('[data-action=add-caption]').evaluate(button=>button.previousElementSibling.dataset.action),'add-balloon');
   assert.equal(await page.locator('[data-kind=caption]').count(),0,'captions must only be added on request');
   await source.locator('[data-action=add-caption]').click();const caption=source.locator('[data-kind=caption]').first(),text=caption.locator('textarea');
-  assert.equal(await caption.locator('[data-field=color]').inputValue(),'#ffffff');assert.equal(await caption.locator('[data-field=transparency]').inputValue(),'25');assert.equal(await caption.locator('[data-field=borderColor]').inputValue(),'#000000');assert.equal(await caption.locator('[data-field=autoFit]').isChecked(),true);assert.equal(await field('size').isDisabled(),true);
+  assert.equal(await caption.locator('[data-field=color]').inputValue(),'#ffffff');assert.equal(await caption.locator('[data-field=transparency]').inputValue(),'25');assert.equal(await caption.locator('[data-field=borderColor]').inputValue(),'#000000');assert.equal(await caption.locator('[data-field=autoFit]').isChecked(),false);assert.equal(await field('size').isEnabled(),true);
   assert.equal(await field('alignX').inputValue(),'center');assert.equal(await field('alignY').inputValue(),'center');
   await caption.locator('[data-field=alignX]').selectOption('left');await field('alignY').selectOption('bottom');
   assert.equal(await field('alignX').inputValue(),'left');assert.equal(await caption.locator('[data-field=alignY]').inputValue(),'bottom');

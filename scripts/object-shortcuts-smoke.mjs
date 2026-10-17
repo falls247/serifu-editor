@@ -98,7 +98,7 @@ try {
     if (kind === 'balloon') {
       await shortcut('f');
       const shapes = await field('shape').evaluate(select => [...select.options].filter(option => !option.hidden).map(option => option.value));
-      assert.deepEqual(shapes, ['ellipse', 'distorted-rect', 'spiky']);
+      assert.deepEqual(shapes, ['ellipse', 'distorted-rect', 'spiky', 'polygon']);
       const initialShape = await field('shape').inputValue(), initialIndex = shapes.indexOf(initialShape);
       const unchangedFields = ['x', 'y', 'w', 'h', 'size', 'distortion', 'shapeSeed', 'spikeCount', 'textOffsetX', 'textOffsetY'];
       const settings = () => Promise.all(unchangedFields.map(name => field(name).inputValue()));

@@ -2,11 +2,16 @@
 
 ローカルリポジトリで作業を継続するエージェント向けの入口。
 
+2026-10-16：吹き出しの多角形モード・3〜60頂点の指定とランダム生成は [ADR-0029](adr/0029-polygon-balloons.md) を参照。保存版は15、ブラウザ検証は `npm run test:polygon-browser`。
+
+2026-10-16：画像別JSON下書きの自動取り込み・配置は [ADR-0028](adr/0028-annotation-draft-import.md) を参照。対応する外部ファイル名は `画像のファイル名.jpg.json`。検証は `npm run test:annotation-drafts`。
+
 | 文書 | 用途 |
 |---|---|
 | [JSのsrc移行SOW](sow/SOW_20261011_src_reorganization.md) | 22件の移動・パス整合性・Worker/書体・互換性の受入条件 |
 | [引継書](HANDOFF.md) | 現在地、ローカル起動、コード構成、変更時の確認先、検証、編集データの移行 |
 | [一括処理の実装後報告](bulk-performance-report.md) | Worker・進捗・高速形式の検証と性能比較 |
+| [編集操作の応答性改善](editor-interaction-performance.md) | プリセット変更・画像選択・サイズ変化の調査、修正と性能比較 |
 | [文字配置・ブラシ輪郭の実装報告](lettering-brush-report.md) | アルゴリズム、推奨値、互換性、比較画像、検証結果 |
 | [ADR一覧](adr/README.md) | 採用済みの設計と、その理由・制約 |
 | [利用者向けREADME](../../README.md) | 画面操作と機能仕様 |

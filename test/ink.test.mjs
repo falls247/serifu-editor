@@ -2,6 +2,27 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { directionalBlur, distressMask, dilateMask, inkSeed, adjustInkThickness, glyphVariation } from '../src/ink.js';
 
+function legacyExtremeMask(source,width,height,radius,expand) {
+  radius=Math.ceil(radius);if(!radius)return new Uint8ClampedArray(source);
+  let input=source;
+  for(const vertical of [false,true]){
+    const out=new Uint8ClampedArray(input.length),length=vertical?height:width,lines=vertical?width:height,stride=vertical?width:1,queue=new Int32Array(length);
+    for(let line=0;line<lines;line++){
+      const start=vertical?line:line*width;let head=0,tail=0,next=0;
+      for(let k=0;k<length;k++){
+        while(next<length&&next<=k+radius){
+          while(tail>head&&(expand?input[start+queue[tail-1]*stride]<=input[start+next*stride]:input[start+queue[tail-1]*stride]>=input[start+next*stride]))tail--;
+          queue[tail++]=next++;
+        }
+        while(tail>head&&queue[head]<k-radius)head++;
+        out[start+k*stride]=!expand&&(k<radius||k>=length-radius)?0:input[start+queue[head]*stride];
+      }
+    }
+    input=out;
+  }
+  return input;
+}
+
 test('vertical blur spreads ink only vertically and preserves left-right edges',()=>{
   const width=81,height=81,source=new Uint8ClampedArray(width*height);
   for(let y=38;y<=42;y++)for(let x=38;x<=42;x++)source[y*width+x]=255;
@@ -29,6 +50,28 @@ test('white keyline dilation does not fill the entire glyph surface',()=>{
   const edge=dilateMask(source,7,7,1);
   assert.equal(edge.filter(v=>v===255).length,9);
   assert.equal(edge[0],0);assert.equal(edge[24],255);
+});
+test('cropped morphology preserves full-canvas dilation and ink-thickness pixels',()=>{
+  let seed=123456789;const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed>>>24;};
+  for(const [width,height] of [[1,11],[8,7],[29,18],[101,5]]){
+    for(let sample=0;sample<4;sample++){
+      const source=new Uint8ClampedArray(width*height);
+      for(let i=0;i<source.length;i++)source[i]=random()<((sample+1)*29)?random():0;
+      for(const radius of [0,.1,1,2.8,12]){
+        assert.deepEqual(dilateMask(source,width,height,radius),legacyExtremeMask(source,width,height,radius,true),`dilation ${width}x${height} r=${radius}`);
+      }
+      for(const amount of [-5,-1.5,-.25,0,.25,1.5,5]){
+        const whole=Math.floor(Math.abs(amount)),fraction=Math.abs(amount)-whole,expand=amount>=0;
+        const base=legacyExtremeMask(source,width,height,whole,expand);
+        if(!fraction)assert.deepEqual(adjustInkThickness(source,width,height,amount),base,`thickness ${width}x${height} a=${amount}`);
+        else{
+          const next=legacyExtremeMask(source,width,height,whole+1,expand);
+          for(let i=0;i<base.length;i++)base[i]=base[i]*(1-fraction)+next[i]*fraction;
+          assert.deepEqual(adjustInkThickness(source,width,height,amount),base,`thickness ${width}x${height} a=${amount}`);
+        }
+      }
+    }
+  }
 });
 test('numeric ink thickness expands and erodes the body, including fractional values, without moving it',()=>{
   const width=21,height=21,source=new Uint8ClampedArray(width*height);

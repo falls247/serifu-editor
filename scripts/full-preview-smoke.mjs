@@ -100,7 +100,7 @@ try {
   await magnifier.click(); await lens.locator('.magnifier-status').waitFor({ state: 'hidden' });
   await mkdir('artifacts', { recursive: true }); await page.screenshot({ path: 'artifacts/preview-magnifier-desktop.png' });
   await page.evaluate(() => { window.previewWork = { decodes: 0, draws: 0 }; });
-  const integerFields = ['shapeSeed','spikeCount','brushSeed','glyphSeed','x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth','textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth','shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY'];
+  const integerFields = ['shapeSeed','spikeCount','polygonCount','brushSeed','glyphSeed','x','y','w','h','size','thickness','outline','borderWidth','textOutlineWidth','textOffsetX','textOffsetY','padding','tailX','tailY','tailWidth','shadowBlur','shadowOffsetX','shadowOffsetY','minimumGlyphGap','blur','motionBlur','blurX','blurY'];
   const values = await row.locator('input[data-field][type=number],input[data-numeric-field][type=number]').evaluateAll(inputs => inputs.map(i => ({ field: i.dataset.field ?? i.dataset.numericField, value: i.value, step: i.step })));
   for (const input of values) {
     if (!input.value) continue;
