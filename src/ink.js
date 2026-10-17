@@ -111,24 +111,44 @@ export function directionalBlur(source,width,height,blurX=0,blurY=0) {
   }
   return new Uint8ClampedArray(result);
 }
-function extremeMask(source,width,height,radius,expand) {
+function maskBounds(source,width,height) {
+  let left=width,top=height,right=-1,bottom=-1;
+  for(let y=0;y<height;y++){
+    const row=y*width;
+    for(let x=0;x<width;x++)if(source[row+x]){left=Math.min(left,x);right=Math.max(right,x);top=Math.min(top,y);bottom=Math.max(bottom,y);}
+  }
+  return right<left?null:{left,top,right,bottom};
+}
+function extremeMask(source,width,height,radius,expand,bounds=undefined) {
   radius=Math.ceil(radius);
   if(!radius)return new Uint8ClampedArray(source);
-  let input=source;
+  const initial=bounds===undefined?maskBounds(source,width,height):bounds;
+  if(!initial)return new Uint8ClampedArray(source.length);
+  let input=source,inputBounds=initial;
   for(const vertical of [false,true]){
-    const out=new Uint8ClampedArray(input.length),length=vertical?height:width,lines=vertical?width:height,stride=vertical?width:1,queue=new Int32Array(length);
-    for(let line=0;line<lines;line++){
-      const start=vertical?line:line*width;let head=0,tail=0,next=0;
-      for(let k=0;k<length;k++){
-        while(next<length&&next<=k+radius){
+    const outBounds={...inputBounds};
+    if(expand){
+      if(vertical){outBounds.top=Math.max(0,inputBounds.top-radius);outBounds.bottom=Math.min(height-1,inputBounds.bottom+radius);}
+      else{outBounds.left=Math.max(0,inputBounds.left-radius);outBounds.right=Math.min(width-1,inputBounds.right+radius);}
+    }
+    const out=new Uint8ClampedArray(input.length),length=vertical?height:width;
+    const lineStart=vertical?inputBounds.left:inputBounds.top,lineEnd=vertical?inputBounds.right:inputBounds.bottom;
+    const outStart=vertical?outBounds.top:outBounds.left,outEnd=vertical?outBounds.bottom:outBounds.right;
+    const inputStart=vertical?inputBounds.top:inputBounds.left,inputEnd=vertical?inputBounds.bottom:inputBounds.right;
+    const queue=new Int32Array(inputEnd-inputStart+1),stride=vertical?width:1;
+    for(let line=lineStart;line<=lineEnd;line++){
+      const start=vertical?line:line*width;let head=0,tail=0,next=inputStart;
+      for(let k=outStart;k<=outEnd;k++){
+        while(next<=inputEnd&&next<=k+radius){
           while(tail>head&&(expand?input[start+queue[tail-1]*stride]<=input[start+next*stride]:input[start+queue[tail-1]*stride]>=input[start+next*stride]))tail--;
           queue[tail++]=next++;
         }
         while(tail>head&&queue[head]<k-radius)head++;
-        out[start+k*stride]=!expand&&(k<radius||k>=length-radius)?0:input[start+queue[head]*stride];
+        const edgeOutside=k-radius<inputStart||k+radius>inputEnd||k<radius||k>=length-radius;
+        out[start+k*stride]=!expand&&edgeOutside?0:input[start+queue[head]*stride];
       }
     }
-    input=out;
+    input=out;inputBounds=outBounds;
   }
   return input;
 }
@@ -138,9 +158,10 @@ export function dilateMask(source,width,height,radius) {
 export function adjustInkThickness(source,width,height,amount=0) {
   // Expand/erode glyph ink rather than changing its advance or relying on synthetic font weights.
   const radius=Math.abs(amount),whole=Math.floor(radius),fraction=radius-whole;
-  const base=extremeMask(source,width,height,whole,amount>=0);
+  if(!radius)return new Uint8ClampedArray(source);
+  const bounds=maskBounds(source,width,height),base=extremeMask(source,width,height,whole,amount>=0,bounds);
   if(!fraction)return base;
-  const next=extremeMask(source,width,height,whole+1,amount>=0);
+  const next=extremeMask(source,width,height,whole+1,amount>=0,bounds);
   for(let i=0;i<base.length;i++)base[i]=base[i]*(1-fraction)+next[i]*fraction;
   return base;
 }

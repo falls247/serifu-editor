@@ -101,7 +101,7 @@ function maskAt(candidate, x, y) {
 
 function maskColor(index) { return PALETTE[index % PALETTE.length]; }
 
-export function createSam3UI({ page, panel, overlay, image, client, getOriginalBlob, getRetainedMaskDecodedBytes = () => 0, onPreview = () => {}, onCommit = () => {}, onCancel = () => {} }) {
+export function createSam3UI({ page, panel, overlay, image, client, getOriginalBlob, getRetainedMaskDecodedBytes = () => 0, onPreview = () => {}, onCommit = () => {}, onCancel = () => {}, initialPreview = true }) {
   createPanel(panel);
   // The backend remembers the latest sequence by the prefix before the final colon.
   // Include a per-mount nonce so reload/remount never restarts a page at sequence 1.
@@ -314,8 +314,8 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     node.hidden = warnings.length === 0;
   }
 
-  function render() {
-    renderPoints(); renderCandidates(); renderWarnings(); setStatus(draft.status || 'idle'); updateControls(); drawOverlay(); onPreview(draft);
+  function render({ preview = true } = {}) {
+    renderPoints(); renderCandidates(); renderWarnings(); setStatus(draft.status || 'idle'); updateControls(); drawOverlay(); if(preview)onPreview(draft);
   }
 
   function setInteraction(interaction) {
@@ -522,11 +522,11 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(drawOverlay) : null;
   resizeObserver?.observe(image); window.addEventListener('resize', drawOverlay, { signal });
 
-  function discard({ notify = true } = {}) {
+  function discard({ notify = true, preview = true } = {}) {
     clearTimeout(thresholdTimer); requestState.cancel();
     draft.status = 'idle'; draft.mode = 'text'; draft.points = []; draft.candidates = [];
     draft.lastInput = null; draft.lastGoodInput = null; draft.imageId = null; draft.error = null; draft.warnings = []; hoverId = null;
-    hideError(); render(); if (notify) onCancel();
+    hideError(); render({preview}); if (notify) onCancel();
   }
 
   function dispose() {
@@ -536,7 +536,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   image.addEventListener('load',()=>{updateControls();drawOverlay();},{signal});
-  render(); void checkHealth();
+  render({preview:initialPreview}); void checkHealth();
   return { draft, discard, dispose, redraw: drawOverlay, checkHealth: () => checkHealth(true) };
 }
 

@@ -43,4 +43,4 @@
 - [ADR-0028: 画像別JSON下書きの取り込みと自動配置](0028-annotation-draft-import.md)
 - [ADR-0029: 多角形の吹き出しと頂点数のランダム生成](0029-polygon-balloons.md)
 - [ADR-0030: 吹き出し本文のはみ出し描画](0030-balloon-text-overflow.md)
-- [ADR-0031: 選択ページの優先準備とプレビュー更新](0031-selected-page-priority-and-preview-updates.md)（提案・未実装）
+- [ADR-0031: 選択ページの優先準備とプレビュー更新](0031-selected-page-priority-and-preview-updates.md)

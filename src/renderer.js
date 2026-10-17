@@ -99,8 +99,13 @@ function ornament(ctx, l) {
 
 export const WARP_CHOICES = Object.freeze({ wave: '波打ち', bulge: '膨張', taper: '先細り' });
 const glyphCache = new Map();
-let cachePixels = 0;
-export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; clearLayoutCache(); clearFontCache(); }
+let cachePixels = 0,cacheHits=0,cacheMisses=0,cacheEvictions=0,uncachedGlyphs=0;
+export function glyphCacheStats(){return Object.freeze({entries:glyphCache.size,pixels:cachePixels,limitPixels:5000000,hits:cacheHits,misses:cacheMisses,evictions:cacheEvictions,uncached:uncachedGlyphs});}
+export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; cacheHits=cacheMisses=cacheEvictions=uncachedGlyphs=0; clearLayoutCache(); clearFontCache(); }
+function storeGlyph(key,value){
+  glyphCache.set(key,value);cachePixels+=value.width*value.height;
+  while(cachePixels>5000000&&glyphCache.size>1){const first=glyphCache.keys().next().value,old=glyphCache.get(first);cachePixels-=old.width*old.height;glyphCache.delete(first);cacheEvictions++;}
+}
 function drawInk(ctx, l, char, x, y) {
   const color=l.kind==='sfx'?l.color:dialogueColor(l);
   if(color===TRANSPARENT){
@@ -134,7 +139,8 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
   const textured=l.kind==='sfx'&&l.inkTexture==='grunge'&&(l.grungeAmount>0||l.spatterAmount>0);
   const textureKey=textured?[l.inkTexture,l.grungeAmount,l.scratchLength,l.scratchAngle,l.spatterAmount,l.textureSeed,glyphIndex]:[];
   const key = [char,glyphAngle,l.vertical,l.kind,l.size,l.thickness??0,l.outline,outlineColor,l.color,l.effect,l.font,l.distortion,l.warp,l.skew,l.stretchX,l.stretchY,l.roughness,l.dryInk,l.brushTails,l.blurX,l.blurY,l.blurStrength,l.inkCore,...textureKey].join('|');
-  if (glyphCache.has(key)) { const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
+  if (glyphCache.has(key)) { cacheHits++;const value = glyphCache.get(key); glyphCache.delete(key); glyphCache.set(key,value); return value; }
+  cacheMisses++;
   const sx=l.stretchX/100,sy=l.stretchY/100,shear=Math.tan(l.skew*Math.PI/180);
   const reach=l.size*(l.brushTails||0)/100*.65;
   const base=l.size*(2.5*Math.max(sx,sy)+Math.abs(shear)*sy)+l.outline*6+Math.max(0,l.thickness||0)*6+reach*2;
@@ -177,9 +183,8 @@ function warpedGlyph(ctx, l, char, glyphAngle=0, glyphIndex=0) {
     out.globalCompositeOperation='source-over';
   }
   const value={surface:result,drawWidth,drawHeight,width,height};
-  if(width*height>5000000)return value;
-  glyphCache.set(key,value); cachePixels += width*height;
-  while (cachePixels > 5000000 && glyphCache.size > 1) { const first= glyphCache.keys().next().value, old=glyphCache.get(first); cachePixels-=old.width*old.height; glyphCache.delete(first); }
+  if(width*height>5000000){uncachedGlyphs++;return value;}
+  storeGlyph(key,value);
   return value;
 }
 export function glyphFontSize(layer,index) {
@@ -255,6 +260,7 @@ function paintSfxStroke(ctx,item,positions,layer,{withoutOutline=false,silhouett
   const quality=Math.min(1,Math.sqrt(2000000/(drawWidth*drawHeight))),width=Math.max(1,Math.ceil(drawWidth*quality)),height=Math.max(1,Math.ceil(drawHeight*quality));
   const key='stroke:'+JSON.stringify([s,polygon,...['size','color','outline','textOutlineColor','inkTexture','grungeAmount','scratchLength','scratchAngle','spatterAmount','roughness','dryInk','brushTails','blurX','blurY','blurStrength','inkCore'].map(k=>layer[k]),withoutOutline]);
   let value=glyphCache.get(key);
+  if(value)cacheHits++;else cacheMisses++;
   if(!value){
     const canvas=createSurface(ctx,width,height),c=canvas.getContext('2d',{willReadFrequently:true});c.scale(quality,quality);c.translate(-left,-top);c.beginPath();polygon.forEach((p,i)=>i?c.lineTo(p.x,p.y):c.moveTo(p.x,p.y));c.closePath();c.fill();
     const data=c.getImageData(0,0,width,height).data,body=new Uint8ClampedArray(width*height);for(let i=0;i<body.length;i++)body[i]=data[i*4+3];
@@ -266,15 +272,14 @@ function paintSfxStroke(ctx,item,positions,layer,{withoutOutline=false,silhouett
     if(layer.blurX||layer.blurY)c.drawImage(tintedMask(ctx,directionalBlur(alpha,width,height,layer.blurX*quality,layer.blurY*quality),width,height,color,(layer.blurStrength??200)/100),0,0);
     c.drawImage(tintedMask(ctx,alpha,width,height,color),0,0);
     if(color===TRANSPARENT){c.globalCompositeOperation='destination-out';c.drawImage(tintedMask(ctx,body,width,height,'#000000'),0,0);c.globalCompositeOperation='source-over';}
-    value={surface:canvas,width,height};glyphCache.set(key,value);cachePixels+=width*height;
-    while(cachePixels>5000000&&glyphCache.size>1){const first=glyphCache.keys().next().value,old=glyphCache.get(first);cachePixels-=old.width*old.height;glyphCache.delete(first);}
+    value={surface:canvas,width,height};storeGlyph(key,value);
   }
   ctx.save();if(layer.blur>0)ctx.filter=`blur(${layer.blur}px)`;ctx.drawImage(value.surface,left,top,width/quality,height/quality);ctx.restore();
 }
 function editedGlyphSurface(ctx,layer,item){
   const g=item.glyph,letter=item.letter,style={...layer,size:letter.size,font:g.overrides.font??layer.font,color:g.overrides.fill??layer.color,textOutlineColor:g.overrides.outlineColor??layer.textOutlineColor};
   const key='edited:'+JSON.stringify([letter.char,letter.angle,...['size','font','color','textOutlineColor','outline','stretchX','stretchY','thickness','effect','distortion','skew','warp','roughness','dryInk','brushTails','inkTexture','grungeAmount','spatterAmount','scratchLength','scratchAngle','blurX','blurY','blurStrength','inkCore'].map(k=>style[k]),g.scaleX,g.scaleY,g.shear,g.inkVariantSeed,layer.lettering.outlineScale,g.overrides.outlineWidth]);
-  if(glyphCache.has(key))return glyphCache.get(key);
+  if(glyphCache.has(key)){cacheHits++;return glyphCache.get(key);}cacheMisses++;
   const source=warpedGlyph(ctx,{...style,color:'#ffffff',outline:0,roughness:0,dryInk:0,brushTails:0,inkTexture:'none',blurX:0,blurY:0},letter.char,letter.angle,0);
   const outline=(g.overrides.outlineWidth??layer.outline)*(layer.lettering.outlineScale?Math.min(g.scaleX,g.scaleY):1);
   const pad=Math.max(outline*3,letter.size*.8*(layer.brushTails||0)/100,(layer.blurX||0)*4,(layer.blurY||0)*4,8);
@@ -298,8 +303,7 @@ function editedGlyphSurface(ctx,layer,item){
   if(style.color===TRANSPARENT){const b=border.getContext('2d');b.globalCompositeOperation='destination-out';b.drawImage(tintedMask(ctx,body,width,height,'#000000'),0,0);b.globalCompositeOperation='source-over';}
   const value={surface,fill,border,body,width,height,drawWidth:width/quality,drawHeight:height/quality,quality,outline,
     bounds:{minX:(minX-width/2)/quality,minY:(minY-height/2)/quality,maxX:(maxX-width/2+1)/quality,maxY:(maxY-height/2+1)/quality}};
-  glyphCache.set(key,value);cachePixels+=width*height;
-  while(cachePixels>5000000&&glyphCache.size>1){const first=glyphCache.keys().next().value,old=glyphCache.get(first);cachePixels-=old.width*old.height;glyphCache.delete(first);}
+  storeGlyph(key,value);
   raw.width=raw.height=1;return value;
 }
 function glyphPivot(item){

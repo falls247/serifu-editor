@@ -379,6 +379,8 @@ try {
   assert.equal(await page.locator('.image-row').first().locator('.position-controls [data-field=thickness]').inputValue(),'3');
   assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=sizeVariation]').inputValue(),'8.5');assert.equal(await page.locator('.image-row').first().locator('.layer-card').nth(2).locator('[data-field=horizontalJitter]').inputValue(),'3.5');
   assert.equal(await page.locator('.image-row').nth(2).locator('.layer-card').nth(2).locator('[data-field=brushTails]').inputValue(),'90');
+  // The paused test clock leaves background rows unprepared; focusing a preview prepares its page.
+  await rows.nth(6).locator('canvas.preview').focus();
   assert.deepEqual(await rows.nth(6).locator('textarea').evaluateAll(inputs=>inputs.slice(1).map(input=>input.value)),savedBatchTexts,'draft recovery keeps batch copies independent of later source edits');
   assert.equal(await rows.nth(6).locator('[data-action=paste-all]').isDisabled(),true,'reloading starts with an empty clipboard');
   await page.locator('#autosaveEnabled').uncheck();

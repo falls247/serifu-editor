@@ -107,6 +107,7 @@ function releasePage(p){previewDeferredThumbnails.delete(p);disposeSam3UI(p);unm
 const VIEW_KEY = 'serifu.view.v1';
 const PAGE_FILTERS = ['all', 'unedited', 'edited', 'pending', 'done'];
 let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null, filter: 'all' }, batchStart = 0, syncingView = false;
+let pageMountGeneration=0,pageMountQueue=[],pageMountTimer=null;
 let displayedOrder = '';
 try {
   const saved = JSON.parse(localStorage.getItem(VIEW_KEY));
@@ -325,6 +326,16 @@ function previewImageEdit(p) {
   return p.cropDraft ? uncroppedImageEdit(p.img.width,p.img.height,p.imageEdit) : p.imageEdit;
 }
 
+function previewRenderGeometry(p) {
+  if(!p?.canvas||!p.row)return null;
+  const frame=p.row.querySelector('.preview-frame'),rect=p.canvas.getBoundingClientRect(),focus=p.previewFocus;
+  return JSON.stringify([
+    p.canvas.width,p.canvas.height,rect.width,rect.height,p.canvas.style.transform||'',
+    frame?.clientWidth,frame?.clientHeight,!!focus?.enabled,
+    focus?.enabled?focus.zoomPercent:null,focus?.enabled?focus.panX:null,focus?.enabled?focus.panY:null,
+  ]);
+}
+
 function drawPage(p) {
   if (!p?.canvas) return;
   if (previewIsOpen()) { previewDeferredDraws.add(p); return; }
@@ -338,6 +349,7 @@ function drawPage(p) {
     maskEffects:p.maskEffects,maskAssets:p.maskAssets,draft:p.sam3Draft,
     maskSelection:p.id===activeId?p.maskEffects.find(effect=>effect.id===p.selectedMaskId)??null:null,
   });
+  if(p.mountReady){p.firstMountDrawToken=p.mountToken;p.firstMountDrawGeometry=previewRenderGeometry(p);}
   const current=selected(p),glyphMode=activeGlyphEdit(p,current);
   if(glyphMode&&!p.cropDraft){
     const scene=sceneFor(p,current);
@@ -385,7 +397,7 @@ function renderLayerSummary(layer,button) {
 }
 
 function persistControlValue(p,input) {
-  if(!p?.row||!input?.matches(CONTROL_SELECTOR))return;
+  if(!p?.row||!p.mountReady||!input?.matches(CONTROL_SELECTOR))return;
   const field=controlField(input),card=input.closest('.layer-card'),layer=p.layers.find(item=>item.id===(card?.dataset.layerId||p.selectedId));
   if(!layer)return;
   let value=input.type==='color'?colorInputValue(input):input.value;
@@ -568,7 +580,7 @@ function connectPreviewFocusPan(p) {
   for(const type of ['pointerup','pointercancel','lostpointercapture'])handle.addEventListener(type,end);
 }
 
-function sizePreview(p) {
+function sizePreview(p,{draw=true}={}) {
   if (!p.row) return;
   const frame=p.row.querySelector('.preview-frame'),originalFrame=p.row.querySelector('.original-frame');
   const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),maxHeight=parseFloat(getComputedStyle(p.row.querySelector('.row-columns')).getPropertyValue('--image-max-height'))||620;
@@ -595,10 +607,10 @@ function sizePreview(p) {
   }
   syncPreviewFocusUI(p);
   p.row.querySelector('.original-toolbar').style.height=`${p.row.querySelector('.preview-toolbar:not(.original-toolbar)').getBoundingClientRect().height}px`;
-  drawPage(p);
+  if(draw)drawPage(p);
 }
 
-function updateImageView(p) {
+function updateImageView(p,{draw=true}={}) {
   if(!p?.row)return;
   const size=imageSize(p.img.width,p.img.height,previewImageEdit(p)),scale=Math.min(1,1400/Math.max(size.width,size.height));
   const width=Math.max(1,Math.round(size.width*scale)),height=Math.max(1,Math.round(size.height*scale));
@@ -612,7 +624,7 @@ function updateImageView(p) {
     const field=input.dataset.cropField;if(input!==document.activeElement)input.value=String(p.cropDraft[field]);
     input.max=String(field==='x'?size.width-1:field==='y'?size.height-1:field==='width'?size.width-p.cropDraft.x:size.height-p.cropDraft.y);
   }
-  sizePreview(p);
+  sizePreview(p,{draw});
 }
 
 function cancelCrop(p) {
@@ -636,7 +648,7 @@ function selectMask(p,id) {
 
 function discardSam3Draft(p) {
   if(!p)return;
-  if(p.sam3UI)p.sam3UI.discard({notify:false});
+  if(p.sam3UI)p.sam3UI.discard({notify:false,preview:false});
   else p.sam3Draft=null;
 }
 
@@ -652,6 +664,21 @@ function updateFontSizeButtons(p) {
     const button=p.row.querySelector(`[data-action=${action}]`);if(!button)continue;
     button.disabled=busy||!layer||autoFit;
     button.title=autoFit?'文字サイズの自動調整をOFFにすると使える':action==='apply-font-size'?`記憶した${preferences.fontSizePreset}pxを反映`:'現在の文字サイズを記憶';
+  }
+}
+
+function syncCardSpeaker(layer,card) {
+  if(!['dialogue','balloon'].includes(layer.kind)||card.dataset.speaker===layer.speaker)return;
+  const female=layer.speaker==='female',speaker=female?'female':'male';
+  card.dataset.speaker=speaker;
+  if(layer.kind==='dialogue')card.querySelector('.kind-label').textContent=female?'● 女性セリフ':'● 男性セリフ';
+  renderLayerSummary(layer,card.querySelector('.layer-summary'));
+  card.querySelector('textarea[data-field=text]')?.setAttribute('aria-label',layer.kind==='balloon'
+    ?female?'女性の吹き出しセリフ':'男性の吹き出しセリフ'
+    :female?'女性セリフ':'男性セリフ');
+  for(const button of card.querySelectorAll('.role-switch [data-action]')){
+    const chosen=button.dataset.action===`speaker-${speaker}`;
+    button.classList.toggle('chosen',chosen);button.setAttribute('aria-pressed',String(chosen));
   }
 }
 
@@ -707,6 +734,7 @@ function updateControls(p) {
     const included=p.id===activeId&&p.selectedIds?.includes(card.dataset.layerId);card.classList.toggle('multi-selected',!!included);
     card.querySelector('.layer-summary')?.setAttribute('aria-pressed',String(!!included));
     const layer=p.layers.find(layer=>layer.id===card.dataset.layerId);
+    if(layer)syncCardSpeaker(layer,card);
     if(layer?.kind==='sfx'){
       card.querySelector('.taper-controls').hidden=layer.effect!=='taper';
        card.querySelector('.grunge-controls').hidden=layer.inkTexture!=='grunge';
@@ -786,18 +814,21 @@ function activate(p, id = p.selectedId, scroll = false) {
   }else selectObject(p,id);
   const index = displayedPages().indexOf(p);
   const nextStart = view.pageSize === 'all' ? 0 : Math.floor(index / view.pageSize) * view.pageSize;
-  if (!p.row || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
-  if (previous && previous !== p) { updateControls(previous); drawPage(previous); }
-  updateControls(p); drawPage(p); updateGlobal();
+  const wasMountReady=!!p.mountReady;
+  if (!p.row || !p.mountReady || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
+  if (previous && previous !== p && previous.row) { updateControls(previous); drawPage(previous); }
+  updateControls(p);if(wasMountReady||p.firstMountDrawToken!==p.mountToken)drawPage(p);updateGlobal();
   if (scroll) p.row.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function unmountPage(p) {
+  p.mountToken=(p.mountToken||0)+1;
   previewDeferredDraws.delete(p);
   closeMagnifier(p);
-  if (!p.row) { disposeSam3UI(p); return; }
+  if (!p.row) { p.mountReady=false;disposeSam3UI(p); return; }
   disposeSam3UI(p);
   persistPageControl(p);
+  p.mountReady=false;
   rememberCardDetails(p);
   p.resizeObserver?.disconnect();
   p.canvas.width = 1; p.canvas.height = 1;
@@ -805,19 +836,44 @@ function unmountPage(p) {
   p.img.src = '';
 }
 
+function cancelPageMountQueue() {
+  pageMountGeneration++;
+  pageMountQueue=[];
+  if(pageMountTimer!==null){clearTimeout(pageMountTimer);pageMountTimer=null;}
+  return pageMountGeneration;
+}
+
+function schedulePageMounts(queue,generation) {
+  pageMountQueue=queue;
+  const prepareNext=()=>{
+    pageMountTimer=null;
+    if(generation!==pageMountGeneration)return;
+    while(pageMountQueue.length){
+      const p=pageMountQueue.shift();
+      if(pages.includes(p)&&p.row&&!p.mountReady){prepareMountedPage(p,generation);break;}
+    }
+    if(pageMountQueue.length&&generation===pageMountGeneration)pageMountTimer=setTimeout(prepareNext,0);
+  };
+  if(pageMountQueue.length)pageMountTimer=setTimeout(prepareNext,0);
+}
+
 function syncVisiblePages() {
   const displayed = displayedPages();
   const count = view.pageSize === 'all' ? Math.max(1, displayed.length) : view.pageSize;
   const activeIndex = displayed.findIndex(p => p.id === activeId);
   batchStart = activeIndex < 0 ? 0 : Math.floor(activeIndex / count) * count;
-  const visible = new Set(displayed.slice(batchStart, batchStart + count));
+  const ordered=displayed.slice(batchStart,batchStart+count),visible = new Set(ordered);
+  const generation=cancelPageMountQueue();
   const wasSyncing=syncingView;syncingView = true;
   try {
     for (const p of pages) if (!visible.has(p)) unmountPage(p);
-    let position=0;for (const p of visible) {
-      if (!p.row) mountPage(p);
+    const priority=ordered.find(p=>p.id===activeId)||ordered[0];
+    if(priority){if(!priority.row)mountPage(priority);if(!priority.mountReady)prepareMountedPage(priority,generation);}
+    for (const p of ordered) if(p!==priority&&!p.row)mountPage(p);
+    let position=0;for (const p of ordered) {
       const existing=$('deck').children[position++];if(existing!==p.row)$('deck').insertBefore(p.row,existing||null);
     }
+    schedulePageMounts(ordered.filter(p=>p!==priority&&!p.mountReady),generation);
   } finally { syncingView = wasSyncing; }
   updateGlobal();
 }
@@ -1365,12 +1421,12 @@ function restoreCardViewport(p,view) {
   document.scrollingElement.scrollLeft=view.windowX;document.scrollingElement.scrollTop=view.windowY;
 }
 
-function renderCards(p) {
+function renderCards(p,{draw=true}={}) {
   if(p.renderingCards)return;p.renderingCards=true;
   try{
   const viewport=captureCardViewport(p);
   syncSelection(p);p.row?.classList.toggle('sfx-editing',!!activeGlyphEdit(p,selected(p)));
-  updateImageView(p);
+  updateImageView(p,{draw});
   if (!p.row) return;
   rememberCardDetails(p);
   const container = p.row.querySelector('.layer-cards'); container.replaceChildren();
@@ -1489,22 +1545,41 @@ function renderCards(p) {
 }
 
 function mountPage(p) {
-  const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;delete p.globalUIState;
+  const row = $('pageTemplate').content.firstElementChild.cloneNode(true); row.dataset.pageId = p.id; p.row = row;p.mountReady=false;delete p.globalUIState;
   row.querySelector('[data-page-destination]').value=p.moveAfterPage??'';
-  addNumericControls(row.querySelector('.position-controls'),p);
-  addTextColorControls(row.querySelector('.position-controls'),p);
   row.querySelector('.page-name').textContent = p.name;
   row.querySelector('.dimensions').textContent = `${p.img.width} × ${p.img.height}`;
-  const original = row.querySelector('.original'); original.src = p.src; original.alt = `元画像 ${p.name}`;
+  const original = row.querySelector('.original'); original.alt = `元画像 ${p.name}`;original.style.aspectRatio=`${p.img.width}/${p.img.height}`;
   row.querySelector('[data-action=delete]').disabled = !p.directory;
   row.querySelector('.source-note').textContent = p.directory ? '元ファイルは上書きしない。削除は確認後に完全削除。' : '元ファイルとの接続なし。元画像削除は無効。';
   const copy = button('copy-next', '文字を次の画像へ複製 →'); copy.className = 'copy-next'; row.querySelector('.dialogue-pane').append(copy);
   p.canvas = row.querySelector('canvas.preview'); p.canvas.tabIndex = 0;
-  p.img.onload = () => { if (p.row) { sizePreview(p); updateControls(p); } };
-  p.img.onerror = () => { if (p.row) status(`「${p.name}」のプレビュー画像を読み込めなかった。`); };
+  const previewSize=imageSize(p.img.width,p.img.height,previewImageEdit(p)),previewScale=Math.min(1,1400/Math.max(previewSize.width,previewSize.height));
+  p.canvas.width=Math.max(1,Math.round(previewSize.width*previewScale));p.canvas.height=Math.max(1,Math.round(previewSize.height*previewScale));
+  $('deck').append(row);
+}
+
+function prepareMountedPage(p,generation) {
+  if(generation!==pageMountGeneration||!pages.includes(p)||!p.row||p.mountReady)return;
+  const row=p.row,token=p.mountToken=(p.mountToken||0)+1,original=row.querySelector('.original');
+  delete p.globalUIState;
+  addNumericControls(row.querySelector('.position-controls'),p);
+  addTextColorControls(row.querySelector('.position-controls'),p);
+  p.img.onload = () => {
+    if(p.row!==row||p.mountToken!==token)return;
+    sizePreview(p,{draw:false});updateControls(p);
+    if(p.firstMountDrawToken!==token)drawPage(p);
+  };
+  p.img.onerror = () => { if (p.row===row&&p.mountToken===token) status(`「${p.name}」のプレビュー画像を読み込めなかった。`); };
+  original.src=p.src;
   p.img.src = p.src;
-  $('deck').append(row); renderCards(p);
-  p.resizeObserver = new ResizeObserver(() => sizePreview(p)); p.resizeObserver.observe(row.querySelector('.preview-frame'));
+  renderCards(p,{draw:false});
+  p.resizeObserver = new ResizeObserver(() => {
+    if(p.row!==row||p.mountToken!==token)return;
+    const hadDraw=p.firstMountDrawToken===token;
+    sizePreview(p,{draw:false});
+    if(!hadDraw||p.firstMountDrawToken!==token||p.firstMountDrawGeometry!==previewRenderGeometry(p))drawPage(p);
+  }); p.resizeObserver.observe(row.querySelector('.preview-frame'));
   p.resizeObserver.observe(row.querySelector('.original-frame'));p.resizeObserver.observe(row.querySelector('.preview-toolbar:not(.original-toolbar)'));
   connectPreviewFocusPan(p);
   const focusZoom=row.querySelector('[data-focus-zoom]');
@@ -1542,13 +1617,15 @@ function mountPage(p) {
     if(!focusZoomSuppressClick)return;
     focusZoomSuppressClick=false;event.preventDefault();
   });
-  connectCanvas(p); sizePreview(p);
+  connectCanvas(p);
   p.sam3UI=createSam3UI({
     page:p,panel:row.querySelector('.sam3-panel'),overlay:row.querySelector('.sam3-overlay'),image:original,client:sam3Client,
-    getOriginalBlob:()=>originalBlob(p),getRetainedMaskDecodedBytes:retainedMaskDecodedBytes,onPreview:()=>drawPage(p),
+    getOriginalBlob:()=>originalBlob(p),getRetainedMaskDecodedBytes:retainedMaskDecodedBytes,onPreview:()=>drawPage(p),initialPreview:false,
     onCommit:(candidates,settings)=>commitSam3Candidates(p,candidates,settings),
     onCancel:()=>drawPage(p),
   });
+  p.mountReady=true;p.firstMountDrawToken=null;
+  if(p.img.complete&&p.img.naturalWidth){updateControls(p);drawPage(p);}
 }
 
 function refreshJump() {
@@ -1818,8 +1895,9 @@ $('deck').addEventListener('click', async event => {
   const p = pageFrom(event.target); if (!p) return;
   const action = event.target.closest('[data-action]')?.dataset.action;
   if(action==='preview-full'){
-    persistPageControl(p);closeMagnifier();void openFullPreview(p,event.target.closest('button'));
-    if(p.id!==activeId)activate(p);
+    persistPageControl(p);closeMagnifier();
+    if(p.id!==activeId||!p.mountReady)activate(p);
+    void openFullPreview(p,event.target.closest('button'));
     return;
   }
   const maskCard=event.target.closest('.mask-effect-card');
@@ -2659,7 +2737,9 @@ function alignLayerText(p,layer,alignment) {
   edit(p,()=>Object.assign(layer,changes,{presetId:null}),false);refreshPresetMenus();
 }
 function applyLayerPreset(p,layer,preset) {
-  edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height));preferences.defaults[layer.kind]=preset.id;persistPreferences();
+  edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height),false);
+  preferences.defaults[layer.kind]=preset.id;
+  persistPreferences({target:p,layerId:layer.id,defaultKind:layer.kind});
 }
 function fillPresetSelect(select,kind,current,custom=false) {
   if(select===document.activeElement)return;
@@ -2668,9 +2748,11 @@ function fillPresetSelect(select,kind,current,custom=false) {
   for(const preset of preferences.presets.filter(p=>p.kind===kind)){const option=element('option','',preset.name);option.value=preset.id;select.append(option);}
   select.value=current||'';
 }
-function refreshPresetMenus(target=null) {
-  if(!target)for(const [id,kind] of presetControls)fillPresetSelect($(id),kind,preferences.defaults[kind]);
+function refreshPresetMenus(target=null,{layerId=null,defaultKind=null}={}) {
+  if(defaultKind){const [id,kind]=presetControls.find(([,kind])=>kind===defaultKind)||[];if(id)fillPresetSelect($(id),kind,preferences.defaults[kind]);}
+  else if(!target)for(const [id,kind] of presetControls)fillPresetSelect($(id),kind,preferences.defaults[kind]);
   for(const p of target?[target]:pages)if(p.row)for(const card of p.row.querySelectorAll('.layer-card')){
+    if(layerId&&card.dataset.layerId!==layerId)continue;
     const layer=p.layers.find(l=>l.id===card.dataset.layerId),select=card.querySelector('[data-preset-select]');
     if(layer&&select){
       fillPresetSelect(select,layer.kind,layer.presetId,true);
@@ -2678,13 +2760,13 @@ function refreshPresetMenus(target=null) {
       card.querySelector('[data-action=delete-preset]').disabled=busy||!preset||preset.builtin;
     }
   }
-  for(const b of document.querySelectorAll('[data-delete-preset]'))b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
+  for(const b of document.querySelectorAll('[data-delete-preset]'))if(!defaultKind||b.dataset.deletePreset===defaultKind)b.disabled=busy||!!preferences.presets.find(p=>p.id===preferences.defaults[b.dataset.deletePreset])?.builtin;
 }
-function persistPreferences() {
+function persistPreferences({target=null,layerId=null,defaultKind=null}={}) {
   let remembered=true;
   try {localStorage.setItem(PREFS_KEY,JSON.stringify(preferences));}
   catch(error){remembered=false;status(`設定をブラウザに記憶できなかった: ${error.message}`);}
-  refreshPresetMenus();
+  refreshPresetMenus(target,{layerId,defaultKind});
   return remembered;
 }
 function mergePresets(input) {

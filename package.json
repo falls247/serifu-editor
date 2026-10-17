@@ -65,6 +65,9 @@
     "test:sfx-export": "node scripts/sfx-export-smoke.mjs",
     "test:autosave-catchup": "node scripts/autosave-catchup-smoke.mjs",
     "test:sfx-desktop": "node scripts/sfx-desktop-browser-smoke.mjs",
-    "test:annotation-drafts": "node scripts/annotation-drafts-smoke.mjs"
+    "test:annotation-drafts": "node scripts/annotation-drafts-smoke.mjs",
+    "test:editor-interaction": "node scripts/editor-interaction-smoke.mjs",
+    "benchmark:editor-interaction": "node scripts/editor-interaction-benchmark.mjs",
+    "benchmark:glyph-render": "node scripts/glyph-render-benchmark.mjs"
   }
 }

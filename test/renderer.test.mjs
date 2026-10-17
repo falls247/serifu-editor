@@ -56,12 +56,12 @@ test('new dialogue and effects default to vertical writing',()=>{
   assert.equal(newLayer('dialogue',1000,750).vertical,true);
   assert.equal(newLayer('sfx',1000,750).vertical,true);
 });
-test('balloon dialogue uses the existing text renderer while clipping letters to the balloon',()=>{
+test('balloon dialogue uses the shared text renderer without clipping to its shape',()=>{
   const calls=[],ctx=new Proxy({canvas:{width:320,height:200},globalAlpha:1},{get(target,key){if(key in target)return target[key];return (...args)=>{calls.push([key,...args]);if(key==='measureText')return {width:20};};},set(target,key,value){target[key]=value;return true;}});
   const balloon={...newLayer('balloon',320,200),text:'中へ',vertical:false,w:220,h:120};
   draw(ctx,{},[balloon]);
-  const clipIndex=calls.findIndex(([name])=>name==='clip'),textIndex=calls.findIndex(([name])=>name==='fillText');
-  assert.ok(clipIndex>=0);assert.ok(textIndex>clipIndex);assert.deepEqual(calls.filter(([name])=>name==='fillText').map(([,text])=>text),['中','へ']);
+  assert.equal(calls.filter(([name])=>name==='clip').length,0,'balloon shape must not clip text overflow');
+  assert.deepEqual(calls.filter(([name])=>name==='fillText').map(([,text])=>text),['中','へ'],'shared text renderer must draw every grapheme');
 });
 test('batch clipboard snapshots every layer and can paste repeatedly after the source changes or is removed',()=>{
   const source=page([
