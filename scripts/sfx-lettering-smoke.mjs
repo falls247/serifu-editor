@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {createRequire} from 'node:module';
 import {readFile} from 'node:fs/promises';
+import {PROJECT_VERSION} from '../src/model.js';
 const {chromium}=createRequire(import.meta.url)('playwright');
 const port=5224,server=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:String(port)},stdio:['ignore','pipe','inherit']});
 let browser;
@@ -53,7 +54,7 @@ try{
   const dl=page.waitForEvent('download');await page.click('#projectSave');const download=await dl;
   const project=JSON.parse(await readFile(await download.path(),'utf8'));
   const layer=project.pages[0].layers.find(l=>l.kind==='sfx');
-  assert.equal(project.version,14);assert.equal(layer.text,'ザーーーーッ');
+  assert.equal(project.version,PROJECT_VERSION);assert.equal(layer.text,'ザーーーーッ');
   assert.equal(layer.lettering.strokes[0].shape,'custom');
   assert.equal(layer.lettering.strokes[0].start.cap,'taper');
   assert.equal(layer.lettering.strokes[0].path.points[1].y,0.23);
