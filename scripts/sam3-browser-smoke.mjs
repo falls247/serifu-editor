@@ -29,6 +29,41 @@ for (const [x, y] of [[30, 30], [110, 30], [190, 30], [270, 30]]) {
     mask: { codec: asset.codec, byteLength: asset.byteLength, dataBase64: maskBytesToBase64(asset.data), sha256: asset.sha256 },
   });
 }
+const scrollCandidates = Array.from({ length: 24 }, (_, index) => ({
+  ...fixtureMasks[index % fixtureMasks.length], candidateId: `scroll-candidate-${index + 1}`,
+}));
+
+async function afterPaint(page) {
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+}
+
+async function candidateViewport(page) {
+  return page.evaluate(() => {
+    const list = document.querySelector('[data-sam3-candidates]');
+    return { documentTop: document.scrollingElement.scrollTop, paneTop: list.closest('.original-pane').scrollTop, listTop: list.scrollTop };
+  });
+}
+
+async function checkCandidateScroll(page, panel) {
+  const list = panel.locator('[data-sam3-candidates]');
+  assert.equal(await list.evaluate(node => node.scrollHeight > node.clientHeight), true, 'candidate list overflows before selection');
+  for (const index of [18, 23, 10]) {
+    const checkbox = list.locator('input').nth(index);
+    await checkbox.scrollIntoViewIfNeeded();
+    await checkbox.focus();
+    await afterPaint(page);
+    const before = await candidateViewport(page), checked = await checkbox.isChecked();
+    await checkbox.click();
+    await afterPaint(page);
+    assert.equal(await checkbox.isChecked(), !checked, 'candidate click updates selection');
+    assert.deepEqual(await candidateViewport(page), before, `candidate ${index + 1} preserves document, pane and list scroll`);
+    assert.equal(await checkbox.evaluate(node => document.activeElement === node), true, 'candidate retains keyboard focus after clicking');
+    await page.keyboard.press('Space');
+    await afterPaint(page);
+    assert.equal(await checkbox.isChecked(), checked, 'Space toggles the same candidate after clicking');
+    assert.deepEqual(await candidateViewport(page), before, 'keyboard selection preserves scroll');
+  }
+}
 
 async function waitForServer() {
   await new Promise((resolve, reject) => {
@@ -94,7 +129,7 @@ async function fulfillApi(route) {
     }
     const candidates = job.payload.mode === 'refine'
       ? [fixtureMasks[0]]
-      : fixtureMasks;
+      : job.payload.prompt === 'スクロール確認' ? scrollCandidates : fixtureMasks;
     return route.fulfill({ json: { jobId, status: 'ready', requestId: job.payload.requestId, candidates,
       ...(job.payload.prompt === '標識' ? { warnings: ['一部候補は応答上限により省略'] } : {}) } });
   }
@@ -122,6 +157,7 @@ try {
   const pathInput = panel.locator('[data-sam3-model-path]'), savePath = panel.locator('[data-sam3-action=save-model-path]');
   assert.equal(await pathInput.inputValue(), '/models/sam3.pt');
   assert.equal(await savePath.isDisabled(), true);
+  assert.equal(await panel.locator('[data-sam3-model-path-status]').isHidden(), true, 'initial model path does not show a saved notice');
   assert.equal(await panel.locator('text=ピクセレートとぼかしは').count(), 0);
   assert.equal(await pathInput.evaluate(input => !!input.closest('.original-pane')?.querySelector('.preview-label')), true);
   await pathInput.fill('/models/new sam3.pt');
@@ -135,6 +171,9 @@ try {
   await page.waitForFunction(() => document.querySelector('[data-sam3-model-path-status]')?.textContent.startsWith('保存済み'));
   assert.deepEqual(modelPathSaves, ['/models/new sam3.pt']);
   assert.equal(await savePath.isDisabled(), true);
+  await panel.locator('[data-sam3-action=health]').click();
+  await page.waitForFunction(() => document.querySelector('.sam3-connection')?.textContent.includes('接続済み'));
+  assert.equal(await panel.locator('[data-sam3-model-path-status]').isHidden(), true, 'health check does not show a saved notice');
   settingsFailure = true;
   await pathInput.fill('/models/failed.pt');
   await savePath.click();
@@ -144,9 +183,11 @@ try {
   assert.equal(await savePath.isEnabled(), true);
   settingsFailure = false;
   await pathInput.fill(modelPath);
+  assert.equal(await panel.locator('[data-sam3-model-path-status]').isHidden(), true, 'reverting an unsaved path hides the status');
   await page.reload({ waitUntil: 'domcontentloaded' });
   await makeImage(page);
   await page.waitForFunction(() => document.querySelector('[data-sam3-model-path]')?.value === '/models/new sam3.pt');
+  assert.equal(await panel.locator('[data-sam3-model-path-status]').isHidden(), true, 'loading a stored path does not show a saved notice');
 
   const promptInput=panel.locator('[data-sam3-prompt]');
   await page.evaluate(()=>{window.__sam3DetectClicks=0;document.querySelector('[data-sam3-action=detect]').addEventListener('click',()=>window.__sam3DetectClicks++);});
@@ -370,6 +411,13 @@ try {
   await retainedPanel.locator('[data-sam3-prompt]').fill('ページ切替後の検出');
   await retainedPanel.locator('[data-sam3-action=detect]').click();
   await page.waitForFunction(() => document.querySelector('.sam3-candidate') && document.querySelector('[data-sam3-request-status]')?.textContent === '候補を確認可能');
+  await retainedPanel.locator('[data-sam3-prompt]').fill('スクロール確認');
+  await retainedPanel.locator('[data-sam3-action=detect]').click();
+  await page.waitForFunction(() => document.querySelectorAll('.sam3-candidate').length === 24);
+  for (const viewport of [{ width: 1440, height: 700 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await checkCandidateScroll(page, retainedPanel);
+  }
   assert.deepEqual(errors, []);
   console.log('SAM3 mock API stale-sequence rejection, loading/retry handling, four effects, Worker-disabled original-pixel thumbnails, source coordinates, crop/drag/resize, autosave/project restore and PNG export passed');
 } finally {

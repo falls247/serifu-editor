@@ -319,9 +319,11 @@ function updateGlobal() {
     p.row.querySelector('[data-action=copy-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=cut-all]').disabled = busy || !p.layers.length;
     p.row.querySelector('[data-action=paste-all]').disabled = busy || !pageClipboard?.layers.length;
-    p.row.querySelector('.batch-copy-hint').textContent = pageClipboard
+    const batchCopyHint = p.row.querySelector('.batch-copy-hint');
+    batchCopyHint.hidden = !pageClipboard;
+    batchCopyHint.textContent = pageClipboard
       ? `${pageClipboard.cut?'カット':'コピー'}済み：${pageClipboard.name} · ${pageClipboard.layers.length}件。この画像に追加。カット・貼付けは各画像の「戻す」で取り消せる。`
-      : '台詞・効果音・吹き出し・キャプションをまとめて別の画像に追加。貼付け一回分は「戻す」で取り消せる。';
+      : '';
   });
 }
 
