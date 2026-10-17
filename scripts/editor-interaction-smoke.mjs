@@ -39,9 +39,10 @@ window.__forceObservedRowGrowth=id=>{const p=pages.find(page=>page.id===id),targ
 window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if(!p?.row||!p.mountReady)throw new Error('target page is not prepared');const layer=p.layers.find(item=>item.id===p.selectedId),input=p.row.querySelector('.position-controls [data-field=size]');if(!layer||!input)throw new Error('selected size input not found');const before=layer.size;input.value=String(before+11);input.focus();activeId=pages[0].id;view.pageSize=50;$('pageSize').value='50';syncVisiblePages();return {before,pending:Number(input.value),after:layer.size,ready:!!p.mountReady,mounted:!!p.row};};` });
   });
   await page.addInitScript(() => {
-    const probe = window.__editorProbe = { draws: [], starts: [] };
+    const probe = window.__editorProbe = { draws: [], starts: [], scrollEnds: [] };
     probe.wheels=[];
     window.addEventListener('wheel',event=>probe.wheels.push({trusted:event.isTrusted,deltaY:event.deltaY,at:performance.now()}),true);
+    document.addEventListener('scrollend',()=>probe.scrollEnds.push({top:window.scrollY,at:performance.now()}));
     const clearRect = CanvasRenderingContext2D.prototype.clearRect;
     CanvasRenderingContext2D.prototype.clearRect = function (...args) {
       if (this.canvas.matches?.('canvas.preview')) {
@@ -205,7 +206,8 @@ window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if
     const end=await target.evaluate(row=>row.getBoundingClientRect().top);
     assert.ok(Math.abs(end-start)<=8,`${label} keeps the selected row stable during preparation (${start.toFixed(1)}px -> ${end.toFixed(1)}px)`);
     const toolbarBottom=await page.locator('.collection-bar').evaluate(bar=>bar.getBoundingClientRect().bottom);
-    assert.ok(Math.abs(end-toolbarBottom)<=1,`${label} aligns the selected row below the toolbar (${end.toFixed(1)}px vs ${toolbarBottom.toFixed(1)}px)`);
+    // scrollByの整数丸めと位置保持の0.5px閾値を合わせた誤差を許容する。
+    assert.ok(Math.abs(end-toolbarBottom)<=2,`${label} aligns the selected row below the toolbar (${end.toFixed(1)}px vs ${toolbarBottom.toFixed(1)}px)`);
     const retained=await page.evaluate(()=>window.__interactionSnapshot().navigationAnchor?.pageId);
     assert.equal(retained,await target.getAttribute('data-page-id'),`${label} keeps its anchor after the background queue and image loads finish`);
     if(probeLateResize){
@@ -256,21 +258,26 @@ window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if
   assert.equal(boundaryNavigation.focused,true,'selected SFX preset menu receives focus during neighboring preparation');
   assert.equal(boundaryNavigation.focusDraws,0,'selected SFX menu focus does not draw while neighboring pages prepare');
   await page.waitForFunction(() => document.querySelector('.image-row.active .page-name')?.textContent === '051.png');
-  const boundaryRow=page.locator('.image-row.active'),boundaryPosition=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
-  const boundaryBeforeWheel=await page.evaluate(()=>({scrollTop:document.scrollingElement.scrollTop,maxScroll:document.scrollingElement.scrollHeight-document.scrollingElement.clientHeight}));
+  const boundaryRow=page.locator('.image-row.active');
+  // 右端の余白へ移動し、プレビューなどの内部スクロール領域を避ける。
+  const wheelPoint=await page.evaluate(()=>({x:document.documentElement.clientWidth-4,y:window.innerHeight/2}));
+  await page.mouse.move(wheelPoint.x,wheelPoint.y);
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  const boundaryPosition=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
+  const boundaryBeforeWheel=await page.evaluate(()=>{
+    window.__editorProbe.wheels.length=0;window.__editorProbe.scrollEnds.length=0;
+    return {scrollTop:document.scrollingElement.scrollTop,maxScroll:document.scrollingElement.scrollHeight-document.scrollingElement.clientHeight};
+  });
   const wheelDirection=boundaryBeforeWheel.scrollTop<boundaryBeforeWheel.maxScroll-10?1:-1;
-  await page.locator('main').hover();
   await page.mouse.wheel(0,wheelDirection*120);
-  let boundaryAfterWheel=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
-  let wheelWasTrusted=await page.evaluate(()=>window.__editorProbe.wheels.at(-1)?.trusted===true);
-  const nativeWheelMoved=wheelWasTrusted&&Math.abs(boundaryAfterWheel-boundaryPosition)>40;
-  let manualScrollEvent=await page.evaluate(()=>({anchor:window.__interactionSnapshot().navigationAnchor,top:document.querySelector('.image-row.active').getBoundingClientRect().top}));
-  if(Math.abs(boundaryAfterWheel-boundaryPosition)<40){
-    await page.evaluate(direction=>{window.dispatchEvent(new WheelEvent('wheel',{deltaY:direction*120,bubbles:true}));window.scrollBy({top:direction*120,behavior:'instant'});},wheelDirection);
-    boundaryAfterWheel=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
-    manualScrollEvent=await page.evaluate(()=>({anchor:window.__interactionSnapshot().navigationAnchor,top:document.querySelector('.image-row.active').getBoundingClientRect().top}));
-  }
-  assert.ok(Math.abs(boundaryAfterWheel-boundaryPosition)>40,`manual wheel/scroll input moves the selected row (${boundaryPosition.toFixed(1)}px -> ${boundaryAfterWheel.toFixed(1)}px)`);
+  // mouse.wheel()はスクロール完了を待たない。合成入力を重ねず、実イベントの完了位置を使う。
+  await page.waitForFunction(before=>{
+    const probe=window.__editorProbe,wheel=probe.wheels.at(-1),end=probe.scrollEnds.at(-1);
+    return wheel?.trusted===true&&end?.at>=wheel.at&&Math.abs(end.top-before)>40&&Math.abs(window.scrollY-end.top)<=1;
+  },boundaryBeforeWheel.scrollTop,{timeout:10000});
+  const manualScrollEvent=await page.evaluate(()=>({anchor:window.__interactionSnapshot().navigationAnchor,top:document.querySelector('.image-row.active').getBoundingClientRect().top}));
+  const boundaryAfterWheel=manualScrollEvent.top;
+  assert.ok(Math.abs(boundaryAfterWheel-boundaryPosition)>40,`trusted wheel input moves the selected row (${boundaryPosition.toFixed(1)}px -> ${boundaryAfterWheel.toFixed(1)}px)`);
   assert.equal(manualScrollEvent.anchor,null,'manual wheel input cancels automatic position correction');
   await page.evaluate(()=>window.__resumePageMountQueue());
   await page.waitForFunction(() => [...document.querySelectorAll('.image-row')].every(row => {
@@ -278,8 +285,9 @@ window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if
     return state?.ready&&state.naturalWidth>0;
   }), { timeout: 30000 });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-  assert.ok(Math.abs(await boundaryRow.evaluate(row=>row.getBoundingClientRect().top)-boundaryAfterWheel)<=2,
-    'background preparation does not undo an external scroll position change');
+  const boundaryAfterPreparation=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
+  assert.ok(Math.abs(boundaryAfterPreparation-boundaryAfterWheel)<=2,
+    `background preparation does not undo an external scroll position change (${boundaryAfterWheel.toFixed(1)}px -> ${boundaryAfterPreparation.toFixed(1)}px)`);
   await page.waitForFunction(() => window.__editorProbe.draws.slice().some(draw => draw.pageId === document.querySelector('.image-row.active').dataset.pageId), { timeout: 10000 });
   assert.equal(await page.locator('.thumbnail[aria-current=page] .thumbnail-name').textContent(), '051.png');
   assert.equal(await page.locator('.image-row').count(), 5, 'boundary navigation retains the selected 50-page batch');
@@ -358,7 +366,7 @@ window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if
   assert.equal(fullPreview.status,'');
   await page.locator('#fullPreviewClose').click();
   assert.deepEqual(errors, []);
-  console.log(`Editor interaction smoke passed: four preset kinds retain cards, focused preset menus avoid redraws, single preview draw, Undo/Redo/defaults, selection/model-size checks, 50/100/all navigation holds the selected row through preparation and image load plus late ResizeObserver reflow, pending-preparation wheel preserves manual position${nativeWheelMoved?' (trusted browser wheel)':' (synthetic scroll fallback)'}, filtered views, stale raw-control protection, focused-control unmount flush, unprepared full preview, and rapid boundary navigation.`);
+  console.log('Editor interaction smoke passed: four preset kinds retain cards, focused preset menus avoid redraws, single preview draw, Undo/Redo/defaults, selection/model-size checks, 50/100/all navigation holds the selected row through preparation and image load plus late ResizeObserver reflow, pending-preparation wheel preserves manual position (trusted browser wheel), filtered views, stale raw-control protection, focused-control unmount flush, unprepared full preview, and rapid boundary navigation.');
 } catch (error) {
   await mkdir(artifactDir, { recursive: true });
   if (page) await page.screenshot({ path: join(artifactDir, 'editor-interaction-smoke-failure.png'), fullPage: true }).catch(() => {});
