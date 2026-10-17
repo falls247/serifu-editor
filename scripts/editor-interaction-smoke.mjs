@@ -30,10 +30,18 @@ try {
   await page.route('**/src/app.js', async route => {
     const response = await route.fetch();
     const source = await response.text();
-    await route.fulfill({ response, body: `${source}\nwindow.__interactionSnapshot=()=>({activeId,pages:pages.map(p=>({id:p.id,selectedId:p.selectedId,ready:!!p.mountReady,currentSrc:p.img.currentSrc,naturalWidth:p.img.naturalWidth,layers:p.layers.map(layer=>({id:layer.id,kind:layer.kind,speaker:layer.speaker,size:layer.size}))}))});window.__forceUnpreparedShell=id=>{const p=pages.find(page=>page.id===id);if(!p)throw new Error('page not found');if(p.row)unmountPage(p);mountPage(p);return p.id;};window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if(!p?.row||!p.mountReady)throw new Error('target page is not prepared');const layer=p.layers.find(item=>item.id===p.selectedId),input=p.row.querySelector('.position-controls [data-field=size]');if(!layer||!input)throw new Error('selected size input not found');const before=layer.size;input.value=String(before+11);input.focus();activeId=pages[0].id;view.pageSize=50;$('pageSize').value='50';syncVisiblePages();return {before,pending:Number(input.value),after:layer.size,ready:!!p.mountReady,mounted:!!p.row};};` });
+    await route.fulfill({ response, body: `${source}
+window.__interactionSnapshot=()=>({activeId,pendingMounts:pageMountQueue.length,navigationAnchor:thumbnailNavigationAnchor&&{pageId:thumbnailNavigationAnchor.pageId,generation:thumbnailNavigationAnchor.generation},pages:pages.map(p=>({id:p.id,selectedId:p.selectedId,ready:!!p.mountReady,currentSrc:p.img.currentSrc,naturalWidth:p.img.naturalWidth,layers:p.layers.map(layer=>({id:layer.id,kind:layer.kind,speaker:layer.speaker,size:layer.size}))}))});
+window.__forceUnpreparedShell=id=>{const p=pages.find(page=>page.id===id);if(!p)throw new Error('page not found');if(p.row)unmountPage(p);mountPage(p);return p.id;};
+window.__pausePageMountQueue=()=>{const pending=pageMountQueue.length;if(pageMountTimer!==null){clearTimeout(pageMountTimer);pageMountTimer=null;}return pending;};
+window.__resumePageMountQueue=()=>{if(pageMountQueue.length)schedulePageMounts(pageMountQueue,pageMountGeneration);};
+window.__forceObservedRowGrowth=id=>{const p=pages.find(page=>page.id===id),target=active()?.row;if(!p?.row||!target)throw new Error('page row not mounted');const frame=p.row.querySelector('.preview-frame'),before=frame.getBoundingClientRect().height,rowHeight=p.row.getBoundingClientRect().height,targetTop=target.getBoundingClientRect().top,overflowAnchor=document.documentElement.style.overflowAnchor;document.documentElement.style.overflowAnchor='none';frame.style.minHeight=(before+80)+'px';p.row.style.minHeight=(rowHeight+80)+'px';return {before,overflowAnchor,growth:target.getBoundingClientRect().top-targetTop};};
+window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if(!p?.row||!p.mountReady)throw new Error('target page is not prepared');const layer=p.layers.find(item=>item.id===p.selectedId),input=p.row.querySelector('.position-controls [data-field=size]');if(!layer||!input)throw new Error('selected size input not found');const before=layer.size;input.value=String(before+11);input.focus();activeId=pages[0].id;view.pageSize=50;$('pageSize').value='50';syncVisiblePages();return {before,pending:Number(input.value),after:layer.size,ready:!!p.mountReady,mounted:!!p.row};};` });
   });
   await page.addInitScript(() => {
     const probe = window.__editorProbe = { draws: [], starts: [] };
+    probe.wheels=[];
+    window.addEventListener('wheel',event=>probe.wheels.push({trusted:event.isTrusted,deltaY:event.deltaY,at:performance.now()}),true);
     const clearRect = CanvasRenderingContext2D.prototype.clearRect;
     CanvasRenderingContext2D.prototype.clearRect = function (...args) {
       if (this.canvas.matches?.('canvas.preview')) {
@@ -108,8 +116,13 @@ try {
       window.__retainedCards = [...node.closest('.image-row').querySelectorAll('.layer-card')]
         .map(card => [card.dataset.layerId, card]);
     });
-    await select.focus();
-    await page.evaluate(() => { window.__editorProbe.draws.length = 0; });
+    const focusResult=await page.evaluate(id=>{
+      const card=[...document.querySelectorAll('.layer-card')].find(node=>node.dataset.layerId===id);
+      const menu=card.querySelector('[data-preset-select]');menu.blur();window.__editorProbe.draws.length=0;menu.focus();
+      return {draws:window.__editorProbe.draws.length,focused:document.activeElement===menu};
+    },await target.getAttribute('data-layer-id'));
+    assert.equal(focusResult.focused,true,`${kind}: preset select receives focus`);
+    assert.equal(focusResult.draws, 0, `${kind}: opening an already-selected preset menu does not redraw the preview`);
     await select.selectOption(builtin[kind]);
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     assert.equal(await target.evaluate(node => node === window.__retainedCard
@@ -180,9 +193,92 @@ try {
   await page.mouse.click(center.x, center.y);
   assert.equal(await modelSize(), initialModelSize, 'glyph-edit click keeps SFX model size');
 
+  const assertNavigationStable=async(index,name,label,{click=true,initialTop=null,probeLateResize=false}={})=>{
+    if(click)initialTop=await page.evaluate(index=>{document.querySelectorAll('.thumbnail')[index].click();return document.querySelector('.image-row.active')?.getBoundingClientRect().top;},index);
+    await page.waitForFunction(expected=>document.querySelector('.image-row.active .page-name')?.textContent===expected,name);
+    const target=page.locator('.image-row.active'),start=initialTop??await target.evaluate(row=>row.getBoundingClientRect().top);
+    await page.waitForFunction(()=>[...document.querySelectorAll('.image-row')].every(row=>{
+      const state=window.__interactionSnapshot().pages.find(page=>page.id===row.dataset.pageId);
+      return state?.ready&&state.naturalWidth>0;
+    }),{timeout:30000});
+    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    const end=await target.evaluate(row=>row.getBoundingClientRect().top);
+    assert.ok(Math.abs(end-start)<=8,`${label} keeps the selected row stable during preparation (${start.toFixed(1)}px -> ${end.toFixed(1)}px)`);
+    assert.ok(end>=0&&end<400,`${label} leaves the selected row near the viewport top (${end.toFixed(1)}px)`);
+    const retained=await page.evaluate(()=>window.__interactionSnapshot().navigationAnchor?.pageId);
+    assert.equal(retained,await target.getAttribute('data-page-id'),`${label} keeps its anchor after the background queue and image loads finish`);
+    if(probeLateResize){
+      const priorId=await page.locator('.thumbnail').nth(index-1).getAttribute('data-page-id');
+      const resize=await page.evaluate(id=>window.__forceObservedRowGrowth(id),priorId);
+      assert.ok(resize.growth>40,`${label} actually shifts the target before the resize callback (${resize.growth.toFixed(1)}px)`);
+      await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+      const afterResize=await target.evaluate(row=>row.getBoundingClientRect().top);
+      assert.ok(Math.abs(afterResize-end)<=2,`${label} stays pinned through a late ResizeObserver layout change (${end.toFixed(1)}px -> ${afterResize.toFixed(1)}px)`);
+      await page.evaluate(value=>{document.documentElement.style.overflowAnchor=value;},resize.overflowAnchor);
+    }
+    return end;
+  };
+  await assertNavigationStable(39,'040.png','50-page view navigation');
+  await page.locator('#pageSize').selectOption('100');
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===55);
+  const firstFortyIds=await page.locator('.thumbnail').evaluateAll(nodes=>nodes.slice(0,40).map(node=>node.dataset.pageId));
+  const mediumNavigation=await page.evaluate(ids=>{for(const id of ids)window.__forceUnpreparedShell(id);document.querySelector(`.thumbnail[data-page-id="${ids.at(-1)}"]`).click();return {...window.__interactionSnapshot(),top:document.querySelector('.image-row.active').getBoundingClientRect().top};},firstFortyIds);
+  assert.ok(mediumNavigation.pendingMounts>0,'100-page view click leaves background page preparation pending');
+  assert.equal(mediumNavigation.navigationAnchor?.pageId,firstFortyIds.at(-1),'100-page view retains its clicked page anchor');
+  await assertNavigationStable(39,'040.png','100-page view navigation',{click:false,initialTop:mediumNavigation.top});
+  await page.locator('#pageSize').selectOption('50');
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===50);
+  await page.locator('#pageSize').selectOption('all');
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===55);
+  const lastBatchIds=await page.locator('.thumbnail').evaluateAll(nodes=>nodes.slice(50).map(node=>node.dataset.pageId));
+  const allNavigation=await page.evaluate(ids=>{for(const id of ids)window.__forceUnpreparedShell(id);document.querySelector(`.thumbnail[data-page-id="${ids.at(-1)}"]`).click();return {...window.__interactionSnapshot(),top:document.querySelector('.image-row.active').getBoundingClientRect().top};},lastBatchIds);
+  assert.ok(allNavigation.pendingMounts>0,'all-pages click leaves background page preparation pending');
+  assert.equal(allNavigation.navigationAnchor?.pageId,lastBatchIds.at(-1),'all-pages view retains its clicked page anchor');
+  await assertNavigationStable(54,'055.png','all-pages navigation',{click:false,initialTop:allNavigation.top,probeLateResize:true});
+  await page.locator('#pageSize').selectOption('50');
+  await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===5);
+  await assertNavigationStable(53,'054.png','reused-ready-row navigation after page-size generation change',{probeLateResize:true});
+
   const startCount = await page.evaluate(() => window.__editorProbe.draws.length);
-  await page.locator('.thumbnail').nth(50).click();
+  const boundaryIds=await page.locator('.thumbnail').evaluateAll(nodes=>nodes.slice(50).map(node=>node.dataset.pageId));
+  const boundaryNavigation=await page.evaluate(ids=>{
+    for(const id of ids)window.__forceUnpreparedShell(id);
+    document.querySelector(`.thumbnail[data-page-id="${ids[0]}"]`).click();
+    const pending=window.__pausePageMountQueue();
+    const active=document.querySelector('.image-row.active'),menu=active.querySelector('.layer-card[data-kind="sfx"] [data-preset-select]');
+    const start=window.__editorProbe.draws.length;menu.focus();
+    return {state:window.__interactionSnapshot(),pending,focused:document.activeElement===menu,focusDraws:window.__editorProbe.draws.length-start};
+  },boundaryIds);
+  assert.ok(boundaryNavigation.pending>0,'boundary click leaves neighboring page preparation pending');
+  assert.equal(boundaryNavigation.state.pendingMounts,boundaryNavigation.pending,'page preparation is paused with its queue intact');
+  assert.equal(boundaryNavigation.state.navigationAnchor?.pageId,boundaryIds[0],'boundary click anchors its selected page during preparation');
+  assert.equal(boundaryNavigation.focused,true,'selected SFX preset menu receives focus during neighboring preparation');
+  assert.equal(boundaryNavigation.focusDraws,0,'selected SFX menu focus does not draw while neighboring pages prepare');
   await page.waitForFunction(() => document.querySelector('.image-row.active .page-name')?.textContent === '051.png');
+  const boundaryRow=page.locator('.image-row.active'),boundaryPosition=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
+  const boundaryBeforeWheel=await page.evaluate(()=>({scrollTop:document.scrollingElement.scrollTop,maxScroll:document.scrollingElement.scrollHeight-document.scrollingElement.clientHeight}));
+  const wheelDirection=boundaryBeforeWheel.scrollTop<boundaryBeforeWheel.maxScroll-10?1:-1;
+  await page.locator('main').hover();
+  await page.mouse.wheel(0,wheelDirection*120);
+  let boundaryAfterWheel=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
+  let wheelWasTrusted=await page.evaluate(()=>window.__editorProbe.wheels.at(-1)?.trusted===true);
+  const nativeWheelMoved=wheelWasTrusted&&Math.abs(boundaryAfterWheel-boundaryPosition)>40;
+  let manualScrollEvent=await page.evaluate(()=>({anchor:window.__interactionSnapshot().navigationAnchor,top:document.querySelector('.image-row.active').getBoundingClientRect().top}));
+  if(Math.abs(boundaryAfterWheel-boundaryPosition)<40){
+    await page.evaluate(direction=>{window.dispatchEvent(new WheelEvent('wheel',{deltaY:direction*120,bubbles:true}));window.scrollBy({top:direction*120,behavior:'instant'});},wheelDirection);
+    boundaryAfterWheel=await boundaryRow.evaluate(row=>row.getBoundingClientRect().top);
+    manualScrollEvent=await page.evaluate(()=>({anchor:window.__interactionSnapshot().navigationAnchor,top:document.querySelector('.image-row.active').getBoundingClientRect().top}));
+  }
+  assert.ok(Math.abs(boundaryAfterWheel-boundaryPosition)>40,`manual wheel/scroll input moves the selected row (${boundaryPosition.toFixed(1)}px -> ${boundaryAfterWheel.toFixed(1)}px)`);
+  assert.equal(manualScrollEvent.anchor,null,'manual wheel input cancels automatic position correction');
+  await page.evaluate(()=>window.__resumePageMountQueue());
+  await page.waitForFunction(() => [...document.querySelectorAll('.image-row')].every(row => {
+    const state=window.__interactionSnapshot().pages.find(page=>page.id===row.dataset.pageId);
+    return state?.ready&&state.naturalWidth>0;
+  }), { timeout: 30000 });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.ok(Math.abs(await boundaryRow.evaluate(row=>row.getBoundingClientRect().top)-boundaryAfterWheel)<=2,
+    'background preparation does not undo an external scroll position change');
   await page.waitForFunction(() => window.__editorProbe.draws.slice().some(draw => draw.pageId === document.querySelector('.image-row.active').dataset.pageId), { timeout: 10000 });
   assert.equal(await page.locator('.thumbnail[aria-current=page] .thumbnail-name').textContent(), '051.png');
   assert.equal(await page.locator('.image-row').count(), 5, 'boundary navigation retains the selected 50-page batch');
@@ -261,7 +357,7 @@ try {
   assert.equal(fullPreview.status,'');
   await page.locator('#fullPreviewClose').click();
   assert.deepEqual(errors, []);
-  console.log('Editor interaction smoke passed: four preset kinds retain cards, focus/details and XY, single preview draw, Undo/Redo/defaults, selection/model-size checks, filtered and 50/100/all page views, stale raw-control protection, focused-control unmount flush, unprepared full preview, and rapid boundary navigation.');
+  console.log(`Editor interaction smoke passed: four preset kinds retain cards, focused preset menus avoid redraws, single preview draw, Undo/Redo/defaults, selection/model-size checks, 50/100/all navigation holds the selected row through preparation and image load plus late ResizeObserver reflow, pending-preparation wheel preserves manual position${nativeWheelMoved?' (trusted browser wheel)':' (synthetic scroll fallback)'}, filtered views, stale raw-control protection, focused-control unmount flush, unprepared full preview, and rapid boundary navigation.`);
 } catch (error) {
   await mkdir(artifactDir, { recursive: true });
   if (page) await page.screenshot({ path: join(artifactDir, 'editor-interaction-smoke-failure.png'), fullPage: true }).catch(() => {});

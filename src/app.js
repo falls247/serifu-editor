@@ -107,7 +107,10 @@ function releasePage(p){previewDeferredThumbnails.delete(p);disposeSam3UI(p);unm
 const VIEW_KEY = 'serifu.view.v1';
 const PAGE_FILTERS = ['all', 'unedited', 'edited', 'pending', 'done'];
 let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null, filter: 'all' }, batchStart = 0, syncingView = false;
-let pageMountGeneration=0,pageMountQueue=[],pageMountTimer=null;
+let pageMountGeneration=0,pageMountQueue=[],pageMountTimer=null,thumbnailNavigationAnchor=null;
+window.addEventListener('wheel',()=>{thumbnailNavigationAnchor=null;},{passive:true});
+window.addEventListener('touchstart',()=>{thumbnailNavigationAnchor=null;},{passive:true});
+window.addEventListener('pointerdown',()=>{thumbnailNavigationAnchor=null;},{passive:true});
 let displayedOrder = '';
 try {
   const saved = JSON.parse(localStorage.getItem(VIEW_KEY));
@@ -805,6 +808,7 @@ function activate(p, id = p.selectedId, scroll = false) {
     if (!p) { activeId = null;refreshJump();return; }
     id = p.selectedId;
   }
+  if(thumbnailNavigationAnchor&&thumbnailNavigationAnchor.pageId!==p.id)thumbnailNavigationAnchor=null;
   const previous = active();
   if(previous&&previous!==p)persistPageControl(previous);
   if(previous&&previous!==p)discardSam3Draft(previous);
@@ -818,7 +822,15 @@ function activate(p, id = p.selectedId, scroll = false) {
   if (!p.row || !p.mountReady || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
   if (previous && previous !== p && previous.row) { updateControls(previous); drawPage(previous); }
   updateControls(p);if(wasMountReady||p.firstMountDrawToken!==p.mountToken)drawPage(p);updateGlobal();
-  if (scroll) p.row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (scroll) scrollToThumbnailPage(p);
+}
+
+function scrollToThumbnailPage(p){
+  if(!p?.row)return;
+  p.row.scrollIntoView({behavior:'instant',block:'start'});
+  thumbnailNavigationAnchor={
+    pageId:p.id,generation:pageMountGeneration,top:p.row.getBoundingClientRect().top,
+  };
 }
 
 function unmountPage(p) {
@@ -838,9 +850,23 @@ function unmountPage(p) {
 
 function cancelPageMountQueue() {
   pageMountGeneration++;
+  thumbnailNavigationAnchor=null;
   pageMountQueue=[];
   if(pageMountTimer!==null){clearTimeout(pageMountTimer);pageMountTimer=null;}
   return pageMountGeneration;
+}
+
+function retainThumbnailNavigationPosition(generation){
+  const anchor=thumbnailNavigationAnchor;
+  if(!anchor)return;
+  if(anchor.generation!==generation)return;
+  if(generation!==pageMountGeneration){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
+  if(activeId!==anchor.pageId){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
+  const target=pages.find(page=>page.id===anchor.pageId);
+  if(!target?.row){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
+  const top=target.row.getBoundingClientRect().top,delta=top-anchor.top;
+  if(Math.abs(delta)>0.5)window.scrollBy({top:delta,behavior:'instant'});
+  anchor.top=target.row.getBoundingClientRect().top;
 }
 
 function schedulePageMounts(queue,generation) {
@@ -850,7 +876,7 @@ function schedulePageMounts(queue,generation) {
     if(generation!==pageMountGeneration)return;
     while(pageMountQueue.length){
       const p=pageMountQueue.shift();
-      if(pages.includes(p)&&p.row&&!p.mountReady){prepareMountedPage(p,generation);break;}
+      if(pages.includes(p)&&p.row&&!p.mountReady){prepareMountedPage(p,generation);retainThumbnailNavigationPosition(generation);break;}
     }
     if(pageMountQueue.length&&generation===pageMountGeneration)pageMountTimer=setTimeout(prepareNext,0);
   };
@@ -1395,7 +1421,7 @@ function captureCardViewport(p) {
   };
 }
 
-function restoreCardViewport(p,view) {
+function restoreCardViewport(p,view,{window:restoreWindow=true}={}) {
   if(!view||!p.row)return;
   const pane=p.row.querySelector('.dialogue-pane'),container=p.row.querySelector('.layer-cards');
   const cards=new Map([...container.querySelectorAll('.layer-card')].map(card=>[card.dataset.layerId,card]));
@@ -1418,10 +1444,10 @@ function restoreCardViewport(p,view) {
     const list=cards.get(saved.layerId)?.querySelector('.sfx-glyph-list');
     if(list){list.scrollLeft=saved.left;list.scrollTop=saved.top;}
   }
-  document.scrollingElement.scrollLeft=view.windowX;document.scrollingElement.scrollTop=view.windowY;
+  if(restoreWindow){document.scrollingElement.scrollLeft=view.windowX;document.scrollingElement.scrollTop=view.windowY;}
 }
 
-function renderCards(p,{draw=true}={}) {
+function renderCards(p,{draw=true,restoreWindow=true}={}) {
   if(p.renderingCards)return;p.renderingCards=true;
   try{
   const viewport=captureCardViewport(p);
@@ -1540,7 +1566,7 @@ function renderCards(p,{draw=true}={}) {
   const cards=new Map([...container.children].map(card=>[card.dataset.layerId,card]));
   for(const [index,effect] of p.maskEffects.entries())cards.set(effect.id,createMaskEffectCard(effect,p.maskAssets[effect.assetId],index,p.id===activeId&&p.selectedMaskId===effect.id,p.img.width,p.img.height));
   for(const object of paintOrder(p.layers,p.maskEffects))container.append(cards.get(object.id));
-  refreshPresetMenus(p); updateControls(p);restoreCardViewport(p,viewport);
+  refreshPresetMenus(p); updateControls(p);restoreCardViewport(p,viewport,{window:restoreWindow});
   }finally{p.renderingCards=false;}
 }
 
@@ -1569,16 +1595,18 @@ function prepareMountedPage(p,generation) {
     if(p.row!==row||p.mountToken!==token)return;
     sizePreview(p,{draw:false});updateControls(p);
     if(p.firstMountDrawToken!==token)drawPage(p);
+    retainThumbnailNavigationPosition(pageMountGeneration);
   };
-  p.img.onerror = () => { if (p.row===row&&p.mountToken===token) status(`「${p.name}」のプレビュー画像を読み込めなかった。`); };
+  p.img.onerror = () => { if (p.row===row&&p.mountToken===token) {status(`「${p.name}」のプレビュー画像を読み込めなかった。`);retainThumbnailNavigationPosition(pageMountGeneration);} };
   original.src=p.src;
   p.img.src = p.src;
-  renderCards(p,{draw:false});
+  renderCards(p,{draw:false,restoreWindow:false});
   p.resizeObserver = new ResizeObserver(() => {
     if(p.row!==row||p.mountToken!==token)return;
     const hadDraw=p.firstMountDrawToken===token;
     sizePreview(p,{draw:false});
     if(!hadDraw||p.firstMountDrawToken!==token||p.firstMountDrawGeometry!==previewRenderGeometry(p))drawPage(p);
+    retainThumbnailNavigationPosition(pageMountGeneration);
   }); p.resizeObserver.observe(row.querySelector('.preview-frame'));
   p.resizeObserver.observe(row.querySelector('.original-frame'));p.resizeObserver.observe(row.querySelector('.preview-toolbar:not(.original-toolbar)'));
   connectPreviewFocusPan(p);
@@ -1764,6 +1792,7 @@ $('deck').addEventListener('focusin', event => {
   const p = pageFrom(event.target); if (!p) return;
   const maskCard=event.target.closest('.mask-effect-card');if(maskCard){if(p.id!==activeId||p.selectedMaskId!==maskCard.dataset.maskId)selectMask(p,maskCard.dataset.maskId);return;}
   const id = event.target.closest('.layer-card')?.dataset.layerId;
+  if(p===active()&&p.mountReady&&p.selectedId===(id||p.selectedId)&&!p.selectedMaskId)return;
   activate(p, id || p.selectedId);
 });
 $('deck').addEventListener('focusout', event => {
@@ -2258,6 +2287,7 @@ function connectCanvas(p) {
 }
 
 window.addEventListener('keydown', event => {
+  thumbnailNavigationAnchor=null;
   if(previewIsOpen())return;
   if(event.key==='Escape'&&active()?.cropDraft&&!event.isComposing&&!editLocked()){event.preventDefault();cancelCrop(active());return;}
   if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable || event.isComposing || editLocked()) return;

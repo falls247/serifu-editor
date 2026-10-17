@@ -9,6 +9,8 @@
 
 2026-10-17追加：プリセット適用時のカード保持・描画集約、インクマスク処理範囲の縮小、選択ページを優先する段階的な表示準備を実装した。[ADR-0031](adr/0031-selected-page-priority-and-preview-updates.md)と[性能・検証報告](editor-interaction-performance.md)を参照。回帰は`npm run test:editor-interaction`、計測は`npm run benchmark:editor-interaction`／`npm run benchmark:glyph-render`。プレビュー選択による文字サイズ70→81は未再現。
 
+同日追補：長距離のサムネイル移動は直接スクロールし、背景準備・画像load・ResizeObserver後も移動先の位置を保つ。位置保持は新しい利用者操作や表示範囲の世代変更で解除する。初回`prepareMountedPage()`は`renderCards({restoreWindow:false})`を使い、文書スクロールを古い値へ戻さない。再利用した行の有効なload/resize callbackは現在の世代を参照する。選択済み入力欄への`focusin`は再選択・再描画を省く。候補表示前の待ちと最終停止位置の計測は`npm run benchmark:navigation-menu`。
+
 2026-10-16追加：吹き出しの多角形モードを追加した。頂点数3〜60（既定6）の指定・ランダム生成、歪み度・seedの調整、Undo・プリセット・コピー・各保存形式に対応する。現在の `PROJECT_VERSION=15`、`RENDER_VERSION=12`。仕様は [ADR-0029](adr/0029-polygon-balloons.md)、ブラウザ検証は `npm run test:polygon-browser`。
 
 2026-10-16追加：フォルダ内の `画像名.jpg.json`（`schemaVersion: 1`）から下書きを自動生成する。既定プリセットで右上から左、次に下段へ配置し、必要なら縮小する。最小サイズでも収まらない分は画像外へ配置して警告する。仕様は [ADR-0028](adr/0028-annotation-draft-import.md)、ブラウザ検証は `npm run test:annotation-drafts`。外部下書き形式とアプリの編集データ形式は別物。
