@@ -37,6 +37,26 @@ try {
     await page.mouse.move(box.x + box.width / 2 + target - initial, box.y + 60, { steps: 8 });await page.mouse.up();
     assert.ok(Math.abs(await width() - target) < 1);
   };
+  const assertNavigationAlignment = async index => {
+    await thumbs.nth(index).click();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    const position = await page.locator('.image-row.active').evaluate(row => ({
+      top: row.getBoundingClientRect().top,
+      previousBottom: row.previousElementSibling?.getBoundingClientRect().bottom,
+      toolbarBottom: document.querySelector('.collection-bar').getBoundingClientRect().bottom,
+    }));
+    assert.ok(Math.abs(position.top - position.toolbarBottom) <= 1,
+      `thumbnail ${index + 1}: selected row aligns below the toolbar (${JSON.stringify(position)})`);
+    if (position.previousBottom !== undefined) assert.ok(position.previousBottom <= position.toolbarBottom,
+      `thumbnail ${index + 1}: previous row stays behind the toolbar`);
+  };
+  for (const viewport of [{ width: 1920, height: 1400 }, { width: 1100, height: 1080 }, { width: 820, height: 1000 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await assertNavigationAlignment(3);
+    await assertNavigationAlignment(51);
+    await assertNavigationAlignment(0);
+  }
+  await page.setViewportSize({ width: 1920, height: 1400 });
   await resize(300);
   assert.equal(await handle.getAttribute('aria-valuenow'), '300');
   assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('serifu.view.v1')).sidebarWidth), 300);

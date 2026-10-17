@@ -832,7 +832,9 @@ function activate(p, id = p.selectedId, scroll = false) {
 
 function scrollToThumbnailPage(p){
   if(!p?.row)return;
-  p.row.scrollIntoView({behavior:'instant',block:'start'});
+  const toolbarHeight=document.querySelector('.collection-bar').getBoundingClientRect().height;
+  // Avoid adding the root scroll padding and the row scroll margin together.
+  window.scrollBy({top:p.row.getBoundingClientRect().top-toolbarHeight,behavior:'instant'});
   thumbnailNavigationAnchor={
     pageId:p.id,generation:pageMountGeneration,top:p.row.getBoundingClientRect().top,
   };
@@ -871,7 +873,6 @@ function retainThumbnailNavigationPosition(generation){
   if(!target?.row){if(thumbnailNavigationAnchor===anchor)thumbnailNavigationAnchor=null;return;}
   const top=target.row.getBoundingClientRect().top,delta=top-anchor.top;
   if(Math.abs(delta)>0.5)window.scrollBy({top:delta,behavior:'instant'});
-  anchor.top=target.row.getBoundingClientRect().top;
 }
 
 function schedulePageMounts(queue,generation) {

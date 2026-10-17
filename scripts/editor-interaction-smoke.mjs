@@ -204,7 +204,8 @@ window.__forceFocusedInputUnmount=id=>{const p=pages.find(page=>page.id===id);if
     await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
     const end=await target.evaluate(row=>row.getBoundingClientRect().top);
     assert.ok(Math.abs(end-start)<=8,`${label} keeps the selected row stable during preparation (${start.toFixed(1)}px -> ${end.toFixed(1)}px)`);
-    assert.ok(end>=0&&end<400,`${label} leaves the selected row near the viewport top (${end.toFixed(1)}px)`);
+    const toolbarBottom=await page.locator('.collection-bar').evaluate(bar=>bar.getBoundingClientRect().bottom);
+    assert.ok(Math.abs(end-toolbarBottom)<=1,`${label} aligns the selected row below the toolbar (${end.toFixed(1)}px vs ${toolbarBottom.toFixed(1)}px)`);
     const retained=await page.evaluate(()=>window.__interactionSnapshot().navigationAnchor?.pageId);
     assert.equal(retained,await target.getAttribute('data-page-id'),`${label} keeps its anchor after the background queue and image loads finish`);
     if(probeLateResize){
