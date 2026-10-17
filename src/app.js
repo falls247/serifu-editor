@@ -36,6 +36,9 @@ import { FONT_CATALOG, FONT_STYLES, fontLoadQueries,registerSessionFont,hasSessi
 import { Sam3Client } from './sam3-client.js';
 import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
 import { enhanceColorInput, syncColorInput, colorInputValue } from './colors.js';
+import { setupAppMenu } from './app-menu.js';
+
+setupAppMenu(document.getElementById('appMenu'));
 
 const $ = id => document.getElementById(id);
 const presetControls=[['defaultDialogue','dialogue'],['defaultSfx','sfx'],['defaultBalloon','balloon'],['defaultCaption','caption']];
