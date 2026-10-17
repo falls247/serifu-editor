@@ -38,6 +38,8 @@
 .balloon-distortion-control[hidden]{display:none}
 .balloon-seed-controls[hidden],.balloon-spike-count-control[hidden],[data-shape-seed-control][hidden],[data-polygon-control][hidden]{display:none}
 .balloon-style-controls [data-shape-seed-control]{grid-column:span 2}
+.balloon-style-controls>button[data-action=regenerate-shape]{align-self:end;justify-self:start;font-size:10px;padding:5px 8px}
+.position-controls>.layer-actions{flex-wrap:wrap;margin:0 0 12px}
 .balloon-seed-controls>button,.speech-style-controls>button{grid-column:1/-1;justify-self:start;font-size:10px;padding:5px 8px}
 .speech-style-controls input[type=color],[data-text-color-control] input[type=color]{height:32px;padding:3px}
 .color-picker{display:flex;align-items:center;gap:4px;min-width:0;margin-top:3px}
