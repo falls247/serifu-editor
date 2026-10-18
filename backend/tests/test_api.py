@@ -4,6 +4,7 @@ import base64
 import hashlib
 import io
 import time
+import threading
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,46 @@ from app.settings import Settings
 
 ORIGIN = "http://localhost:5173"
 BASE_URL = "http://127.0.0.1:8765"
+
+
+def test_health_remains_responsive_during_model_load() -> None:
+    class SlowEngine(MockSam3Engine):
+        def __init__(self, settings: Settings) -> None:
+            super().__init__(settings)
+            self.model_loaded = False
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def load(self) -> None:
+            self.started.set()
+            assert self.release.wait(3)
+            super().load()
+
+    config = _settings()
+    engine = SlowEngine(config)
+    with TestClient(create_app(config, engine=engine), base_url=BASE_URL) as client:
+        try:
+            assert engine.started.wait(2)
+            started = time.monotonic()
+            loading = client.get("/api/sam3/health").json()
+            assert time.monotonic() - started < 1
+            assert loading["status"] == "loading"
+            assert not loading["modelLoaded"]
+            assert loading["loadCount"] == 1
+            assert loading["loadElapsedSeconds"] >= 0
+            assert loading["lastLoadSeconds"] is None
+        finally:
+            engine.release.set()
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            ready = client.get("/api/sam3/health").json()
+            if ready["status"] == "ready":
+                break
+            time.sleep(0.01)
+        assert ready["status"] == "ready"
+        assert ready["modelGeneration"] == loading["modelGeneration"]
+        assert ready["loadElapsedSeconds"] is None
+        assert ready["lastLoadSeconds"] >= 0
 
 
 def _settings(**overrides: object) -> Settings:
@@ -36,7 +77,8 @@ def test_model_path_save_persists_and_updates_engine(tmp_path: Path, monkeypatch
     config = _settings(model_settings_file=settings_file)
     engine = MockSam3Engine(config)
     with TestClient(create_app(config, engine=engine), base_url=BASE_URL) as client:
-        assert client.get("/api/sam3/health").json()["modelPath"] == str(config.model_path)
+        initial_health = client.get("/api/sam3/health").json()
+        assert initial_health["modelPath"] == str(config.model_path)
         # Startup load must release the GPU lock before changing configuration.
         deadline = time.monotonic() + 3
         while client.app.state.sam3_jobs._gpu_lock.locked() and time.monotonic() < deadline:
@@ -50,7 +92,13 @@ def test_model_path_save_persists_and_updates_engine(tmp_path: Path, monkeypatch
         assert response.json() == {"modelPath": expected}
         assert engine.settings.model_path == Path(expected)
         assert not engine.model_loaded
-        assert client.get("/api/sam3/health").json()["modelPath"] == expected
+        changed_health = client.get("/api/sam3/health").json()
+        assert changed_health["modelPath"] == expected
+        assert changed_health["modelGeneration"] != initial_health["modelGeneration"]
+        assert changed_health["lastLoadSeconds"] is None
+        assert changed_health["loadTimings"] == {}
+        assert client.app.state.sam3_jobs._last_model_ready is None
+        assert client.app.state.sam3_jobs._last_inference_finished is None
         job = client.post(
             "/api/sam3/infer",
             json={"imageId": _upload(client)["imageId"], "requestId": "new-model:1", "mode": "text", "prompt": "face"},

@@ -102,6 +102,9 @@ def main() -> None:
                          'gpuMemoryMiB': gpu_memory_mib(),
                          'firstCandidate': inspect_mask(candidates[0]),
                          'warnings': result.get('warnings', [])}
+                health_after = request('/health')
+                entry['modelLoad'] = {key: health_after.get(key) for key in
+                                      ('modelGeneration', 'loadCount', 'lastLoadSeconds', 'loadTimings')}
                 report['inferences'].append(entry)
                 print(json.dumps(entry), flush=True)
                 return result

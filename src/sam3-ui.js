@@ -5,7 +5,7 @@ import { previewFocusPanForAnchor, previewFocusPointFromClient } from './preview
 
 const PALETTE = ['#c8ee91', '#ef4b91', '#74c8ef', '#ffc66d', '#ba9bff', '#54d7b0', '#ff8c6b', '#d2dc6a'];
 const EFFECTS = [['pixelate', 'ピクセレート'], ['blur', 'ぼかし'], ['fill-black', '黒塗り'], ['fill-white', '白塗り']];
-const STATUS = { idle: '待機中', uploading: '元画像を送信中', queued: '推論待ち', loading: 'モデル読込中', running: 'SAM3推論中', ready: '候補を確認可能', failed: '推論に失敗', cancelled: 'キャンセル済み', superseded: '新しい入力に置換' };
+const STATUS = { idle: '待機中', uploading: '元画像を送信中', queued: '推論待ち', loading: 'モデルの準備待ち', running: 'SAM3推論中', ready: '候補を確認可能', failed: '推論に失敗', cancelled: 'キャンセル済み', superseded: '新しい入力に置換' };
 let sam3PanelSequence = 0;
 
 function element(tag, className = '', text = '') {
@@ -26,7 +26,7 @@ function createPanel(panel) {
     <div class="sam3-model-path-row"><label for="${modelPathId}">SAM3モデルパス</label><input id="${modelPathId}" data-sam3-model-path type="text" maxlength="4096" placeholder="/home/user/dev/models/vision/sam3.pt" autocomplete="off" spellcheck="false"><button type="button" data-sam3-action="save-model-path" disabled>保存</button></div>
     <p class="sam3-model-path-status" data-sam3-model-path-status role="status">モデルパスを取得中…</p>
     <div class="sam3-prompt-row"><label for="${promptId}">テキスト検出</label><input id="${promptId}" data-sam3-prompt maxlength="500" placeholder="例：赤い傘を持つ人物" autocomplete="off"><button type="button" class="primary" data-sam3-action="detect">検出</button></div>
-    <div class="sam3-input-tools"><label>信頼度 <output data-sam3-threshold-value>0.50</output><input data-sam3-threshold type="range" min="0" max="1" step="0.05" value="0.5"></label><span data-sam3-request-status role="status">待機中</span></div>
+    <div class="sam3-input-tools"><label>信頼度 <output data-sam3-threshold-value>0.50</output><input data-sam3-threshold type="range" min="0" max="1" step="0.05" value="0.5"></label><span>この画像：<span data-sam3-request-status role="status">待機中</span></span></div>
     <div class="sam3-point-tools" role="group" aria-label="元画像での操作"><span>元画像クリック</span><button type="button" data-interaction="candidate" aria-pressed="true">候補選択</button><button type="button" data-interaction="include" aria-pressed="false">＋ 前景点</button><button type="button" data-interaction="exclude" aria-pressed="false">− 背景点</button><button type="button" data-sam3-action="clear-points">点を全消去</button></div>
     <p class="sam3-help" data-sam3-help>候補選択でマスクを確認。前景・背景点は複数追加でき、入力ごとに最新結果を待つ。</p>
     <div class="sam3-points" data-sam3-points aria-label="指定ポイント"></div>
@@ -281,7 +281,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     draft.connection = 'ready';
     let message = 'ローカルAPI接続済み';
     if (health.status === 'ready') message += health.modelLoaded ? ' · SAM3準備完了' : ' · 次の推論でモデルをロード';
-    else if (health.status === 'loading') message += ' · モデル読込中';
+    else if (health.status === 'loading') message += ` · モデル読込中${Number.isFinite(health.loadElapsedSeconds) ? `（経過${Math.floor(health.loadElapsedSeconds)}秒）` : ''}`;
     else if (health.status === 'unloaded') message += ' · モデル未ロード';
     else if (health.status === 'error') {
       const detail = health.error, description = detail?.message || health.message || 'モデル読込エラー';
@@ -290,6 +290,14 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     if (health.gpuAvailable === false) message += ' · CUDA GPU未検出';
     const connectionNode = query('[data-sam3-connection]');
     connectionNode.textContent = message; connectionNode.title = message;
+    updateControls();
+  }
+
+  function showConnectionError(error) {
+    draft.connection = 'unavailable';
+    if (savedModelPath === null) { modelPathNotice = 'モデルパスを取得できない。ローカルAPIへの接続を確認。'; updateModelPathStatus(); }
+    const node = query('[data-sam3-connection]');
+    node.textContent = `ローカル推論APIを利用できない: ${error.message}。GitHub Pagesでは新規検出を使えない。保存済みマスクの編集・保存は続けられる。`; node.title = node.textContent;
     updateControls();
   }
 
@@ -305,10 +313,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     }
     catch (error) {
       if (disposed || sequence !== healthSequence) return;
-      draft.connection = 'unavailable';
-      if (savedModelPath === null) { modelPathNotice = 'モデルパスを取得できない。ローカルAPIへの接続を確認。'; updateModelPathStatus(); }
-      node.textContent = `ローカル推論APIを利用できない: ${error.message}。GitHub Pagesでは新規検出を使えない。保存済みマスクの編集・保存は続けられる。`; node.title = node.textContent;
-      updateControls();
+      showConnectionError(error);
     }
   }
 
@@ -633,7 +638,13 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   image.addEventListener('load',()=>{resetFocus();updateControls();drawOverlay();},{signal});
-  render({preview:initialPreview}); void checkHealth();
+  render({preview:initialPreview});
+  const unsubscribeModel = client.subscribeModelState(({ health, error }) => {
+    if (disposed) return;
+    if (error) showConnectionError(error);
+    else if (health) setConnection(health);
+  });
+  signal.addEventListener('abort', unsubscribeModel, { once: true });
   return { draft, discard, dispose, redraw: drawOverlay, checkHealth: () => checkHealth(true, true) };
 }
 

@@ -834,6 +834,7 @@ function activate(p, id = p.selectedId, scroll = false, preserveThumbnailSelecti
   if (!p.row || !p.mountReady || batchStart !== nextStart) { batchStart = nextStart; syncVisiblePages(); }
   if (previous && previous !== p && previous.row) { updateControls(previous); drawPage(previous); }
   updateControls(p);if(wasMountReady||p.firstMountDrawToken!==p.mountToken)drawPage(p);updateGlobal();
+  if(previous!==p)void sam3Client.health({force:true}).catch(()=>{});
   if (scroll) scrollToThumbnailPage(p);
 }
 

@@ -320,12 +320,17 @@ def create_app(
             else None
         )
         return HealthResponse(
-            status=engine.status,
+            status="loading" if manager.model_loading else engine.status,
             modelLoaded=bool(engine.model_loaded),
             gpuAvailable=bool(engine.gpu_available),
             version=f"{__version__};sam3={engine.version}",
             modelPath=str(engine.settings.model_path),
             error=error,
+            modelGeneration=manager.model_generation,
+            loadCount=manager.load_count,
+            loadElapsedSeconds=manager.load_elapsed_seconds,
+            lastLoadSeconds=manager.last_load_seconds,
+            loadTimings=dict(getattr(engine, "load_timings", {})),
         )
 
     @app.post("/api/sam3/settings")

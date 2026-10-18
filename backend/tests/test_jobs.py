@@ -5,11 +5,12 @@ import threading
 import time
 from types import SimpleNamespace
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
 
-from app.engine import EngineCandidate, EngineResult, MockSam3Engine, Sam3Engine
+from app.engine import EngineCandidate, EngineError, EngineResult, MockSam3Engine, Sam3Engine
 from app.image_cache import ImageCache
 from app.jobs import ApiException, CandidateRecord, Job, JobManager
 from app.mask_codec import encode_mask
@@ -288,6 +289,7 @@ def test_idle_unload_cannot_overlap_new_inference() -> None:
             assert manager._startup_load_task is not None
             await manager._startup_load_task
             manager._last_inference_finished = time.monotonic() - 2
+            manager._last_model_ready = time.monotonic() - 2
             deadline = time.monotonic() + 2
             while not engine.unload_started.is_set() and time.monotonic() < deadline:
                 await asyncio.sleep(0.01)
@@ -312,5 +314,148 @@ def test_idle_unload_cannot_overlap_new_inference() -> None:
         finally:
             engine.release_unload.set()
             await manager.stop()
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("supersede", [False, True])
+def test_cancelled_reload_keeps_model_for_next_page(supersede: bool) -> None:
+    class SlowReloadEngine(MockSam3Engine):
+        def __init__(self, settings: Settings) -> None:
+            super().__init__(settings)
+            self.model_loaded = False
+            self.loads = 0
+            self.started = threading.Event()
+            self.release = threading.Event()
+            self.inferences = 0
+
+        def load(self) -> None:
+            self.loads += 1
+            if self.loads > 1:
+                self.status = "loading"
+                self.started.set()
+                assert self.release.wait(3)
+            super().load()
+
+        def infer(self, **kwargs: object) -> EngineResult:
+            self.inferences += 1
+            return super().infer(**kwargs)  # type: ignore[arg-type]
+
+    async def until(predicate: Any) -> None:
+        deadline = time.monotonic() + 3
+        while not predicate():
+            assert time.monotonic() < deadline, "job state transition timed out"
+            await asyncio.sleep(0.005)
+
+    async def exercise() -> None:
+        settings = _settings(model_idle_seconds=600, maintenance_interval_seconds=0.01)
+        engine = SlowReloadEngine(settings)
+        cache = ImageCache(ttl_seconds=600, max_bytes=1024)
+        manager = JobManager(settings, engine, cache)
+        await manager.start()
+        try:
+            await manager._startup_load_task
+            manager._last_model_ready = manager._last_inference_finished = time.monotonic() - 601
+            await until(lambda: not engine.model_loaded)
+            cached, _ = cache.add(np.zeros((8, 8, 3), dtype=np.uint8))
+            request = _points_request().model_copy(update={"imageId": cached.image_id})
+            first = manager.submit(request)
+            await until(engine.started.is_set)
+            if supersede:
+                pending = manager.submit(request.model_copy(update={"requestId": "page-b:1"}))
+                assert first.status == "superseded"
+                manager.cancel(pending.job_id)
+            else:
+                manager.cancel(first.job_id)
+            finished_after = time.monotonic()
+            engine.release.set()
+            await until(lambda: manager._active is None)
+            assert manager._last_model_ready >= finished_after
+            assert manager._last_inference_finished < finished_after
+            await asyncio.sleep(0.04)
+            assert engine.model_loaded
+            assert engine.inferences == 0
+            next_job = manager.submit(request.model_copy(update={"requestId": "page-c:1"}))
+            await until(lambda: next_job.status in manager._terminal_states())
+            assert next_job.status == "ready"
+            assert engine.loads == 2
+            assert engine.inferences == 1
+        finally:
+            engine.release.set()
+            await manager.stop()
+
+    asyncio.run(exercise())
+
+
+def test_failed_shared_load_can_be_retried_by_next_request() -> None:
+    class RetryEngine(MockSam3Engine):
+        def __init__(self, settings: Settings) -> None:
+            super().__init__(settings)
+            self.model_loaded = False
+            self.loads = 0
+
+        def load(self) -> None:
+            self.loads += 1
+            if self.loads == 1:
+                raise EngineError("MODEL_LOAD_FAILED", "temporary model load failure", retryable=True)
+            super().load()
+
+    async def exercise() -> None:
+        settings = _settings()
+        engine = RetryEngine(settings)
+        cache = ImageCache(ttl_seconds=600, max_bytes=1024)
+        manager = JobManager(settings, engine, cache)
+        cached, _ = cache.add(np.zeros((8, 8, 3), dtype=np.uint8))
+        request = _points_request().model_copy(update={"imageId": cached.image_id})
+        failed = manager.submit(request)
+        await manager._run(failed)
+        assert failed.status == "failed"
+        assert manager._last_model_ready is None
+        assert not manager.model_loading
+        retried = manager.submit(request.model_copy(update={"requestId": "page-a:2"}))
+        await manager._run(retried)
+        assert retried.status == "ready"
+        assert manager.load_count == engine.loads == 2
+        assert manager._last_model_ready is not None
+
+    asyncio.run(exercise())
+
+
+def test_cancelled_load_waiter_holds_gpu_lock_until_thread_finishes() -> None:
+    class BlockingEngine(MockSam3Engine):
+        def __init__(self, settings: Settings) -> None:
+            super().__init__(settings)
+            self.model_loaded = False
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        def load(self) -> None:
+            self.started.set()
+            assert self.release.wait(3)
+            super().load()
+
+    async def exercise() -> None:
+        settings = _settings()
+        engine = BlockingEngine(settings)
+        manager = JobManager(settings, engine, ImageCache(ttl_seconds=600, max_bytes=1024))
+        task = asyncio.create_task(manager._load_startup_model())
+        try:
+            deadline = time.monotonic() + 3
+            while not engine.started.is_set():
+                assert time.monotonic() < deadline
+                await asyncio.sleep(0.005)
+            task.cancel()
+            await asyncio.sleep(0.01)
+            assert manager._gpu_lock.locked()
+            assert not task.done()
+            engine.release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not manager._gpu_lock.locked()
+            assert engine.model_loaded
+            assert manager._last_model_ready is not None
+        finally:
+            engine.release.set()
+            await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(exercise())
