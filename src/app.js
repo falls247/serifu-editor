@@ -111,6 +111,7 @@ const VIEW_KEY = 'serifu.view.v1';
 const PAGE_FILTERS = ['all', 'unedited', 'edited', 'pending', 'done'];
 let view = { pageSize: 50, thumbnails: true, scale: 100, sidebarWidth: null, filter: 'all' }, batchStart = 0, syncingView = false;
 let pageMountGeneration=0,pageMountQueue=[],pageMountTimer=null,thumbnailNavigationAnchor=null;
+let thumbnailSelection=new Set(),thumbnailSelectionAnchor=null,pendingPageRemoval=null;
 window.addEventListener('wheel',()=>{thumbnailNavigationAnchor=null;},{passive:true});
 window.addEventListener('touchstart',()=>{thumbnailNavigationAnchor=null;},{passive:true});
 window.addEventListener('pointerdown',()=>{thumbnailNavigationAnchor=null;},{passive:true});
@@ -274,6 +275,8 @@ function updateGlobal() {
   $('nextBatch').disabled = viewLocked() || batchEnd >= displayed.length;
   const pageIndex = pages.findIndex(p => p.id === activeId);
   $('thumbnailProgress').textContent = `現在 ${pageIndex < 0 ? 0 : pageIndex + 1} / ${pages.length} · 確認済み ${pages.filter(p=>p.done).length}`;
+  $('thumbnailSelectionCount').hidden=!thumbnailSelection.size;
+  $('thumbnailSelectionCount').textContent=`${thumbnailSelection.size}枚を選択中`;
   $('temporarySave').disabled=readOnly||busy||!!draftTask||!pages.length;
   $('savePreset').disabled=busy||!active()||!selected(active())||!PRESET_KINDS.includes(selected(active()).kind);
   for(const id of [...presetControls.map(([id])=>id),'autosaveEnabled','autosaveMinutes','restoreDraft','clearDraft'])$(id).disabled=busy||(readOnly&&id!=='restoreDraft');
@@ -283,10 +286,13 @@ function updateGlobal() {
     if (p.thumbnail) {
       p.thumbnail.hidden = !matchesPageFilter(p) && p.id !== activeId;
       p.thumbnail.draggable = !busy;
-      const state = `${i}:${p.edited}:${p.done}:${p.id === activeId}`;
+      const pageSelected=thumbnailSelection.has(p.id);
+      const state = `${i}:${p.edited}:${p.done}:${p.id === activeId}:${pageSelected}`;
       if (p.thumbnailState !== state) {
         p.thumbnailState = state;
         p.thumbnail.classList.toggle('active', p.id === activeId);
+        p.thumbnail.classList.toggle('selected',pageSelected);
+        p.thumbnail.setAttribute('aria-pressed',String(pageSelected));
         p.thumbnail.classList.toggle('edited', p.edited);
         p.thumbnail.classList.toggle('done', p.done);
         if (p.id === activeId) p.thumbnail.setAttribute('aria-current', 'page');
@@ -807,7 +813,7 @@ function speechStyleControls(layer) {
   return grid;
 }
 
-function activate(p, id = p.selectedId, scroll = false) {
+function activate(p, id = p.selectedId, scroll = false, preserveThumbnailSelection = false) {
   if (!matchesPageFilter(p) && !p.row) {
     p = pages.find(page => page.id === activeId && matchesPageFilter(page)) || pages.find(matchesPageFilter);
     if (!p) { activeId = null;refreshJump();return; }
@@ -818,6 +824,7 @@ function activate(p, id = p.selectedId, scroll = false) {
   if(previous&&previous!==p)persistPageControl(previous);
   if(previous&&previous!==p)discardSam3Draft(previous);
   activeId = p.id;
+  if(!preserveThumbnailSelection){thumbnailSelection=new Set([p.id]);thumbnailSelectionAnchor=p.id;}
   if(p.selectedMaskId&&p.maskEffects.some(effect=>effect.id===p.selectedMaskId)&&(id===null||id===p.selectedId)){
     p.selectedIds=[];p.selectedId=null;
   }else selectObject(p,id);
@@ -916,7 +923,7 @@ function refreshThumbnails() {
     if (!p.thumbnail) {
       const thumbnail = element('button', 'thumbnail'); thumbnail.dataset.pageId = p.id;
       thumbnail.draggable = !busy;
-      thumbnail.title = 'ドラッグで順序変更 · Alt + ↑↓でも移動';
+      thumbnail.title = 'Shiftで範囲選択 · Ctrl／⌘で追加・解除 · Deleteで一覧から外す · ドラッグで順序変更';
       const image = element('img'); image.draggable = false; image.loading = 'lazy'; image.decoding = 'async'; image.src = p.thumbnailSrc; image.alt = '';
       const caption = element('span', 'thumbnail-caption');
       caption.append(element('b', 'thumbnail-number'), element('span', 'thumbnail-state'));
@@ -997,6 +1004,7 @@ $('thumbnailFilters').onclick = event => {
   if (!PAGE_FILTERS.includes(filter)) return;
   if (active()) persistPageControl(active());
   finishThumbnailDrag();view.filter = filter;
+  thumbnailSelection.clear();thumbnailSelectionAnchor=null;
   const matching = pages.filter(matchesPageFilter), current = active();
   const next = matching.includes(current) ? current : matching[0];
   activeId = next?.id ?? null;batchStart = 0;
@@ -1015,8 +1023,39 @@ $('pageSize').onchange = event => {
 $('thumbnailList').onclick = event => {
   if (viewLocked()) return;
   const p = pages.find(p=>p.id===event.target.closest('[data-page-id]')?.dataset.pageId);
-  if (p) activate(p, p.selectedId, true);
+  if(!p)return;
+  const additive=event.ctrlKey||event.metaKey;
+  if(event.shiftKey){
+    const displayed=displayedPages(),index=displayed.indexOf(p),anchorIndex=displayed.findIndex(page=>page.id===thumbnailSelectionAnchor);
+    const start=anchorIndex<0?index:anchorIndex;
+    if(!additive)thumbnailSelection.clear();
+    for(const page of displayed.slice(Math.min(start,index),Math.max(start,index)+1))thumbnailSelection.add(page.id);
+    if(anchorIndex<0)thumbnailSelectionAnchor=p.id;
+  }else{
+    if(additive){if(thumbnailSelection.has(p.id))thumbnailSelection.delete(p.id);else thumbnailSelection.add(p.id);}
+    else thumbnailSelection=new Set([p.id]);
+    thumbnailSelectionAnchor=p.id;
+  }
+  activate(p, p.selectedId, true, true);
 };
+function requestThumbnailRemoval(){
+  if(busy||editLocked()||previewIsOpen()||$('removePagesDialog').open)return;
+  const targets=displayedPages().filter(p=>thumbnailSelection.has(p.id));
+  if(!targets.length)return;
+  pendingPageRemoval=targets;
+  $('removePagesSummary').textContent=`選択した${targets.length}枚の画像を一覧から外す？`;
+  $('removePagesNames').replaceChildren(...targets.map(p=>element('li','',p.name)));
+  $('removePagesDialog').returnValue='no';
+  $('removePagesDialog').showModal();
+}
+$('removePagesDialog').addEventListener('close',()=>{
+  const targets=pendingPageRemoval;pendingPageRemoval=null;
+  if($('removePagesDialog').returnValue!=='yes'||!targets)return;
+  if(busy||editLocked()){status('処理中または閲覧専用のため、画像を一覧から外せなかった。');return;}
+  const removed=removePages(targets);
+  (active()?.thumbnail||$('files')).focus({preventScroll:true});
+  status(`${removed}枚の画像を一覧から外した。元ファイルは残る。`);
+});
 let thumbnailDrag = null, thumbnailDrop = null, thumbnailScrollFrame = null, thumbnailDragY = 0;
 function clearThumbnailDrop() {
   thumbnailDrop?.node.classList.remove('drop-before', 'drop-after', 'drop-horizontal');
@@ -1077,6 +1116,11 @@ thumbnailList.ondragleave = event => {
 };
 thumbnailList.ondragend = finishThumbnailDrag;
 thumbnailList.addEventListener('keydown', event => {
+  if(event.key==='Delete'){
+    event.preventDefault();event.stopPropagation();
+    if(!event.ctrlKey&&!event.metaKey&&!event.altKey&&!event.shiftKey&&!event.isComposing&&event.keyCode!==229&&!event.repeat)requestThumbnailRemoval();
+    return;
+  }
   const direction = { ArrowUp: -1, ArrowDown: 1 }[event.code];
   if (!event.altKey || !direction) return;
   event.preventDefault();event.stopPropagation();
@@ -1665,6 +1709,9 @@ function prepareMountedPage(p,generation) {
 function refreshJump() {
   const current = active();
   if (!current || !current.row && !matchesPageFilter(current)) activeId = pages.find(matchesPageFilter)?.id ?? null;
+  const displayedIds=new Set(displayedPages().map(p=>p.id));
+  for(const id of thumbnailSelection)if(!displayedIds.has(id))thumbnailSelection.delete(id);
+  if(!displayedIds.has(thumbnailSelectionAnchor))thumbnailSelectionAnchor=null;
   const wasSyncing=syncingView;syncingView=true;
   try{syncVisiblePages();refreshThumbnails();
     const displayed = displayedPages();displayedOrder = displayed.map(p => p.id).join(',');
@@ -2294,7 +2341,7 @@ function connectCanvas(p) {
 
 window.addEventListener('keydown', event => {
   thumbnailNavigationAnchor=null;
-  if(previewIsOpen())return;
+  if(previewIsOpen()||$('removePagesDialog').open)return;
   if(event.key==='Escape'&&active()?.cropDraft&&!event.isComposing&&!editLocked()){event.preventDefault();cancelCrop(active());return;}
   if (/INPUT|TEXTAREA|SELECT/.test(event.target.tagName) || event.target.isContentEditable || event.isComposing || editLocked()) return;
   const p = active(); if (!p) return;
@@ -2384,10 +2431,19 @@ async function duplicateImage(p,task){
 }
 
 function removePage(p) {
-  const displayedIndex = displayedPages().indexOf(p);
-  const index = pages.indexOf(p); pages.splice(index, 1); releasePage(p);
-  if (activeId === p.id) { const displayed = displayedPages();activeId = displayed[Math.min(displayedIndex, displayed.length - 1)]?.id || null; }
+  removePages([p]);
+}
+function removePages(targets) {
+  const removed=new Set(targets.filter(p=>pages.includes(p)));
+  if(!removed.size)return 0;
+  const displayed=displayedPages(),index=displayed.findIndex(p=>p.id===activeId);
+  const next=displayed.slice(Math.max(0,index)).find(p=>!removed.has(p))||displayed.slice(0,Math.max(0,index)).reverse().find(p=>!removed.has(p));
+  const removingActive=removed.has(active());
+  pages=pages.filter(p=>!removed.has(p));
+  for(const p of removed){thumbnailSelection.delete(p.id);releasePage(p);}
+  if(removingActive)activeId=next?.id??null;
   dirty(); refreshJump(); if (active()) activate(active());
+  return removed.size;
 }
 
 $('previous').onclick = () => { const displayed=displayedPages(),p = displayed[displayed.indexOf(active()) - 1]; if (p) activate(p, p.selectedId, true); };
