@@ -21,12 +21,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
       - name: Check syntax
         run: npm run check
+        env:
+          DOCUMENTATION_BASE: ${{ github.event.before || 'HEAD^' }}
       - name: Run tests
         run: npm test
       - name: Install browser test dependencies

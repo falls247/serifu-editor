@@ -2300,6 +2300,12 @@ window.addEventListener('keydown', event => {
   const p = active(); if (!p) return;
   const key=event.key.toLowerCase(),command=event.ctrlKey||event.metaKey;
   if(p.cropDraft&&!(command&&key==='z'))return;
+  if(key==='enter'&&event.target===p.canvas&&!command&&!event.altKey&&!event.shiftKey){
+    if(event.repeat||event.keyCode===229||drag||p.glyphDrag)return;
+    const layer=selected(p),input=layer&&p.row.querySelector(`.layer-card[data-layer-id="${layer.id}"] textarea[data-field=text]`);
+    if(!input||input.disabled)return;
+    event.preventDefault();input.focus();input.setSelectionRange(input.value.length,input.value.length);return;
+  }
   if (!command && !event.altKey && ['c','r','v','m'].includes(key) && selected(p)?.kind==='balloon') {
     const layer=selected(p),shape={c:'ellipse',r:'distorted-rect',v:'spiky',m:'polygon'}[key];
     event.preventDefault();

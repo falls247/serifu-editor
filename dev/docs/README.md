@@ -19,6 +19,7 @@
 | [起動用README](../../README.md) | アプリ概要、公開版、ローカル起動・SAM3起動 |
 | [操作説明書（HTML）](../../docs/index.html) | 利用者向けの操作手順・保存・復元・ショートカット |
 | [操作説明書の更新ルール](documentation-maintenance.md) | アプリ改修と同時に説明書を更新する運用・確認方法 |
+| [操作説明書の更新漏れ調査](manual-maintenance-audit.md) | SAM3 FOCUSの記載漏れの根拠、Enter入力対応、再発防止と検証 |
 
 記録日：2026-10-10（日本時間）。実装の基準コミットは `b721ad78a7c658f23b83a0da1f6ed13c950c9696`。
 
