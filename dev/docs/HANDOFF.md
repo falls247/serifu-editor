@@ -7,6 +7,8 @@
 
 ## 1. 現在地と作業方針
 
+2026-10-18追加：READMEを起動用に整理し、利用者向けの操作説明をルートの[HTML操作説明書](../../docs/index.html)へ移した。以後のアプリ改修では[操作説明書の更新ルール](documentation-maintenance.md)に従い、利用者向けの変更と同時に説明書も更新する。
+
 2026-10-17追加：プリセット適用時のカード保持・描画集約、インクマスク処理範囲の縮小、選択ページを優先する段階的な表示準備を実装した。[ADR-0031](adr/0031-selected-page-priority-and-preview-updates.md)と[性能・検証報告](editor-interaction-performance.md)を参照。回帰は`npm run test:editor-interaction`、計測は`npm run benchmark:editor-interaction`／`npm run benchmark:glyph-render`。プレビュー選択による文字サイズ70→81は未再現。
 
 同日追補：長距離のサムネイル移動は直接スクロールし、背景準備・画像load・ResizeObserver後も移動先の位置を保つ。位置保持は新しい利用者操作や表示範囲の世代変更で解除する。初回`prepareMountedPage()`は`renderCards({restoreWindow:false})`を使い、文書スクロールを古い値へ戻さない。再利用した行の有効なload/resize callbackは現在の世代を参照する。選択済み入力欄への`focusin`は再選択・再描画を省く。候補表示前の待ちと最終停止位置の計測は`npm run benchmark:navigation-menu`。
@@ -31,7 +33,7 @@
 
 着手時は `git status --short --branch`、現在のHEAD、適用される `AGENTS.md` を確認し、既存変更を保ったまま作業する。この引継の作成時点で、リポジトリ内に `AGENTS.md` はない。
 
-先に [利用者向けREADME](../../README.md) と [ADR一覧](adr/README.md) を読む。動作と設計の詳細は対応するコードを確認する。
+先に [起動用README](../../README.md)、[HTML操作説明書](../../docs/index.html)、[操作説明書の更新ルール](documentation-maintenance.md)、[ADR一覧](adr/README.md) を読む。動作と設計の詳細は対応するコードを確認する。
 
 ## 2. ローカル起動と編集データの移行
 
