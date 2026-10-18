@@ -2300,6 +2300,12 @@ window.addEventListener('keydown', event => {
   const p = active(); if (!p) return;
   const key=event.key.toLowerCase(),command=event.ctrlKey||event.metaKey;
   if(p.cropDraft&&!(command&&key==='z'))return;
+  if (!command && !event.altKey && ['c','r','v','m'].includes(key) && selected(p)?.kind==='balloon') {
+    const layer=selected(p),shape={c:'ellipse',r:'distorted-rect',v:'spiky',m:'polygon'}[key];
+    event.preventDefault();
+    if(layer.shape===shape)return;
+    edit(p,()=>{layer.shape=shape;layer.presetId=null;},false);refreshPresetMenus();return;
+  }
   if (!command && !event.altKey && ['f','b','c','u','e'].includes(key)) {
     const layer=selected(p);if(!layer)return;
     if(key==='e'){

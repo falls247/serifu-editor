@@ -2,6 +2,8 @@
 
 ローカルリポジトリで作業を継続するエージェント向けの入口。
 
+**アプリ改修時は[操作説明書の更新ルール](documentation-maintenance.md)を確認し、利用者向けの変更を同じ変更内で`docs/index.html`へ反映する。READMEは起動に必要な情報に絞る。**
+
 2026-10-16：吹き出しの多角形モード・3〜60頂点の指定とランダム生成は [ADR-0029](adr/0029-polygon-balloons.md) を参照。保存版は15、ブラウザ検証は `npm run test:polygon-browser`。
 
 2026-10-16：画像別JSON下書きの自動取り込み・配置は [ADR-0028](adr/0028-annotation-draft-import.md) を参照。対応する外部ファイル名は `画像のファイル名.jpg.json`。検証は `npm run test:annotation-drafts`。
@@ -14,7 +16,9 @@
 | [編集操作の応答性改善](editor-interaction-performance.md) | プリセット変更・画像選択・サイズ変化の調査、修正と性能比較 |
 | [文字配置・ブラシ輪郭の実装報告](lettering-brush-report.md) | アルゴリズム、推奨値、互換性、比較画像、検証結果 |
 | [ADR一覧](adr/README.md) | 採用済みの設計と、その理由・制約 |
-| [利用者向けREADME](../../README.md) | 画面操作と機能仕様 |
+| [起動用README](../../README.md) | アプリ概要、公開版、ローカル起動・SAM3起動 |
+| [操作説明書（HTML）](../../docs/index.html) | 利用者向けの操作手順・保存・復元・ショートカット |
+| [操作説明書の更新ルール](documentation-maintenance.md) | アプリ改修と同時に説明書を更新する運用・確認方法 |
 
 記録日：2026-10-10（日本時間）。実装の基準コミットは `b721ad78a7c658f23b83a0da1f6ed13c950c9696`。
 

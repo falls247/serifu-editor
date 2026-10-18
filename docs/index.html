@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="ja" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Serifu Editorの操作説明書。画像の読み込みから、セリフ・吹き出し・効果音の編集、PNG出力、編集データの保存まで。">
+  <meta name="color-scheme" content="dark light">
+  <title>操作説明書 — Serifu Editor</title>
+  <script>
+    (() => {
+      const root = document.documentElement;
+      const storageKey = 'serifu-manual-theme';
+      try {
+        if (localStorage.getItem(storageKey) === 'light') root.dataset.theme = 'light';
+      } catch {}
+
+      document.addEventListener('DOMContentLoaded', () => {
+        const buttons = document.querySelectorAll('[data-set-theme]');
+        const updateThemeButtons = () => buttons.forEach(button => {
+          button.setAttribute('aria-pressed', String(button.dataset.setTheme === root.dataset.theme));
+        });
+        for (const button of buttons) button.addEventListener('click', () => {
+          root.dataset.theme = button.dataset.setTheme;
+          updateThemeButtons();
+          try { localStorage.setItem(storageKey, root.dataset.theme); } catch {}
+        });
+        updateThemeButtons();
+        document.getElementById('themeControl').hidden = false;
+
+        const toc = document.querySelector('.toc');
+        if (matchMedia('(max-width: 760px)').matches) toc.open = false;
+        const links = Array.from(toc.querySelectorAll('a'));
+        const sections = Array.from(document.querySelectorAll('main > section'));
+        let scheduled = false;
+        const updateCurrentSection = () => {
+          scheduled = false;
+          let current = sections[0].id;
+          for (const section of sections) {
+            if (section.getBoundingClientRect().top <= 120) current = section.id;
+          }
+          for (const link of links) {
+            if (link.hash === '#' + current) link.setAttribute('aria-current', 'location');
+            else link.removeAttribute('aria-current');
+          }
+        };
+        document.addEventListener('scroll', () => {
+          if (!scheduled) { scheduled = true; requestAnimationFrame(updateCurrentSection); }
+        }, { passive: true });
+        window.addEventListener('resize', updateCurrentSection);
+        updateCurrentSection();
+      });
+    })();
+  </script>
+  <link rel="stylesheet" href="./manual.css">
+</head>
+<body>
+  <a class="skip" href="#main">本文へ移動</a>
+  <header class="manual-bar">
+    <a class="manual-brand" href="#top">Serifu Editor<span>操作説明書</span></a>
+    <div class="manual-tools">
+      <div id="themeControl" class="theme-control" role="group" aria-label="表示テーマ" hidden>
+        <span class="theme-label">表示</span>
+        <button type="button" data-set-theme="dark" aria-pressed="true">ダーク</button>
+        <button type="button" data-set-theme="light" aria-pressed="false">ライト</button>
+      </div>
+      <a class="app-link" href="../index.html">アプリを開く</a>
+    </div>
+  </header>
+  <div class="shell">
+    <aside class="sidebar">
+      <details class="toc" open>
+      <summary>目次</summary>
+      <nav aria-label="操作説明書の目次">
+        <ol>
+          <li><a href="#quickstart"><span>01</span>基本操作</a></li>
+          <li><a href="#workspace"><span>02</span>画面の見方</a></li>
+          <li><a href="#pages"><span>03</span>画像とページの管理</a></li>
+          <li><a href="#dialogue"><span>04</span>セリフと文字の書式</a></li>
+          <li><a href="#balloons"><span>05</span>吹き出し</a></li>
+          <li><a href="#captions"><span>06</span>キャプション</a></li>
+          <li><a href="#sfx"><span>07</span>効果音・文字単位編集</a></li>
+          <li><a href="#placement"><span>08</span>配置・複製・重なり</a></li>
+          <li><a href="#presets"><span>09</span>プリセット</a></li>
+          <li><a href="#image-edit"><span>10</span>画像加工・SAM3</a></li>
+          <li><a href="#save"><span>11</span>書き出しと再編集</a></li>
+          <li><a href="#autosave"><span>12</span>一時保存と復元</a></li>
+          <li><a href="#shortcuts"><span>13</span>ショートカット</a></li>
+          <li><a href="#help"><span>14</span>困ったときは</a></li>
+        </ol>
+      </nav>
+      </details>
+      <div class="sidebar-reference">
+        <a href="#save">保存方法の一覧</a>
+        <a href="#shortcuts">ショートカット一覧</a>
+        <a href="#help">トラブル対処</a>
+      </div>
+      <small>ファイルからも閲覧できます。<br>印刷・PDF保存には、ブラウザの印刷機能をご利用ください。</small>
+    </aside>
+
+    <main id="main">
+      <header class="document-header" id="top">
+        <p class="document-path">Serifu Editor / 利用者向けドキュメント</p>
+        <h1>操作説明書</h1>
+        <p class="document-description">この説明書では、画像の読み込み、文字や吹き出しの編集、保存・復元の手順を説明します。</p>
+        <dl class="document-info">
+          <div><dt>対象アプリ</dt><dd>Serifu Editor</dd></div>
+          <div><dt>対象日</dt><dd><time datetime="2026-10-18">2026年10月18日</time>時点の実装を対象としています。</dd></div>
+          <div><dt>利用環境</dt><dd>公開版・ローカル版でご利用いただけます。SAM3の新規検出には、GPUに対応したローカル版が必要です。</dd></div>
+        </dl>
+        <div class="reading-guide">
+          <h2>この説明書の使い方</h2>
+          <ul>
+            <li>初めてお使いの場合は、<a href="#quickstart">第1章「基本操作」</a>に沿って、読み込みから保存まで進めてください。</li>
+            <li>操作を調べる場合は、目次から各章へ移動してください。<a href="#save">保存方法</a>、<a href="#shortcuts">ショートカット</a>、<a href="#help">トラブル対処</a>は一覧から確認できます。</li>
+            <li>「 」は画面上のボタン・項目名を示します。<kbd>Ctrl</kbd>などの囲みは、キーボードのキーを示します。</li>
+          </ul>
+          <p>編集画面の上部にある青色の「マニュアル」を選択すると、編集中の画面を残したまま、新しいタブでこの説明書を開けます。</p>
+          <p>上部の「ダーク」「ライト」で表示を切り替えられます。初回はダーク表示になり、選択した設定は同じブラウザに保存されます。印刷時は白背景になります。</p>
+        </div>
+      </header>
+
+      <section id="quickstart" aria-labelledby="quickstart-title">
+        <h2 id="quickstart-title"><span class="number">01</span>基本操作</h2>
+        <p>1枚の画像にセリフを配置し、PNGと再編集用データを保存するまでの手順を説明します。</p>
+        <h3>操作手順</h3>
+        <ol class="steps">
+          <li><strong>画像を開きます</strong>上部の「画像を追加」で画像を選択してください。フォルダ単位で読み込む場合は「フォルダを開く」を選択してください。手元の画像を使わずに試す場合は、「3枚のサンプルで試す ↗」をご利用ください。</li>
+          <li><strong>セリフを入力します</strong>画像の中央列で「＋ 男性」または「＋ 女性」を押し、カードの本文欄に入力してください。新しいセリフは縦書きで追加されます。話者はカードの見出しで切り替えられます。</li>
+          <li><strong>位置と大きさを整えます</strong>右のプレビューで文字をドラッグしてください。選択枠の右下でサイズ、上の丸で回転を調整できます。書体・文字サイズ・文字方向は、下の設定欄で変更してください。</li>
+          <li><strong>画像と編集データを保存します</strong>「画像を保存」を押すと、この1枚をPNGで出力できます。あとで編集し直す場合に備えて、上部の「編集データを保存」から<code>.serifu</code>ファイルも保存してください。</li>
+        </ol>
+        <p class="note">複数枚をまとめて保存する場合は、「一括保存」をご利用ください。PNGと再編集用データを、新しいフォルダまたはZIPにまとめて保存できます。詳しくは<a href="#save">保存方法の違い</a>をご確認ください。</p>
+      </section>
+
+      <section id="workspace" aria-labelledby="workspace-title">
+        <h2 id="workspace-title"><span class="number">02</span>画面の見方</h2>
+        <p>各画像の編集画面は3列で構成されています。下へスクロールすると、次の画像を続けて編集できます。狭い画面では、各列が縦に並びます。</p>
+        <div class="screen-map" role="group" aria-label="画像ごとの3列構成">
+          <div><span>01 / ORIGINAL</span><b>元画像</b><p>元の画像を確認できます。画像の除外・複製と、SAM3によるマスク検出を行います。</p></div>
+          <div><span>02 / WORDS</span><b>セリフ・効果音</b><p>オブジェクトを追加し、本文・色・装飾・プリセットを編集します。</p></div>
+          <div><span>03 / LIVE PREVIEW</span><b>仕上がり・配置</b><p>ドラッグで位置を調整できます。数値設定、クロップ、回転、PNG保存も行えます。</p></div>
+        </div>
+        <p>上部のメニューには、読み込み・保存・既定プリセット・自動保存の項目があります。左の「ページ一覧」では、サムネイルからの移動と絞り込みができます。中央のカードやプレビューを選択すると、そのオブジェクトの設定が開きます。</p>
+        <h3>細部を確認する</h3>
+        <ul>
+          <li><strong>100%</strong>：原寸プレビューを別画面で表示します。10〜200%に拡縮でき、ドラッグで表示位置を移動できます。「閉じる」または<kbd>Esc</kbd>で元の画面に戻ります。</li>
+          <li><strong>FOCUS</strong>：枠の大きさを固定して、拡大しながら編集できます。倍率100%では、元画像の1pxを画面の1pxで表示します。倍率欄への数値入力または上下ドラッグで倍率を変更し、手のひらボタンで表示位置を移動してください。</li>
+          <li><strong>拡大鏡ボタン</strong>：画像の一部を等倍で確認できます。拡大鏡の位置とサイズは、ドラッグで調整してください。</li>
+        </ul>
+      </section>
+
+      <section id="pages" aria-labelledby="pages-title">
+        <h2 id="pages-title"><span class="number">03</span>画像とページの管理</h2>
+        <p>「画像を追加」では複数の画像を選択できます。「フォルダを開く」では、フォルダ内の画像を読み込みます。画像ファイルをページ一覧にドロップしても追加できます。新しく読み込んだ画像は、ファイル名の数字を考慮した順序で並びます。</p>
+        <div class="table-wrap"><table>
+          <caption>ページ一覧と各画像の見出しで使う操作</caption>
+          <thead><tr><th scope="col">操作</th><th scope="col">使い方</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">ページの移動</th><td>サムネイルをクリックするか、上部の矢印・画像選択欄で移動してください。</td></tr>
+            <tr><th scope="row">絞り込み</th><td>「未編集のみ」「編集済みのみ」「未確認のみ」「確認済みのみ」から選択してください。「すべて」を選択すると解除できます。</td></tr>
+            <tr><th scope="row">並べ替え</th><td>サムネイルをドラッグするか、フォーカスした状態で<kbd>Alt</kbd>＋<kbd>↑</kbd>／<kbd>↓</kbd>を押してください。画像見出しの「ページ移動↑／↓」も使えます。「ページの後へ」に現在のページ番号を入力して「移動」を押すと、そのページの直後へ移動します。0を指定すると先頭へ移動します。</td></tr>
+            <tr><th scope="row">確認済みにする</th><td>「編集完了・次へ」を押すと、確認済みにして次へ進みます。確認済みと編集済みは別の状態です。</td></tr>
+            <tr><th scope="row">表示を軽くする</th><td>表示件数を「50件ずつ」または「100件ずつ」に設定してください。表示範囲やフィルターを変更しても、一括保存の対象は表示中の範囲だけには限定されません。</td></tr>
+            <tr><th scope="row">一覧の大きさ</th><td>サムネイル倍率は50〜200%で調整できます。一覧の右端をドラッグすると幅を変更でき、ダブルクリックすると初期幅に戻ります。「サムネイルを非表示」で一覧を隠せます。</td></tr>
+            <tr><th scope="row">画像複製</th><td>元画像だけを一覧内に複製します。文字などの編集内容は引き継ぎません。</td></tr>
+            <tr><th scope="row">一覧から外す</th><td>アプリの一覧から画像を除外します。元ファイルは残りますが、そのページの未保存の編集は失われます。</td></tr>
+          </tbody>
+        </table></div>
+        <p class="note warning"><strong>注意：「元画像を削除」では、実ファイルが完全に削除されます。</strong>ファイル名を確認してから実行してください。ゴミ箱には移動せず、Undoでも元に戻せません。「フォルダを開く」で直接接続し、削除APIを利用できる画像だけが対象です。画像追加・サンプル・編集データから読み込んだ画像では使えません。</p>
+        <details>
+          <summary>画像別のJSON下書きを取り込む</summary>
+          <p>同じフォルダに<code>img001.jpg</code>と<code>img001.jpg.json</code>を置き、「フォルダを開く」で読み込んでください。通常の画像追加やドラッグ追加では、下書きは取り込まれません。</p>
+          <pre><code>{
+  "schemaVersion": 1,
+  "imageFile": "img001.jpg",
+  "annotations": [
+    { "type": "dialogue", "speaker": "female", "text": "こんにちは" },
+    { "type": "speech_bubble", "text": "吹き出しの本文" },
+    { "type": "caption", "text": "その日のこと。" },
+    { "type": "sound_effect", "text": "ドン" }
+  ]
+}</code></pre>
+          <p>セリフの<code>speaker</code>には、<code>male</code>または<code>female</code>を指定してください。既定のプリセットを使い、右上から左へ、その後は下段へ自動で配置されます。収まらない場合は縮小され、縮小の限界を超えた分は画像外に残して警告を表示します。保存前に位置とサイズをご確認ください。</p>
+          <p>不正な下書きがあっても、画像は読み込まれます。元画像・下書きJSONは変更されません。この形式は、「編集データを追加」で開くプロジェクト形式とは異なります。</p>
+        </details>
+      </section>
+
+      <section id="dialogue" aria-labelledby="dialogue-title">
+        <h2 id="dialogue-title"><span class="number">04</span>セリフと文字の書式</h2>
+        <p>「＋ 男性」「＋ 女性」でセリフを追加できます。初期色は男性が黒、女性がピンクで、輪郭は白です。色と輪郭は変更できます。セリフを追加しても、吹き出しは自動では付きません。</p>
+        <ul>
+          <li>本文欄に直接入力してください。入力欄の高さは入力した改行に合わせて伸び、長い1行は横にスクロールできます。プレビューでの折り返しは、配置幅・高さにも依存します。</li>
+          <li>カード見出しの「男性」「女性」で話者を変更できます。「文字色」「文字の輪郭色」「文字の輪郭の太さ」で見た目を調整してください。輪郭の太さを0にすると、輪郭を消せます。</li>
+          <li>「文字方向」で縦書き／横書きを選択してください。縦書きの句読点は、文字枠の右上に配置されます。「改行位置」の上付き／中央揃えで、複数行の揃え方を変更できます。</li>
+          <li>「文字の太さ（px）」は−10〜30で指定できます。0が書体の標準で、正の値では太く、負の値では細くなります。輪郭や文字サイズとは別の設定です。細くしすぎると細い線が消えるため、プレビューで確認しながら調整してください。</li>
+        </ul>
+        <h3>書体を選ぶ</h3>
+        <p>右側の「書体」から、ゴシック・明朝・手書き・漫画向けなどの書体を選択してください。選択した書体の読み込みが終わると、プレビューが更新されます。PNG保存も書体の読み込み完了を待って実行されます。書体に含まれない文字は、端末の代替書体で表示されます。</p>
+        <p>「激筆 SFX」はかな・英大文字・数字・記号向けで、漢字と英小文字は代替書体になります。「851チカラヨワク」は「手書き・丸文字」から選択できます。ローカル環境で書体が見つからない場合は、<a href="#help">困ったときは</a>の準備方法をご確認ください。</p>
+        <details>
+          <summary>書体の種類と同梱ライセンス</summary>
+          <p>同梱の19書体と、端末のゴシック・明朝を選択できます。漫画向けには激筆 SFX・Dela Gothic One・Reggae One、筆文字にはYuji Boku・Yuji Mai・Yuji Syuku、手書きにはKlee One・Yomogi・851チカラヨワクなどを用意しています。</p>
+          <p>Google Fonts由来の17書体には、それぞれのOFLライセンスを同梱しています。激筆 SFXはHIDEOUT作で、CC0 1.0が適用されます。851チカラヨワクは8:51:22 pm作で、作者の規約に従ってご利用ください。フォントを準備・ビルドした環境では、<code>assets/fonts/</code>に各ライセンス・規約が収録されます。</p>
+        </details>
+      </section>
+
+      <section id="balloons" aria-labelledby="balloons-title">
+        <h2 id="balloons-title"><span class="number">05</span>吹き出し</h2>
+        <p>「○ 吹き出し」で追加できます。本文は同じカードに入力でき、空欄のまま背景だけにも使えます。話者・書体・文字色も変更できます。初期状態は白・25%透過（不透明度75%）・黒枠で、テールは付いていません。</p>
+        <ol>
+          <li>右の「吹き出し形状」で、楕円・歪み長方形・尖り形・多角形などを選択してください。形状を変更しても、位置・大きさ・本文は保持されます。</li>
+          <li>多角形の頂点数は3〜60で指定できます。「頂点数をランダム生成」で別の頂点数に変更できます。歪み度を0%にすると、均等な多角形になります。「形状を再生成」では、同じ頂点数で形を変更できます。</li>
+          <li>塗り色・透過率・枠線色・枠線の太さを調整してください。枠線の太さを0にすると、枠を消せます。「影を付ける」では、影の色・濃さ・ぼかし・ずれを指定できます。「枠線の描き方」でブラシ風を選ぶと、ラフな縁取りにできます。</li>
+          <li>「テールを追加」をオンにすると、水色の先端をドラッグできます。先端の座標・付根の角度・幅は、数値でも調整できます。</li>
+          <li>本文だけを移動する場合は、「文字の横位置」「文字の縦位置」を使ってください。正の値を指定すると、横位置は右へ、縦位置は下へ移動します。「内側の余白」では、折り返しまでの長さを調整できます。</li>
+        </ol>
+        <p class="note">吹き出しの本文は、枠の外側にも表示されます。ただし、画像の外側はPNGに出力されません。枠内に収めたい場合は、文字位置・余白・文字サイズを調整してください。</p>
+      </section>
+
+      <section id="captions" aria-labelledby="captions-title">
+        <h2 id="captions-title"><span class="number">06</span>キャプション</h2>
+        <p>「▭ キャプション」で、モノローグや説明用の長方形ボックスを追加できます。本文とボックスを一つのオブジェクトとして移動できます。初期状態は白背景・25%透過・黒枠・黒文字・縦書きで、本文は左右上下とも中央揃えになります。</p>
+        <ul>
+          <li>カードで本文・文字色・文字の輪郭・背景色・背景の透過率・枠線を編集してください。右側では、書体・文字方向・位置・ボックスの寸法・回転を調整できます。</li>
+          <li>「左右の揃え方」「上下の揃え方」で位置を指定してください。「文字の横位置」「文字の縦位置」では、ボックスを動かさずに本文だけをずらせます。</li>
+          <li>「文字サイズをボックスに合わせる」は、初期状態ではオフです。オフの場合は、ボックスのサイズを変更しても、手動で指定した文字サイズが保持されます。本文はボックス内で折り返され、はみ出した部分は切り取られます。</li>
+          <li>オンにすると、本文・書体・方向・余白・枠線に合わせて、収まる文字サイズが自動計算されます。オフに戻すと、手動の文字サイズに戻ります。最小サイズでも収まらない場合は、ボックスを広げるか、本文・余白を減らしてください。</li>
+        </ul>
+      </section>
+
+      <section id="sfx" aria-labelledby="sfx-title">
+        <h2 id="sfx-title"><span class="number">07</span>効果音・文字単位編集</h2>
+        <p>「✦ 効果音」で追加し、本文と書体を選択してください。まずプリセットで近い表現を選び、必要な項目を調整すると作りやすくなります。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th scope="col">設定</th><th scope="col">表現と調整</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">漫画エフェクト</th><td>立体・集中線・スピード・震え・先細りなどを選択できます。「なし」を選ぶと漫画装飾が外れますが、別に指定したブラー・掠れ・歪みは残ります。</td></tr>
+            <tr><th scope="row">先細り</th><td>入力順に文字が小さくなります。基準100px・変化率10%の場合は、100→90→80pxと変化し、最小8pxまで縮小されます。改行後も順番は続きます。</td></tr>
+            <tr><th scope="row">ばらつき</th><td>文字サイズのばらつきと左右のズレを調整できます。0を指定すると、追加のばらつきがなくなります。保存・再読み込みによって模様が変わることはありません。</td></tr>
+            <tr><th scope="row">ブラー・筆表現</th><td>縦横のブラー、滲み、文字の芯、輪郭の荒れ、筆の掠れ、ハネ・払い、残像、傾き、縦横倍率を組み合わせて調整してください。</td></tr>
+            <tr><th scope="row">かすれ印刷</th><td>「インク質感」の「かすれ印刷・荒れインク」を選択し、強さ・擦れ筋の長さと方向・飛沫量を調整してください。欠けた部分は透明になります。「模様を再生成」で模様を変更できます。</td></tr>
+          </tbody>
+        </table></div>
+        <h3>1文字ずつ形を整える</h3>
+        <ol>
+          <li>効果音カードで「文字単位編集」を押してください。</li>
+          <li>文字を選択し、移動・回転・倍率・傾き・書体・色・輪郭を調整してください。<kbd>Shift</kbd>で複数選択でき、<kbd>Alt</kbd>で重なった背面の文字を選択できます。</li>
+          <li>詳細パネルでは、矩形／なげなわ選択、共通中心での一括変形、位置・変形・外観ごとのリセット、4案の配置比較を利用できます。</li>
+          <li>選択した文字は、<kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>C</kbd>・<kbd>V</kbd>・<kbd>D</kbd>やドラッグでコピー・複製できます。別の効果音へ貼り付けた場合は、貼り付け先の外観が使われ、本文も更新されます。</li>
+          <li>「文字編集を終了」を押すか、入力欄の外で<kbd>Esc</kbd>を押すと、通常の編集に戻ります。</li>
+        </ol>
+        <details>
+          <summary>長音の曲線・テンプレート・本文の変更</summary>
+          <p>連続する「ー」は、編集開始後に曲線として調整できます。曲線点・太さ点をドラッグし、点の追加削除、端点の接続／分離、長さロック、端の形状、線幅の補間を指定してください。形状・太さ・見た目だけの部分コピーも使えます。単独の「ー」は、通常の文字として扱われます。</p>
+          <p>合成外周は重なりに応じて生成され、メンバーを手動で固定できます。テンプレートはブラウザ・プロジェクト・JSONで管理できます。本文とページ上の絶対位置を変えずに、文字数が異なる効果音にも適用できます。</p>
+          <p>文字単位編集を始めた効果音の本文を変更する場合は、位置／文字一致／リセットから継承方法を選択してください。本文欄で<kbd>Esc</kbd>を押すと変更を取り消せます。<kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>Enter</kbd>を押すか、別の場所へフォーカスを移すと確定します。</p>
+          <p>不足する書体は、代替書体を選ぶか、アップロードして補えます。アップロードした書体は現在のセッション内だけで有効で、編集データにはファイルが同梱されません。再開時には、同じ書体を用意してください。</p>
+          <p>タッチ操作では、大型ハンドル・長押しルーペ・2本指ズーム／パンを利用できます。操作感は端末によって異なります。画像外の文字・線には警告が表示されます。これらは編集データには残りますが、PNGでは画像端で切り取られます。</p>
+        </details>
+      </section>
+
+      <section id="placement" aria-labelledby="placement-title">
+        <h2 id="placement-title"><span class="number">08</span>配置・複製・重なり</h2>
+        <p>プレビューで対象を選択し、ドラッグで移動してください。<kbd>Shift</kbd>を押しながら選ぶと、複数選択できます。右下の角でサイズ、上の丸で回転を調整できます。X/Y・配置幅・配置高さ・回転は、数値でも指定できます。</p>
+        <h3>コピーと複製</h3>
+        <ul>
+          <li><strong>選択した対象</strong>：<kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>C</kbd>でコピーし、貼り付け先のプレビューを選択してから、<kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>V</kbd>で貼り付けてください。書式と配置は保持され、解像度が異なる画像では拡縮されます。貼り付けるたびに、位置が少しずつずれます。</li>
+          <li><strong>ドラッグ複製</strong>：<kbd>Ctrl</kbd>／<kbd>⌘</kbd>を押しながらドラッグしてください。さらに<kbd>Shift</kbd>を押すと、元の対象を通る水平・垂直ガイドに沿って移動できます。クリックしただけでは複製されません。</li>
+          <li><strong>画像内の文字をまとめてコピーする場合</strong>：「文字を一括コピー／カット」を押し、貼り付け先で「文字を一括ペースト」を押してください。セリフ・効果音・吹き出し・キャプションが対象で、マスクは含まれません。貼り付けた内容は、既存の文字に追加されます。</li>
+          <li><strong>次の画像へ複製する場合</strong>：「文字を次の画像へ複製 →」を押すと、次の画像のサイズに合わせて文字が追加されます。</li>
+        </ul>
+        <p>コピーした内容は、同じタブ内で再読み込みするまで保持されます。元の内容をあとで変更してもコピーは変わらず、繰り返し貼り付けられます。縦横比が異なる画像では折り返しや収まりが変わるため、貼り付け後に確認してください。</p>
+        <h3>前後関係と取り消し</h3>
+        <p>右の「背面へ／前面へ／最背面へ／最前面へ」で重なりを変更できます。マスク・文字・吹き出しは共通の順序で扱われ、一覧では上が背面、下が前面になります。前面のマスクは文字も覆います。</p>
+        <p>「戻す」「↷」で、画像ごとの編集を取り消し・やり直しできます。複製や一括貼り付けは、1回の操作として取り消されます。カットと貼り付けを元に戻す場合は、それぞれの操作を行った画像で取り消してください。</p>
+      </section>
+
+      <section id="presets" aria-labelledby="presets-title">
+        <h2 id="presets-title"><span class="number">09</span>プリセット</h2>
+        <ol>
+          <li>セリフ・効果音・吹き出し・キャプションを選択し、書式と配置を整えてください。</li>
+          <li>カードの「保存」または上部の「選択中の設定を記憶」で、名前を付けて保存してください。</li>
+          <li>カードの選択欄からプリセットを適用してください。上部の種類別の「既定」で選択すると、新しく追加する対象にも適用できます。</li>
+        </ol>
+        <p>プリセットには書式と配置が保存されます。本文・話者は保存されません。画像の解像度が異なる場合は、配置や文字サイズが拡縮されます。同じ種類・同じ名前で保存する場合は、確認後に上書きされます。</p>
+        <p>ユーザープリセットを削除する場合は、カードのプリセット欄にある「削除」か、上部の既定選択の右にある「×」を押してください。配置済みの見た目は保持され、組み込みプリセットは削除できません。プリセットは同じブラウザに保存され、編集データにも含まれます。</p>
+      </section>
+
+      <section id="image-edit" aria-labelledby="image-edit-title">
+        <h2 id="image-edit-title"><span class="number">10</span>画像加工・SAM3</h2>
+        <h3>クロップと回転</h3>
+        <p>プレビュー上部の「クロップ」を押し、ドラッグで範囲を選択してから「適用」を押してください。枠内をドラッグすると範囲を移動でき、辺や角でサイズを調整できます。X/Y・幅・高さは、回転後の元画像のピクセル数で指定してください。「左回転」「右回転」では、画像全体を90度ずつ回転できます。</p>
+        <p>「クロップ・回転をリセット」を押すと、元の範囲と向きに戻せます。元ファイルは上書きされません。PNGは、クロップ・回転後の解像度で保存されます。</p>
+        <h3>SAM3で領域を指定する</h3>
+        <p>SAM3の新規検出には、GPUに対応したローカル環境での起動が必要です。通常の編集はブラウザ内で行われますが、SAM3では元画像をお使いのローカル推論サーバーに送信して処理します。公開版では新規検出を利用できません。保存済みのマスクは編集・出力できます。</p>
+        <ol>
+          <li>元画像の下にあるSAM3カードでテキストを入力し、「検出」を押してください。<kbd>Enter</kbd>でも検出できます。日本語変換の確定中は実行されません。</li>
+          <li>必要に応じて、前景・背景ポイントで領域を指定してください。番号・色・信頼度を確認しながら候補を選択してください。複数の候補も選択できます。</li>
+          <li>加工方法を選び、プレビューで確認してから「OK」で確定してください。入力を変更した場合は、最新の検出結果が届くまでお待ちください。確定前の仮加工は、PNG・編集データには保存されません。</li>
+          <li>確定したマスクのカードで、ピクセレート・ぼかし・黒塗り・白塗り、輪郭補正、表示、X/Y/W/Hを変更できます。プレビューでは、移動と8方向のサイズ調整ができます。</li>
+        </ol>
+        <p>新規検出の対象はPNG・JPEG・WebPで、30MiB以下かつ40Mpx以下の画像です。GIF・AVIF・アニメーション画像の推論には対応していません。モデルやサーバーの準備については、READMEの起動手順をご確認ください。</p>
+        <p class="note">ピクセレート・ぼかしは匿名化を保証するものではありません。マスクを確定したあとに、保存した画像もご確認ください。マスク素材は編集データに含まれるため、復元後は推論サーバーなしでも再編集できます。</p>
+      </section>
+
+      <section id="save" aria-labelledby="save-title">
+        <h2 id="save-title"><span class="number">11</span>書き出しと再編集</h2>
+        <div class="table-wrap"><table>
+          <caption>目的に合わせて保存方法を選んでください。</caption>
+          <thead><tr><th scope="col">操作</th><th scope="col">保存するもの</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">画像を保存</th><td>その画像だけを合成済みPNGとして保存します。選択枠は含まれません。保存先はブラウザのダウンロード設定に従います。再編集用データは、別途保存してください。</td></tr>
+            <tr><th scope="row">一括保存</th><td>全画像のPNGと編集データを保存します。選択した親フォルダの中に、日時・ID付きの新しいフォルダが作成されます。フォルダ保存に対応していない場合は、ZIPをダウンロードします。</td></tr>
+            <tr><th scope="row">編集済み画像一括保存</th><td>文字などを編集した画像だけを、PNGと編集データに保存します。画像を開いた・選択した・確認済みにしただけのページは、対象に含まれません。</td></tr>
+            <tr><th scope="row">編集データを保存</th><td>画像・文字・マスク・配置・プリセットなどを1ファイルにまとめます。初期形式の<code>.serifu</code>をおすすめします。上部の「保存形式」でJSONも選択できます。</td></tr>
+            <tr><th scope="row">テキストを保存</th><td>女性／男性／全台詞／キャプション／効果音／全本文から選択し、全ページを現在の順序でTXTとして保存します。台詞は1件ごとに「」で囲まれ、空の本文は省かれます。</td></tr>
+          </tbody>
+        </table></div>
+        <p>一括保存したPNGには、<code>p01_元の名前.png</code>のように、ページ順の番号が付きます。桁数は全体の枚数に合わせられ、編集済みの画像だけを保存する場合も全体の番号が保持されます。PNGは画像の解像度を保ち、クロップ・回転を行った場合は、その結果の寸法になります。</p>
+        <h3>保存した編集を再開する</h3>
+        <ul>
+          <li><strong>「プロジェクトを開く」</strong>：現在の一覧を、保存ファイルの内容に置き換えます。現在の作業を残したい場合は、先に編集データを保存してください。</li>
+          <li><strong>「編集データを追加」</strong>：保存ファイルの画像と編集内容を、現在の一覧に追加します。</li>
+          <li>同じプロジェクトでファイルと自動保存の内容が異なる場合は、ファイル・自動保存・別プロジェクトのどれで開くかを選択してください。</li>
+        </ul>
+        <p>PNGだけでは、文字や吹き出しを個別に再編集できません。保管や端末の移行に備えて、<code>.serifu</code>ファイルも残してください。旧形式の編集データは読み込めますが、新しい形式のデータは古いアプリでは開かないでください。JSONに切り替えても、旧版向けの形式には変換されません。</p>
+        <h3>一括処理を中断する</h3>
+        <p>上部の進捗欄で、処理段階・件数・失敗・経過時間を確認できます。「中断」を押すと、残りの処理を停止します。画像追加を中断した場合は追加済みの画像が残り、フォルダ保存を中断した場合は出力済みのファイルが残ります。ZIPはダウンロード開始前であれば中断できます。通常のダウンロードは、開始後にアプリから取り消すことはできません。</p>
+        <p class="note warning"><strong>注意：</strong>保存の失敗や中断が発生した場合は、画面下部の結果と保存済み枚数をご確認ください。フォルダには途中までの出力が残ります。元画像は上書きされません。</p>
+      </section>
+
+      <section id="autosave" aria-labelledby="autosave-title">
+        <h2 id="autosave-title"><span class="number">12</span>一時保存と復元</h2>
+        <p>「一時保存」では、画像と編集内容をブラウザ内に保存します。自動保存は初期状態でオンになっています。編集を確定すると最新状態が保存され、設定した周期でも確認されます。変更がある場合は、復元用の履歴が原則5分間隔で、最大5世代まで保存されます。</p>
+        <ol>
+          <li>再読み込みしたあとに、「保存した編集を復元」で作業を再開してください。</li>
+          <li>「保存プロジェクト管理」では、プロジェクトと世代を選択して復元・削除できます。保存容量も確認できます。</li>
+          <li>「一時保存を消去」では、対象プロジェクトの最新状態だけが削除されます。履歴や別のプロジェクトは残ります。</li>
+        </ol>
+        <p>同じプロジェクトを編集できるのは1つのタブだけで、ほかのタブは閲覧専用になります。編集タブを閉じたあとなどは、閲覧タブで操作すると、最新状態が再読み込みされて編集を引き継げます。別のプロジェクトは、それぞれ独立して保存されます。</p>
+        <p class="note"><strong>一時保存は、同じブラウザ・同じサイト内に保存されます。</strong>サイトデータを削除すると失われます。公開版とローカル版、ポートが異なるローカル版では、保存先が別になります。環境を移行する場合は、編集データをファイルに保存して持ち出してください。容量不足で自動保存が停止した場合は、ファイルに退避して保存領域を整理し、手動での保存が成功することをご確認ください。</p>
+      </section>
+
+      <section id="shortcuts" aria-labelledby="shortcuts-title">
+        <h2 id="shortcuts-title"><span class="number">13</span>ショートカット</h2>
+        <p>Windows／Linuxでは<kbd>Ctrl</kbd>、Macでは<kbd>⌘</kbd>を使います。まず、プレビューで操作したい対象を選択してください。入力欄の編集中やIME変換中は、オブジェクト操作のキーは適用されません。</p>
+        <div class="table-wrap"><table>
+          <thead><tr><th scope="col">キー・操作</th><th scope="col">動作</th></tr></thead>
+          <tbody>
+            <tr><th scope="row"><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd></th><td>選択した対象を1px移動します。<kbd>Shift</kbd>を加えると、10pxずつ移動します。</td></tr>
+            <tr><th scope="row"><kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>C</kbd>・<kbd>V</kbd></th><td>選択したオブジェクトをコピー・貼り付けできます。文字単位編集では、選択した文字が対象になります。</td></tr>
+            <tr><th scope="row"><kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋ドラッグ</th><td>対象を複製して移動します。<kbd>Shift</kbd>を加えると、水平・垂直方向に沿って複製できます。</td></tr>
+            <tr><th scope="row"><kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>Z</kbd></th><td>現在の画像の編集を元に戻します。<kbd>Shift</kbd>を加えると、やり直しができます。</td></tr>
+            <tr><th scope="row"><kbd>Delete</kbd></th><td>プレビューにフォーカスがあるときに、選択した対象を削除します。Undoで復元できます。元画像ファイルを削除する操作とは異なります。</td></tr>
+            <tr><th scope="row"><kbd>F</kbd>／<kbd>B</kbd></th><td>選択した対象と同じ種類のプリセットを、次／前へ切り替えます。</td></tr>
+            <tr><th scope="row"><kbd>C</kbd>／<kbd>U</kbd></th><td>文字の改行位置を中央揃え／上付きにします。吹き出しを選択している場合、<kbd>C</kbd>では楕円に変更します。</td></tr>
+            <tr><th scope="row"><kbd>C</kbd> <kbd>R</kbd> <kbd>V</kbd> <kbd>M</kbd></th><td>吹き出しを選択している場合に、それぞれ楕円／歪み長方形／尖り形／多角形に変更します。</td></tr>
+            <tr><th scope="row"><kbd>E</kbd></th><td>吹き出しの形状を順番に切り替えます。</td></tr>
+            <tr><th scope="row"><kbd>Ctrl</kbd>／<kbd>⌘</kbd>＋<kbd>D</kbd></th><td>効果音の文字単位編集で、選択した文字を複製します。</td></tr>
+            <tr><th scope="row"><kbd>Alt</kbd>＋<kbd>↑</kbd>／<kbd>↓</kbd></th><td>サムネイルにフォーカスした状態で、そのページを前／後へ移動します。</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+
+      <section id="help" aria-labelledby="help-title">
+        <h2 id="help-title"><span class="number">14</span>困ったときは</h2>
+        <h3>フォルダへ直接保存できない</h3>
+        <p>フォルダへの直接保存と元画像の削除には、対応ブラウザのFile System Access APIが必要です。PC版Chrome／Edgeで、localhostまたはHTTPSからご利用ください。非対応の環境では、一括保存はZIP、単体保存は通常のダウンロードになります。ZIPは全体で4GiB未満、最大65,535ファイルまで対応しています。大きな作業は分割して進めてください。</p>
+        <h3>文字が見切れる・小さくなった</h3>
+        <p>文字サイズ・配置幅・配置高さ・余白をご確認ください。キャプションの自動追従がオンになっている場合は、ボックスに合わせて文字が縮小されます。吹き出しの本文は枠外にも表示されますが、キャプションの本文は枠内で切り取られます。画像外の部分は、どちらもPNGには含まれません。</p>
+        <h3>想定した書体にならない</h3>
+        <p>書体の読み込み状態と、その書体に使いたい文字が含まれているかをご確認ください。ローカルで同梱書体が見つからない場合は、リポジトリのルートで<code>npm run fonts</code>を実行してから再読み込みしてください。アップロードした書体は、再起動時に再度用意してください。端末の代替書体は、環境によって見た目が異なります。</p>
+        <h3>編集済みだけ保存すると画像が抜ける</h3>
+        <p>確認済みと編集済みは、別の状態です。画像の読み込み・選択・「編集完了・次へ」だけでは、編集済みにはなりません。最初の編集をUndoで取り消すと、未編集に戻ります。文字を削除した結果、元画像だけに見えるページも、編集済みとして扱われる場合があります。全画像を保存したい場合は、「一括保存」をご利用ください。</p>
+        <h3>一時保存が見つからない</h3>
+        <p>保存したときと同じブラウザ・サイト・ポートで開いているかをご確認ください。別の環境に移す場合は、<code>.serifu</code>ファイルを移して「プロジェクトを開く」で読み込んでください。復元した画像は元フォルダへの接続を持たないため、「元画像を削除」は利用できません。</p>
+        <h3>SAM3で検出できない</h3>
+        <p>公開版や<code>npm start</code>だけで起動した環境では、新規検出は利用できません。READMEのGPUセットアップを済ませ、<code>npm run dev</code>で起動してください。モデルの場所、入力形式と画像サイズ、カードに表示されるエラーをご確認ください。</p>
+        <h3>動作が重い・出力が途中で止まる</h3>
+        <p>表示件数を減らし、大量の画像や高解像度の画像は分けて編集してください。強いブラーや極端な拡大も負荷が増える原因になります。保存途中で止まった場合は、結果表示と出力済みファイルをご確認ください。PNGは静止画として出力され、GIFの動きやEXIFなどの元画像のメタデータは引き継がれません。高度な縦組み約物・ルビには対応していません。</p>
+      </section>
+
+      <footer class="footer"><span>Serifu Editor · 操作説明書</span><a href="#top">先頭へ戻る ↑</a></footer>
+    </main>
+  </div>
+</body>
+</html>

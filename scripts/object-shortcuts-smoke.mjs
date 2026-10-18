@@ -58,21 +58,25 @@ try {
     }
     if (kind === 'caption') { await field('alignX').selectOption('right'); await field('alignY').selectOption('bottom'); }
     await page.evaluate(() => document.fonts.ready);
-    await shortcut('c');
-    assert.equal(await field(kind === 'caption' ? 'alignY' : 'lineAlign').inputValue(), 'center');
-    if (kind === 'caption') assert.equal(await field('alignX').inputValue(), 'center');
-    if (kind === 'balloon' || kind === 'caption') {
-      assert.equal(await field('textOffsetX').inputValue(), '0'); assert.equal(await field('textOffsetY').inputValue(), '0');
-      assert.equal(await field('padding').inputValue(), '0', 'C clears inner padding');
-      assert.equal(await card.locator('[data-field=padding]').inputValue(), '0', 'card padding stays synchronized');
-      await shortcut('Control+z');
-      assert.equal(await field('padding').inputValue(), '30', 'undo restores inner padding together with alignment');
-      assert.equal(await field('textOffsetX').inputValue(), '25'); assert.equal(await field('textOffsetY').inputValue(), '-18');
-      await shortcut('Control+Shift+z'); assert.equal(await field('padding').inputValue(), '0');
-      await field('padding').fill('30'); await shortcut('c');
-      assert.equal(await field('padding').inputValue(), '0', 'C also clears padding when text is already centered');
+    if (kind === 'balloon') {
+      await field('lineAlign').selectOption('center');
+    } else {
+      await shortcut('c');
+      assert.equal(await field(kind === 'caption' ? 'alignY' : 'lineAlign').inputValue(), 'center');
+      if (kind === 'caption') {
+        assert.equal(await field('alignX').inputValue(), 'center');
+        assert.equal(await field('textOffsetX').inputValue(), '0'); assert.equal(await field('textOffsetY').inputValue(), '0');
+        assert.equal(await field('padding').inputValue(), '0', 'C clears inner padding');
+        assert.equal(await card.locator('[data-field=padding]').inputValue(), '0', 'card padding stays synchronized');
+        await shortcut('Control+z');
+        assert.equal(await field('padding').inputValue(), '30', 'undo restores inner padding together with alignment');
+        assert.equal(await field('textOffsetX').inputValue(), '25'); assert.equal(await field('textOffsetY').inputValue(), '-18');
+        await shortcut('Control+Shift+z'); assert.equal(await field('padding').inputValue(), '0');
+        await field('padding').fill('30'); await shortcut('c');
+        assert.equal(await field('padding').inputValue(), '0', 'C also clears padding when text is already centered');
+      }
+      assert.deepEqual(await xy(), originalXY, 'C centers text without moving the object');
     }
-    assert.deepEqual(await xy(), originalXY, 'C centers text without moving the object');
     if (kind === 'balloon' || kind === 'caption') {
       await field('textOffsetX').fill('25'); await field('textOffsetY').fill('-18');
       await field('padding').fill('20');
@@ -100,7 +104,7 @@ try {
       const shapes = await field('shape').evaluate(select => [...select.options].filter(option => !option.hidden).map(option => option.value));
       assert.deepEqual(shapes, ['ellipse', 'distorted-rect', 'spiky', 'polygon']);
       const initialShape = await field('shape').inputValue(), initialIndex = shapes.indexOf(initialShape);
-      const unchangedFields = ['x', 'y', 'w', 'h', 'size', 'distortion', 'shapeSeed', 'spikeCount', 'textOffsetX', 'textOffsetY'];
+      const unchangedFields = ['x', 'y', 'w', 'h', 'rotation', 'size', 'distortion', 'shapeSeed', 'spikeCount', 'polygonCount', 'tailX', 'tailY', 'tailWidth', 'lineAlign', 'padding', 'textOffsetX', 'textOffsetY'];
       const settings = () => Promise.all(unchangedFields.map(name => field(name).inputValue()));
       const initialSettings = await settings(), initialText = await card.locator('textarea').inputValue();
       await page.evaluate(() => document.fonts.ready);
@@ -120,11 +124,38 @@ try {
       }
       assert.deepEqual(await settings(), initialSettings, 'E preserves dimensions, text offsets, distortion and shape seeds');
       assert.equal(await card.locator('textarea').inputValue(), initialText, 'E preserves balloon text');
+      await menu.selectOption(presets[0].id);
+      const presetShape = await field('shape').inputValue();
+      const shapeKeys = { ellipse: 'c', 'distorted-rect': 'r', spiky: 'v', polygon: 'm' };
+      await shortcut(shapeKeys[presetShape]);
+      assert.equal(await menu.inputValue(), presets[0].id, 'selecting the current shape preserves the preset reference');
+      await field('lineAlign').selectOption('top');
+      await field('textOffsetX').fill('25'); await field('textOffsetY').fill('-18'); await field('padding').fill('20');
+      await field('shape').selectOption('ellipse');
+      const directSettings = await settings();
+      const shapeShortcuts = [['r', 'distorted-rect'], ['v', 'spiky'], ['m', 'polygon'], ['c', 'ellipse']];
+      for (const [key, shape] of [...shapeShortcuts, ...shapeShortcuts.map(([key, shape]) => [`Shift+${key.toUpperCase()}`, shape])]) {
+        const previousShape = await field('shape').inputValue(), previousPixels = await canvas.evaluate(c => c.toDataURL());
+        await shortcut(key);
+        assert.equal(await field('shape').inputValue(), shape, `${key} directly selects ${shape}`);
+        assert.equal(await menu.inputValue(), '', 'shape changes become a custom style');
+        assert.ok(await canvas.evaluate(c => c.toDataURL()) !== previousPixels, `${key} redraws the balloon`);
+        assert.deepEqual(await settings(), directSettings, `${key} preserves geometry, text alignment, padding and shape parameters`);
+        assert.equal(await card.locator('textarea').inputValue(), initialText);
+        assert.equal(await card.locator('.balloon-seed-controls').isVisible(), shape !== 'ellipse');
+        assert.equal(await card.locator('.balloon-spike-count-control').isVisible(), shape === 'spiky');
+        assert.equal(await card.locator('[data-field=polygonCount]').isVisible(), shape === 'polygon');
+        await shortcut(key);
+        await shortcut('Control+z'); assert.equal(await field('shape').inputValue(), previousShape, 'repeating the current shape does not add an undo entry');
+        await shortcut('Control+Shift+z'); assert.equal(await field('shape').inputValue(), shape, 'redo restores the selected shape');
+      }
       assert.deepEqual(await others.evaluateAll(menus => menus.map(menu => menu.value)), otherPresets);
     } else {
       const initial = [await menu.inputValue(), ...await xy(), await field('shape').inputValue()];
-      await shortcut('e');
-      assert.deepEqual([await menu.inputValue(), ...await xy(), await field('shape').inputValue()], initial, 'E ignores other object kinds');
+      for (const key of ['e', 'r', 'v', 'm']) {
+        await shortcut(key);
+        assert.deepEqual([await menu.inputValue(), ...await xy(), await field('shape').inputValue()], initial, `${key} ignores other object kinds`);
+      }
     }
   }
   const balloon = row.locator('[data-kind=balloon]'); await balloon.locator('.layer-summary').click();
@@ -133,36 +164,64 @@ try {
   const before = await state();
   for (const target of [balloon.locator('textarea'), field('x'), menu]) {
     await target.focus();
-    for (const key of ['f', 'b', 'c', 'u', 'e']) {
+    for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) {
       assert.equal(await target.evaluate((el, key) => {
         const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); el.dispatchEvent(event); return event.defaultPrevented;
       }, key), false, 'editable controls keep their keyboard behavior');
     }
     assert.deepEqual(await state(), before);
   }
-  await balloon.locator('textarea').focus(); await page.keyboard.type('fbcue');
-  assert.match(await balloon.locator('textarea').inputValue(), /fbcue/); assert.deepEqual(await state(), before);
+  await balloon.locator('textarea').focus(); await page.keyboard.type('fbc uervm');
+  assert.match(await balloon.locator('textarea').inputValue(), /fbc uervm/); assert.deepEqual(await state(), before);
   await canvas.focus();
   for (const key of ['Control+f', 'Control+b', 'Control+u', 'Meta+f', 'Alt+b', 'Control+e', 'Meta+e', 'Alt+e']) {
     await page.keyboard.press(key); assert.deepEqual(await state(), before, 'modified shortcuts do not change style');
   }
+  for (const key of ['c', 'r', 'v', 'm']) {
+    for (const modifier of ['ctrlKey', 'metaKey', 'altKey']) {
+      if (modifier !== 'altKey' && ['c', 'v'].includes(key)) continue;
+      assert.equal(await canvas.evaluate((el, { key, modifier }) => {
+        const event = new KeyboardEvent('keydown', { key, [modifier]: true, bubbles: true, cancelable: true });
+        el.dispatchEvent(event); return event.defaultPrevented;
+      }, { key, modifier }), false, 'modified shape keys keep browser behavior');
+      assert.deepEqual(await state(), before);
+    }
+  }
   await page.keyboard.press('Control+c'); assert.deepEqual(await state(), before);
   assert.match(await page.locator('#status').textContent(), /コピーした/, 'Ctrl+C still copies objects');
-  for (const key of ['f', 'b', 'c', 'u', 'e']) {
+  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) {
     await canvas.evaluate((el, key) => el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, isComposing: true })), key);
   }
   assert.deepEqual(await state(), before, 'IME composition is ignored');
   await row.locator('[data-action=preview-full]').click(); await page.locator('#fullPreviewCanvas').waitFor({ state: 'visible' });
-  for (const key of ['f', 'b', 'c', 'u', 'e']) await page.keyboard.press(key);
+  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
   assert.deepEqual(await state(), before, 'preview modal blocks editing shortcuts');
   await page.locator('#fullPreviewClose').click();
   await row.locator('[data-action=crop-image]').click();
-  for (const key of ['f', 'b', 'c', 'u', 'e']) await shortcut(key);
+  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await shortcut(key);
   assert.deepEqual(await state(), before, 'crop mode blocks style shortcuts'); await page.keyboard.press('Escape');
   const empty = page.locator('.image-row').nth(1);
   await page.locator('#jump').selectOption(await empty.getAttribute('data-page-id')); await empty.locator('canvas.preview').focus();
-  for (const key of ['f', 'b', 'c', 'u', 'e']) await page.keyboard.press(key);
+  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
   assert.equal(await empty.locator('.layer-card').count(), 0, 'no selection is a no-op');
+  await empty.locator('[data-action=add-balloon]').click();
+  const emptyCanvas = empty.locator('canvas.preview'), emptyShape = empty.locator('.position-controls [data-field=shape]');
+  await emptyCanvas.scrollIntoViewIfNeeded();
+  const rect = await emptyCanvas.boundingBox();
+  await emptyCanvas.click({ position: { x: rect.width * .05, y: rect.height * .9 } });
+  await empty.locator('.layer-summary').click();
+  const directKeys = [['v', 'spiky'], ['m', 'polygon'], ['c', 'ellipse'], ['r', 'distorted-rect']];
+  for (const [key, shape] of directKeys) {
+    await page.keyboard.press(key);
+    assert.equal(await emptyShape.inputValue(), shape, `${key} works immediately after clicking the balloon card`);
+  }
+  await emptyCanvas.click({ position: { x: rect.width * .05, y: rect.height * .9 } });
+  await emptyCanvas.click({ position: { x: rect.width * .88, y: rect.height * .16 } });
+  assert.equal(await empty.locator('.layer-card.selected').getAttribute('data-kind'), 'balloon');
+  for (const [key, shape] of directKeys) {
+    await page.keyboard.press(key);
+    assert.equal(await emptyShape.inputValue(), shape, `${key} works immediately after clicking the balloon in the preview`);
+  }
   assert.deepEqual(errors, []);
-  console.log('F/B presets, C/U text alignment, E balloon shape order/wrapping/redraw/controls, preserved settings, undo/redo, input/IME/modifier/modal/crop guards and Ctrl+C passed');
+  console.log('F/B presets, C/U text alignment, C/R/V/M direct balloon shapes after card/preview clicks, E shape cycling, preserved settings, undo/redo, no-op repeats, input/IME/modifier/modal/crop guards and Ctrl+C passed');
 } finally { await browser?.close(); server.kill(); }
