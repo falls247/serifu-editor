@@ -37,6 +37,10 @@ async function afterPaint(page) {
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
+async function waitForFocus(page) {
+  await page.waitForFunction(() => document.querySelector('.original-frame')?.classList.contains('original-focus-active'));
+}
+
 async function candidateViewport(page) {
   return page.evaluate(() => {
     const list = document.querySelector('[data-sam3-candidates]');
@@ -152,6 +156,9 @@ try {
   await page.goto(`http://localhost:${port}`, { waitUntil: 'domcontentloaded' });
   await makeImage(page);
   const row = page.locator('.image-row.active'), panel = row.locator('.sam3-panel'), overlay = row.locator('.sam3-overlay');
+  const focus = row.locator('[data-sam3-focus]'), original = row.locator('.original'), originalFrame = row.locator('.original-frame');
+  assert.equal(await focus.getAttribute('aria-pressed'), 'true', 'ORIGINAL FOCUS starts enabled');
+  assert.equal(await originalFrame.evaluate(node => node.classList.contains('original-focus-active')), false, 'candidate selection keeps the full image visible');
   await page.waitForFunction(() => document.querySelector('.sam3-connection')?.textContent.includes('接続済み'));
 
   const pathInput = panel.locator('[data-sam3-model-path]'), savePath = panel.locator('[data-sam3-action=save-model-path]');
@@ -223,18 +230,57 @@ try {
   await panel.locator('[data-interaction=include]').click();
   await overlay.scrollIntoViewIfNeeded();
   const overlayBox = await overlay.boundingBox();
-  await page.mouse.click(overlayBox.x + overlayBox.width * 0.24, overlayBox.y + overlayBox.height * 0.34);
+  const pointTarget = { x: overlayBox.x + overlayBox.width * 0.24, y: overlayBox.y + overlayBox.height * 0.34 };
+  await page.mouse.move(pointTarget.x, pointTarget.y); await waitForFocus(page);
+  let focusedBox = await original.boundingBox();
+  assert.ok(Math.abs(focusedBox.width - imageWidth) < 0.1 && Math.abs(focusedBox.height - imageHeight) < 0.1, 'foreground tool displays the original at 100%');
+  assert.ok(Math.abs(pointTarget.x - focusedBox.x - imageWidth * 0.24) < 0.1 && Math.abs(pointTarget.y - focusedBox.y - imageHeight * 0.34) < 0.1, 'zoom preserves the source pixel under the cursor');
+  const focusedOverlay = await overlay.boundingBox();
+  assert.ok(Math.abs(focusedOverlay.x - focusedBox.x) < 0.1 && Math.abs(focusedOverlay.width - imageWidth) < 0.1, 'overlay remains aligned with the zoomed original');
+  const focusedFrame = await originalFrame.boundingBox();
+  await focus.click();
+  assert.equal(await focus.getAttribute('aria-pressed'), 'false');
+  await overlay.scrollIntoViewIfNeeded();
+  let fitBox = await original.boundingBox();
+  await page.mouse.move(fitBox.x + fitBox.width * 0.24, fitBox.y + fitBox.height * 0.34); await afterPaint(page);
+  assert.ok(Math.abs((await original.boundingBox()).width - overlayBox.width) < 0.1, 'FOCUS OFF keeps fit display while the point tool is active');
+  await focus.click();
+  assert.equal(await focus.getAttribute('aria-pressed'), 'true');
+  await overlay.scrollIntoViewIfNeeded();
+  fitBox = await original.boundingBox();
+  const foregroundTarget = { x: fitBox.x + fitBox.width * 0.24, y: fitBox.y + fitBox.height * 0.34 };
+  await page.mouse.move(foregroundTarget.x, foregroundTarget.y); await waitForFocus(page);
+  focusedBox = await original.boundingBox();
+  await page.mouse.move(foregroundTarget.x + 4, foregroundTarget.y + 6);
+  const movedFocusBox = await original.boundingBox();
+  const expectedForeground = { x: imageWidth * (0.24 + 4 / fitBox.width), y: imageHeight * (0.34 + 6 / fitBox.height) };
+  assert.ok(Math.abs(foregroundTarget.x + 4 - movedFocusBox.x - expectedForeground.x) < 0.1
+    && Math.abs(foregroundTarget.y + 6 - movedFocusBox.y - expectedForeground.y) < 0.1, 'FOCUS follows the fitted-image position while keeping the cursor as the zoom center');
+  await page.mouse.click(foregroundTarget.x + 4, foregroundTarget.y + 6);
   await waitForInferCount(page, 2);
+  const foregroundPoint = inferRequests[1].points[0];
+  assert.ok(foregroundPoint.positive && Math.abs(foregroundPoint.x - expectedForeground.x) <= 1.5 && Math.abs(foregroundPoint.y - expectedForeground.y) <= 1.5,
+    `point placement follows the moving cursor within browser click and pixel rounding: ${JSON.stringify({ foregroundPoint, expectedForeground })}`);
+  const afterPointFrame = await originalFrame.boundingBox();
+  assert.ok(Math.abs(afterPointFrame.height - focusedFrame.height) < 0.1, 'zoom and point placement preserve the frame height');
   await panel.locator('[data-interaction=exclude]').click();
+  assert.equal(await originalFrame.evaluate(node => node.classList.contains('original-focus-active')), false, 'leaving the image restores fit display');
   await overlay.scrollIntoViewIfNeeded();
   const negativePointBox = await overlay.boundingBox();
-  await page.mouse.click(negativePointBox.x + negativePointBox.width * 0.31, negativePointBox.y + negativePointBox.height * 0.48);
+  const backgroundTarget = { x: negativePointBox.x + negativePointBox.width * 0.31, y: negativePointBox.y + negativePointBox.height * 0.48 };
+  await page.mouse.move(backgroundTarget.x, backgroundTarget.y); await waitForFocus(page);
+  await page.mouse.click(backgroundTarget.x, backgroundTarget.y);
   await waitForInferCount(page, 3);
+  focusedBox = await original.boundingBox();
+  assert.ok(Math.abs(focusedBox.width - imageWidth) < 0.1 && Math.abs(focusedBox.height - imageHeight) < 0.1, 'background tool also displays the original at 100%');
+  const backgroundPoint = inferRequests[2].points[1];
+  assert.ok(!backgroundPoint.positive && Math.abs(backgroundPoint.x - 124) <= 1 && Math.abs(backgroundPoint.y - 144) <= 1, 'background points use original coordinates in FOCUS');
   await page.waitForFunction(() => document.querySelector('[data-sam3-request-status]')?.textContent === '候補を確認可能' && !document.querySelector('[data-sam3-action=commit]').disabled);
   assert.equal(inferRequests[2].mode, 'refine');
   assert.equal(inferRequests[2].candidateId, 'candidate-1');
   assert.deepEqual(inferRequests[2].points.map(({ positive }) => positive), [true, false]);
   await panel.locator('[data-interaction=candidate]').click();
+  assert.ok(Math.abs((await original.boundingBox()).width - overlayBox.width) < 0.1, 'candidate selection returns to fit display');
   const displayToggle = panel.locator('[data-sam3-display]');
   await displayToggle.uncheck();
   assert.equal(await overlay.evaluate(node => getComputedStyle(node).pointerEvents), 'none');

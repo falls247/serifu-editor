@@ -1,6 +1,7 @@
 import { assetFromEncoded, verifyMaskAsset } from './mask-codec.js';
 import { createSam3RequestNamespace, LatestSam3Request, Sam3ApiError } from './sam3-client.js';
 import { MAX_PROJECT_MASK_DECODED_BYTES } from './project-io.js';
+import { previewFocusPanForAnchor, previewFocusPointFromClient } from './preview-focus.js';
 
 const PALETTE = ['#c8ee91', '#ef4b91', '#74c8ef', '#ffc66d', '#ba9bff', '#54d7b0', '#ff8c6b', '#d2dc6a'];
 const EFFECTS = [['pixelate', 'ピクセレート'], ['blur', 'ぼかし'], ['fill-black', '黒塗り'], ['fill-white', '白塗り']];
@@ -114,12 +115,79 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     lastInput: null, lastGoodInput: null, error: null, connection: 'checking',
   };
   const root = panel, query = selector => root.querySelector(selector), signal = events.signal;
+  draft.focusEnabled ??= true;
+  const originalFrame = image.closest('.original-frame'), originalStage = image.parentElement;
+  const focusButton = image.closest('.original-pane').querySelector('[data-sam3-focus]');
+  let focusView = null, focusTimer = null;
   const candidateCanvas = element('canvas', 'sam3-mask-raster');
   const thresholdInput = query('[data-sam3-threshold]'), promptInput = query('[data-sam3-prompt]');
   let hoverId = null, thresholdTimer = null, disposed = false;
   const modelPathInput = query('[data-sam3-model-path]'), modelPathStatus = query('[data-sam3-model-path-status]');
   let savedModelPath = null, modelPathDirty = false, savingModelPath = false, healthSequence = 0;
   let modelPathNotice = '';
+
+  function resetFocus() {
+    clearTimeout(focusTimer); focusTimer = null;
+    if (!focusView) return;
+    focusView = null;
+    originalStage.style.removeProperty('transform');
+    originalFrame.classList.remove('original-focus-active');
+    drawOverlay();
+  }
+
+  function scheduleFocus(event) {
+    clearTimeout(focusTimer); focusTimer = null;
+    if (!draft.focusEnabled || draft.interaction === 'candidate' || event.pointerType === 'touch' || event.buttons) return;
+    if (focusView) { focusAtPointer(event); return; }
+    // Wait for the cursor to settle so entering across an edge does not choose the zoom anchor.
+    focusTimer = setTimeout(() => { focusTimer = null; focusAtPointer(event); }, 150);
+  }
+
+  function focusAtPointer(event) {
+    if (!draft.focusEnabled || draft.interaction === 'candidate' || event.pointerType === 'touch' || event.buttons) return;
+    const frameRect = originalFrame.getBoundingClientRect(), starting = !focusView;
+    // Map every move through the fitted image, never through the previous zoom transform.
+    const rect = focusView ? {
+      left: frameRect.left + focusView.offsetX, top: frameRect.top + focusView.offsetY,
+      width: focusView.fitWidth, height: focusView.fitHeight,
+    } : image.getBoundingClientRect();
+    if (!image.naturalWidth || !rect.width || !rect.height
+        || (starting && (event.clientX < rect.left || event.clientX >= rect.left + rect.width || event.clientY < rect.top || event.clientY >= rect.top + rect.height))) return;
+    const point = previewFocusPointFromClient({ x: event.clientX, y: event.clientY }, rect, { width: image.naturalWidth, height: image.naturalHeight });
+    point.x = Math.min(image.naturalWidth - 1, Math.max(0, point.x));
+    point.y = Math.min(image.naturalHeight - 1, Math.max(0, point.y));
+    const pan = previewFocusPanForAnchor({ x: event.clientX - rect.left, y: event.clientY - rect.top }, point, 100);
+    focusView ??= {
+      scaleX: image.naturalWidth / rect.width, scaleY: image.naturalHeight / rect.height,
+      fitWidth: rect.width, fitHeight: rect.height, offsetX: rect.left - frameRect.left, offsetY: rect.top - frameRect.top,
+    };
+    // Keep the source point corresponding to the cursor at the center of its zoom.
+    originalStage.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${focusView.scaleX}, ${focusView.scaleY})`;
+    originalFrame.classList.add('original-focus-active');
+    if (starting) drawOverlay();
+  }
+
+  function updateHelp() {
+    const help = draft.interaction === 'include' ? '元画像をクリックして前景点を追加。前景点を1つ以上置くと推論する。'
+      : draft.interaction === 'exclude' ? '元画像をクリックして背景点を追加。前景点も1つ以上必要。'
+      : '候補の輪郭をクリックして確認。Shift+クリックで候補を追加選択。';
+    const focusHelp = draft.focusEnabled && draft.interaction !== 'candidate'
+      ? ' FOCUS ON：カーソルを中心に100%表示し、マウスの動きに追従。画像から離すと全体表示へ戻る。' : '';
+    query('[data-sam3-help]').textContent = (draft.lastGoodInput && !inputMatchesLastGood()
+      ? '最新の入力に対応する検出結果がない。検出を実行してから確定する。' : help) + focusHelp;
+  }
+
+  focusButton.setAttribute('aria-pressed', String(draft.focusEnabled));
+  focusButton.addEventListener('click', () => {
+    draft.focusEnabled = !draft.focusEnabled;
+    focusButton.setAttribute('aria-pressed', String(draft.focusEnabled));
+    resetFocus(); updateHelp();
+  }, { signal });
+  originalFrame.addEventListener('pointerenter', scheduleFocus, { signal });
+  originalFrame.addEventListener('pointermove', scheduleFocus, { signal });
+  originalFrame.addEventListener('pointerleave', resetFocus, { signal });
+  originalFrame.addEventListener('pointercancel', resetFocus, { signal });
+  window.addEventListener('blur', resetFocus, { signal });
 
   function updateModelPathStatus() {
     const saveFailed = modelPathNotice.startsWith('保存に失敗');
@@ -202,9 +270,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     query('[data-sam3-threshold-value]').value = Number(draft.threshold).toFixed(2);
     query('[data-sam3-block-wrap]').hidden = draft.effect !== 'pixelate';
     query('[data-sam3-blur-wrap]').hidden = draft.effect !== 'blur';
-    query('[data-sam3-help]').textContent = draft.lastGoodInput && !inputMatchesLastGood()
-      ? '最新の入力に対応する検出結果がない。検出を実行してから確定する。'
-      : '候補選択でマスクを確認。前景・背景点は複数追加でき、入力ごとに最新結果を待つ。';
+    updateHelp();
     updateOverlayEvents();
   }
 
@@ -247,8 +313,10 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function drawOverlay() {
-    const rect = image.getBoundingClientRect(), width = Math.max(1, rect.width), height = Math.max(1, rect.height), dpr = Math.max(1, window.devicePixelRatio || 1);
-    const backingWidth = Math.max(1, Math.round(width * dpr)), backingHeight = Math.max(1, Math.round(height * dpr));
+    const rect = image.getBoundingClientRect(), width = Math.max(1, rect.width / (focusView?.scaleX || 1)), height = Math.max(1, rect.height / (focusView?.scaleY || 1));
+    // Bound the full-image overlay raster even when a large original is shown at 100%.
+    const dpr = Math.min(Math.max(1, window.devicePixelRatio || 1), focusView ? 4096 / Math.max(rect.width, rect.height, 1) : Infinity);
+    const backingWidth = Math.max(1, Math.round(rect.width * dpr)), backingHeight = Math.max(1, Math.round(rect.height * dpr));
     if (overlay.width !== backingWidth) overlay.width = backingWidth;
     if (overlay.height !== backingHeight) overlay.height = backingHeight;
     overlay.style.width = `${width}px`; overlay.style.height = `${height}px`;
@@ -343,9 +411,10 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function setInteraction(interaction) {
+    resetFocus();
     draft.interaction = interaction;
     for (const button of root.querySelectorAll('[data-interaction]')) button.setAttribute('aria-pressed', String(button.dataset.interaction === interaction));
-    query('[data-sam3-help]').textContent = interaction === 'candidate' ? '候補の輪郭をクリックして確認。Shift+クリックで候補を追加選択。' : interaction === 'include' ? '元画像をクリックして前景点を追加。前景点を1つ以上置くと推論する。' : '元画像をクリックして背景点を追加。前景点も1つ以上必要。';
+    updateHelp();
     updateOverlayEvents(); drawOverlay();
   }
 
@@ -544,10 +613,12 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     if (next !== hoverId) { hoverId = next; updateOverlayEvents(); drawOverlay(); }
   }, { signal });
   overlay.addEventListener('pointerleave', () => { hoverId = null; updateOverlayEvents(); drawOverlay(); }, { signal });
-  const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(drawOverlay) : null;
-  resizeObserver?.observe(image); window.addEventListener('resize', drawOverlay, { signal });
+  const resizeOverlay = () => { resetFocus(); drawOverlay(); };
+  const resizeObserver = typeof ResizeObserver === 'function' ? new ResizeObserver(resizeOverlay) : null;
+  resizeObserver?.observe(image); window.addEventListener('resize', resizeOverlay, { signal });
 
   function discard({ notify = true, preview = true } = {}) {
+    resetFocus();
     clearTimeout(thresholdTimer); requestState.cancel();
     draft.status = 'idle'; draft.mode = 'text'; draft.points = []; draft.candidates = [];
     draft.lastInput = null; draft.lastGoodInput = null; draft.imageId = null; draft.error = null; draft.warnings = []; hoverId = null;
@@ -556,11 +627,12 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
 
   function dispose() {
     if (disposed) return; disposed = true; clearTimeout(thresholdTimer); requestState.cancel(); page.sam3Draft = null;
+    resetFocus();
     overlay.style.pointerEvents = 'none'; overlay.getContext('2d')?.clearRect(0, 0, overlay.width, overlay.height);
     resizeObserver?.disconnect(); events.abort(); panel.replaceChildren();
   }
 
-  image.addEventListener('load',()=>{updateControls();drawOverlay();},{signal});
+  image.addEventListener('load',()=>{resetFocus();updateControls();drawOverlay();},{signal});
   render({preview:initialPreview}); void checkHealth();
   return { draft, discard, dispose, redraw: drawOverlay, checkHealth: () => checkHealth(true, true) };
 }

@@ -35,6 +35,7 @@
     "test:layer-order-browser": "node scripts/layer-order-smoke.mjs",
     "dev": "node scripts/dev.mjs",
     "test:sam3-browser": "node scripts/sam3-browser-smoke.mjs",
+    "test:sam3-focus": "node scripts/sam3-focus-smoke.mjs",
     "test:backend": "cd backend && uv run --locked pytest -m \"not gpu\" -q",
     "test:mask-storage": "node scripts/mask-storage-smoke.mjs",
     "test:mask-stress": "node scripts/mask-stress-smoke.mjs",

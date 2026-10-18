@@ -172,6 +172,9 @@ canvas.preview.cropping{cursor:crosshair}
 .original-frame{position:relative}
 .original-stage{position:relative;display:inline-block;max-width:100%;line-height:0;touch-action:none}
 .original-stage .original{max-width:100%}
+.original-toolbar [data-sam3-focus][aria-pressed=true]{background:#35422a;border-color:#93af6f;color:var(--lime)}
+.original-frame.original-focus-active .original-stage{transform-origin:0 0;will-change:transform}
+.original-frame.original-focus-active{outline:1px solid #93af6f;outline-offset:-1px}
 .sam3-overlay{position:absolute;inset:0;z-index:2;display:block;pointer-events:none;touch-action:none}
 .sam3-panel{display:grid;gap:10px;margin-top:14px;padding:12px;background:#171c23;border:1px solid #39414e;border-radius:9px;line-height:1.5}
 .sam3-panel[aria-busy=true]{border-color:#697c54}
