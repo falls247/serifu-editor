@@ -73,13 +73,19 @@ class JobManager:
         self._worker_task: asyncio.Task[None] | None = None
         self._maintenance_task: asyncio.Task[None] | None = None
         self._startup_load_task: asyncio.Task[None] | None = None
+        self._model_load_task: asyncio.Task[None] | None = None
         self._active: Job | None = None
         self._stopping = False
         self._last_inference_finished: float | None = None
+        self._last_model_ready: float | None = None
+        self.model_generation = uuid.uuid4().hex
+        self.load_count = 0
+        self.load_started: float | None = None
+        self.last_load_seconds: float | None = None
         self._updating_model_path = False
 
     async def set_model_path(self, value: str) -> Path:
-        if self._gpu_lock.locked() or self._active is not None or not self._pending.empty():
+        if self._gpu_lock.locked() or self._active is not None or not self._pending.empty() or self.model_loading:
             raise ApiException(
                 "MODEL_BUSY", "モデル読込・推論が終わってから保存を再試行。",
                 status=409, retryable=True,
@@ -105,6 +111,14 @@ class JobManager:
                     self.engine.status = "unloaded"
                     self.engine.load_error = None
                     self.engine.load_error_message = None
+                    self.model_generation = uuid.uuid4().hex
+                    self._last_model_ready = None
+                    self._last_inference_finished = None
+                    self.load_started = None
+                    self.last_load_seconds = None
+                    if hasattr(self.engine, "load_timings"):
+                        self.engine.load_timings = {}
+                    self._model_load_task = None
                     self.candidates.clear()
             finally:
                 self._updating_model_path = False
@@ -123,16 +137,56 @@ class JobManager:
 
     async def _load_startup_model(self) -> None:
         async with self._gpu_lock:
+            await self._ensure_model_ready_locked()
+
+    @property
+    def model_loading(self) -> bool:
+        return self._model_load_task is not None and not self._model_load_task.done()
+
+    @property
+    def load_elapsed_seconds(self) -> float | None:
+        if self.model_loading and self.load_started is not None:
+            return round(time.monotonic() - self.load_started, 3)
+        return None
+
+    async def _ensure_model_ready_locked(self) -> None:
+        """Caller owns _gpu_lock, including while a cancelled waiter drains the load."""
+        if self.engine.model_loaded:
+            if self._last_model_ready is None:
+                self._last_model_ready = time.monotonic()
+            return
+        if not self.model_loading:
+            self._model_load_task = asyncio.create_task(self._load_model(), name="sam3-model-load")
+        task = self._model_load_task
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # Cancelling an asyncio waiter cannot stop its native GPU thread.
+            # Keep the GPU lock until that thread has actually finished.
+            await asyncio.gather(task, return_exceptions=True)
+            raise
+
+    async def _load_model(self) -> None:
+        self.load_count += 1
+        self.load_started = time.monotonic()
+        try:
             await asyncio.to_thread(self.engine.load)
+            self._last_model_ready = time.monotonic()
+        finally:
+            self.last_load_seconds = round(time.monotonic() - self.load_started, 3)
+            logger.info("SAM3 model load %s finished in %.3fs", self.load_count, self.last_load_seconds)
+
+    def _idle_expired(self) -> bool:
+        times = [value for value in (self._last_model_ready, self._last_inference_finished) if value is not None]
+        return bool(times) and time.monotonic() - max(times) >= self.settings.model_idle_seconds
 
     def _observe_startup_load(self, task: asyncio.Task[None]) -> None:
         try:
             task.result()
+        except asyncio.CancelledError:
+            return
         except Exception as exc:
             logger.warning("SAM3 startup load failed (%s)", type(exc).__name__)
-        else:
-            if self.engine.model_loaded and self._last_inference_finished is None:
-                self._last_inference_finished = time.monotonic()
 
     async def stop(self) -> None:
         self._stopping = True
@@ -349,7 +403,7 @@ class JobManager:
             if not self.engine.model_loaded:
                 job.status = "loading"
                 try:
-                    await asyncio.to_thread(self.engine.load)
+                    await self._ensure_model_ready_locked()
                 except EngineError as exc:
                     self._fail(job, exc)
                     return
@@ -363,8 +417,6 @@ class JobManager:
                         ),
                     )
                     return
-                if self._last_inference_finished is None:
-                    self._last_inference_finished = time.monotonic()
             if job.status in self._terminal_states():
                 return
             job.status = "running"
@@ -500,11 +552,10 @@ class JobManager:
             self._prune_candidates()
             if (
                 self.engine.model_loaded
-                and self._last_inference_finished is not None
+                and not self.model_loading
                 and self._active is None
                 and self._pending.empty()
-                and time.monotonic() - self._last_inference_finished
-                >= self.settings.model_idle_seconds
+                and self._idle_expired()
             ):
                 try:
                     async with self._gpu_lock:
@@ -512,9 +563,8 @@ class JobManager:
                             self.engine.model_loaded
                             and self._active is None
                             and self._pending.empty()
-                            and self._last_inference_finished is not None
-                            and time.monotonic() - self._last_inference_finished
-                            >= self.settings.model_idle_seconds
+                            and not self.model_loading
+                            and self._idle_expired()
                         ):
                             await asyncio.to_thread(self.engine.unload)
                 except Exception as exc:

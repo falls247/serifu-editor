@@ -100,6 +100,11 @@ class HealthResponse(StrictModel):
     version: str
     modelPath: str
     error: HealthError | None = None
+    modelGeneration: str = ""
+    loadCount: int = 0
+    loadElapsedSeconds: float | None = None
+    lastLoadSeconds: float | None = None
+    loadTimings: dict[str, float] = Field(default_factory=dict)
 
 
 class ModelSettingsRequest(StrictModel):

@@ -26,6 +26,17 @@ function wait(ms, signal) {
   });
 }
 
+function withSignal(promise, signal) {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(abortError(signal));
+  return new Promise((resolve, reject) => {
+    const aborted = () => { cleanup(); reject(abortError(signal)); };
+    const cleanup = () => signal.removeEventListener('abort', aborted);
+    signal.addEventListener('abort', aborted, { once: true });
+    promise.then(value => { cleanup(); resolve(value); }, error => { cleanup(); reject(error); });
+  });
+}
+
 async function responseError(response, requestId = null) {
   let body = null;
   try { body = await response.json(); } catch {}
@@ -80,7 +91,8 @@ export function createSam3RequestNamespace(pageId, sessionId = globalThis.crypto
 }
 
 export class Sam3Client extends EventTarget {
-  constructor({ fetchImpl = globalThis.fetch?.bind(globalThis), baseUrl = API_ROOT, pollInterval = 500, maxWait = 10 * 60_000 } = {}) {
+  constructor({ fetchImpl = globalThis.fetch?.bind(globalThis), baseUrl = API_ROOT, pollInterval = 500, maxWait = 10 * 60_000,
+    healthPollInterval = 10_000, healthLoadingInterval = 1000, documentImpl = globalThis.document } = {}) {
     super();
     if (typeof fetchImpl !== 'function') throw new TypeError('fetch implementation is required');
     this.fetch = fetchImpl;
@@ -90,6 +102,53 @@ export class Sam3Client extends EventTarget {
     this.images = new Map();
     this.healthRequest = null;
     this.healthCheckedAt = 0;
+    this.modelState = null;
+    this.modelError = null;
+    this.healthRevision = 0;
+    this.modelSubscribers = new Set();
+    this.healthTimer = null;
+    this.healthFailures = 0;
+    this.healthPollInterval = healthPollInterval;
+    this.healthLoadingInterval = healthLoadingInterval;
+    this.document = documentImpl;
+    this.onVisibilityChange = () => {
+      clearTimeout(this.healthTimer); this.healthTimer = null;
+      if (!this.document?.hidden) void this.health({ force: true }).catch(() => {});
+    };
+  }
+
+  subscribeModelState(listener) {
+    this.modelSubscribers.add(listener);
+    if (this.modelSubscribers.size === 1) this.document?.addEventListener('visibilitychange', this.onVisibilityChange);
+    if (this.modelState || this.modelError) listener({ health: this.modelState, error: this.modelError });
+    void this.health().catch(() => {}).finally(() => this.scheduleHealth());
+    return () => {
+      this.modelSubscribers.delete(listener);
+      if (!this.modelSubscribers.size) {
+        clearTimeout(this.healthTimer); this.healthTimer = null;
+        this.document?.removeEventListener('visibilitychange', this.onVisibilityChange);
+      }
+    };
+  }
+
+  publishModelState(health, error = null) {
+    const changed = JSON.stringify(this.modelState) !== JSON.stringify(health)
+      || this.modelError?.message !== error?.message;
+    this.modelState = health; this.modelError = error;
+    if (changed) for (const listener of this.modelSubscribers) listener({ health, error });
+  }
+
+  scheduleHealth() {
+    clearTimeout(this.healthTimer); this.healthTimer = null;
+    if (!this.modelSubscribers.size || this.document?.hidden) return;
+    const interval = this.healthFailures
+      ? Math.min(30_000, this.healthLoadingInterval * 2 ** Math.min(this.healthFailures, 5))
+      : this.modelState?.status === 'loading' ? this.healthLoadingInterval : this.healthPollInterval;
+    this.healthTimer = setTimeout(() => {
+      this.healthTimer = null;
+      void this.health({ force: true }).catch(() => {});
+    }, interval);
+    this.healthTimer.unref?.();
   }
 
   async saveModelPath(modelPath) {
@@ -102,24 +161,50 @@ export class Sam3Client extends EventTarget {
     if (typeof data.modelPath !== 'string' || !data.modelPath.trim()) {
       throw new Sam3ApiError('モデルパスの保存応答が不正', { code: 'INVALID_RESPONSE' });
     }
-    this.healthRequest = null;
+    // A pre-save health response must never restore the previous model path.
+    // Let any request finish before starting the next one, preserving one in flight.
+    this.healthRevision++;
+    this.healthCheckedAt = 0;
+    this.modelState = null; this.modelError = null;
     this.dispatchEvent(new CustomEvent('model-path-saved', { detail: data.modelPath }));
+    if (this.modelSubscribers.size) void this.health({ force: true }).catch(() => {});
     return data;
   }
 
   async health({ force = false, signal } = {}) {
-    if (!force && this.healthRequest && Date.now() - this.healthCheckedAt < 3000) return this.healthRequest;
-    const pending = this.fetch(`${this.baseUrl}/health`, { signal, headers: { Accept: 'application/json' } })
-      .then(async response => {
-        if (!response.ok) throw await responseError(response);
-        const data = await response.json();
-        if (!['ready', 'loading', 'unloaded', 'error'].includes(data?.status)) throw new Sam3ApiError('SAM3 health response is invalid', { code: 'INVALID_RESPONSE' });
-        return data;
+    if (signal?.aborted) throw abortError(signal);
+    if (!force && this.modelState && !this.modelError && Date.now() - this.healthCheckedAt < 3000) return this.modelState;
+    if (!this.healthRequest) {
+      const revision = this.healthRevision, controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new Sam3ApiError('SAM3接続確認がタイムアウトした', { code: 'HEALTH_TIMEOUT', retryable: true })), 10_000);
+      const pending = Promise.resolve().then(async () => {
+        try {
+          const response = await this.fetch(`${this.baseUrl}/health`, { signal: controller.signal, headers: { Accept: 'application/json' } });
+          if (!response.ok) throw await responseError(response);
+          const data = await response.json();
+          if (!['ready', 'loading', 'unloaded', 'error'].includes(data?.status)) throw new Sam3ApiError('SAM3 health response is invalid', { code: 'INVALID_RESPONSE' });
+          if (revision === this.healthRevision) {
+            this.healthCheckedAt = Date.now(); this.healthFailures = 0;
+            this.publishModelState(data);
+          }
+          return { data, revision };
+        } catch (error) {
+          if (revision !== this.healthRevision) return { data: null, revision };
+          this.healthFailures++;
+          this.publishModelState(this.modelState, error);
+          throw error;
+        } finally {
+          clearTimeout(timeout);
+          this.healthRequest = null;
+          this.scheduleHealth();
+        }
       });
-    this.healthRequest = pending;
-    this.healthCheckedAt = Date.now();
-    try { return await pending; }
-    catch (error) { if (this.healthRequest === pending) this.healthRequest = null; throw error; }
+      this.healthRequest = pending;
+    }
+    // A page may stop waiting without aborting other pages' shared health request.
+    const result = await withSignal(this.healthRequest, signal);
+    if (result.revision !== this.healthRevision) return this.health({ force: true, signal });
+    return result.data;
   }
 
   async ensureImage(pageId, blob, width, height, { signal, force = false } = {}) {
@@ -147,6 +232,12 @@ export class Sam3Client extends EventTarget {
   async infer(input, { signal, onState = () => {} } = {}) {
     const { pageId, blob, width, height, requestId, mode, prompt, threshold, points = [], candidateId } = input;
     let expiredRetry = false;
+    let previousStatus = null;
+    const reportState = status => {
+      onState(status);
+      if (status !== previousStatus && this.modelSubscribers.size) void this.health({ force: true }).catch(() => {});
+      previousStatus = status;
+    };
     while (true) {
       if (signal?.aborted) throw abortError(signal);
       let jobId = null;
@@ -164,7 +255,7 @@ export class Sam3Client extends EventTarget {
         if (typeof job.jobId !== 'string') throw new Sam3ApiError('推論ジョブの応答が不正', { code: 'INVALID_RESPONSE', requestId });
         jobId = job.jobId;
         if (job.requestId && job.requestId !== requestId) throw new Sam3ApiError('推論要求IDが一致しない', { code: 'STALE_RESPONSE', requestId });
-        onState(job.status || 'queued');
+        reportState(job.status || 'queued');
         const startedAt = Date.now();
         while (true) {
           if (signal?.aborted) throw abortError(signal);
@@ -174,7 +265,7 @@ export class Sam3Client extends EventTarget {
           if (!resultResponse.ok) throw await responseError(resultResponse, requestId);
           const result = await resultResponse.json();
           if (result.requestId && result.requestId !== requestId) throw new Sam3ApiError('推論結果の要求IDが一致しない', { code: 'STALE_RESPONSE', requestId });
-          onState(result.status);
+          reportState(result.status);
           if (result.status === 'ready') return result;
           if (['failed', 'cancelled', 'superseded'].includes(result.status)) {
             const detail = result.error?.error ?? result.error;

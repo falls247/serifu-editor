@@ -63,9 +63,10 @@
         <button type="button" data-page-filter="done" aria-pressed="false">確認済みのみ</button>
       </div>
       <p id="thumbnailFilterCount" class="thumbnail-filter-count" aria-live="polite"></p>
+      <p id="thumbnailSelectionCount" class="thumbnail-selection-count" aria-live="polite" hidden></p>
       <div id="thumbnailList" class="thumbnail-list"></div>
       <p id="thumbnailFilterEmpty" class="thumbnail-filter-empty" hidden>条件に合うページがない</p>
-      <p class="thumbnail-hint">画像ファイルをここにドロップして追加<br>ドラッグで順序変更 · Alt + ↑↓でも移動</p>
+      <p class="thumbnail-hint">画像ファイルをここにドロップして追加<br>Shiftで範囲選択 · Ctrl／⌘で追加・解除<br>Deleteで選択画像を一覧から外す<br>ドラッグで順序変更 · Alt + ↑↓でも移動</p>
       <div id="thumbnailResize" class="thumbnail-resize" role="separator" tabindex="0" aria-label="ページ一覧の幅" aria-orientation="vertical" aria-controls="thumbnailSidebar" title="ドラッグまたは←→で幅変更。ダブルクリックで初期幅に戻す"></div>
     </aside>
   <main>
@@ -162,6 +163,15 @@
       </div>
     </article>
   </template>
+  <dialog id="removePagesDialog" class="remove-pages-dialog" aria-labelledby="removePagesTitle" aria-describedby="removePagesSummary removePagesNote">
+    <form method="dialog">
+      <h2 id="removePagesTitle">選択画像を一覧から外す</h2>
+      <p id="removePagesSummary"></p>
+      <ul id="removePagesNames" class="remove-pages-names"></ul>
+      <p id="removePagesNote">元ファイルは残る。対象画像の未保存の編集は失われ、この操作はUndoで戻せない。</p>
+      <div class="remove-pages-actions"><button value="no" autofocus>いいえ</button><button value="yes" class="danger">はい</button></div>
+    </form>
+  </dialog>
   <dialog id="fullPreview" class="full-preview" aria-labelledby="fullPreviewTitle">
     <header class="full-preview-header"><div><span class="preview-label">IMAGE PREVIEW</span><h2 id="fullPreviewTitle"></h2><span id="fullPreviewSize"></span></div><button id="fullPreviewClose" autofocus>閉じる</button></header>
     <div class="full-preview-tools"><button id="fullPreviewZoomOut" aria-label="縮小">−</button><label for="fullPreviewZoom">表示倍率</label><input id="fullPreviewZoom" type="range" min="10" max="200" step="10" value="100"><button id="fullPreviewZoomIn" aria-label="拡大">＋</button><output id="fullPreviewZoomValue" for="fullPreviewZoom">100%</output><button id="fullPreviewActual">100%</button></div>

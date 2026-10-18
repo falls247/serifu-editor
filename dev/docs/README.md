@@ -10,6 +10,7 @@
 
 | 文書 | 用途 |
 |---|---|
+| [SAM3再読み込みのSOW](SOW_20261018_sam3_reload_lifecycle.md) | 取消後の再解放防止・画像間の共有監視・ロード計測の実装。CPU待機は未採用 |
 | [JSのsrc移行SOW](sow/SOW_20261011_src_reorganization.md) | 22件の移動・パス整合性・Worker/書体・互換性の受入条件 |
 | [引継書](HANDOFF.md) | 現在地、ローカル起動、コード構成、変更時の確認先、検証、編集データの移行 |
 | [一括処理の実装後報告](bulk-performance-report.md) | Worker・進捗・高速形式の検証と性能比較 |

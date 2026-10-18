@@ -61,6 +61,7 @@ class Sam3Engine:
         self.load_error: str | None = None
         self.load_error_message: str | None = None
         self.last_inference_finished: float | None = None
+        self.load_timings: dict[str, float] = {}
         self._model: Any = None
         self._processor: Any = None
         self._torch: Any = None
@@ -78,6 +79,8 @@ class Sam3Engine:
             if self.model_loaded:
                 return
             self.status = "loading"
+            self.load_timings = {}
+            stage_started = time.monotonic()
             self.load_error = None
             self.load_error_message = None
             if not self.settings.model_path.is_file():
@@ -110,6 +113,7 @@ class Sam3Engine:
                     "SAM3 dependencies are unavailable. Run `uv sync --locked --extra gpu`.",
                 ) from None
 
+            self.load_timings = {"dependenciesSeconds": round(time.monotonic() - stage_started, 3)}
             self._torch = torch
             self.gpu_available = bool(torch.cuda.is_available())
             if not self.gpu_available:
@@ -210,6 +214,7 @@ class Sam3Engine:
                     return state
 
             try:
+                stage_started = time.monotonic()
                 model = build_sam3_image_model(
                     checkpoint_path=str(self.settings.model_path),
                     load_from_HF=False,
@@ -217,6 +222,8 @@ class Sam3Engine:
                     device="cuda",
                     eval_mode=True,
                 )
+                self.load_timings = {**self.load_timings, "builderSeconds": round(time.monotonic() - stage_started, 3)}
+                stage_started = time.monotonic()
                 model.eval()
                 processor = BoundedSam3Processor(
                     model,
@@ -225,6 +232,7 @@ class Sam3Engine:
                     confidence_threshold=0.5,
                 )
                 processor.output_limits = limits
+                self.load_timings = {**self.load_timings, "processorSeconds": round(time.monotonic() - stage_started, 3)}
             except Exception as exc:
                 self.status = "error"
                 self.load_error = "MODEL_LOAD_FAILED"
