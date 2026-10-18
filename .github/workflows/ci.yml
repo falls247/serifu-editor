@@ -6,10 +6,14 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22
       - run: npm run check
+        env:
+          DOCUMENTATION_BASE: ${{ github.event.pull_request.base.sha || github.event.before || 'HEAD^' }}
       - run: npm test
       - run: npm run fonts
       - run: npm run build

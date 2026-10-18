@@ -35,6 +35,16 @@ try {
   for (const kind of ['dialogue', 'sfx', 'balloon', 'caption']) {
     const card = row.locator(`[data-kind=${kind}]`), menu = card.locator('[data-preset-select]');
     if (!await card.evaluate(c => c.classList.contains('selected'))) await card.locator('.layer-summary').click();
+    const text = card.locator('textarea[data-field=text]'), originalText = await text.inputValue();
+    const undoDisabled = await row.locator('[data-action=undo]').isDisabled();
+    await shortcut('Enter');
+    assert.equal(await text.evaluate(input => document.activeElement === input), true, `${kind}: Enter opens the selected object's text input`);
+    assert.deepEqual(await text.evaluate(input => [input.selectionStart, input.selectionEnd]), [originalText.length, originalText.length], 'caret starts at the end without selecting existing text');
+    assert.equal(await text.inputValue(), originalText, 'entering input mode preserves existing text');
+    assert.equal(await row.locator('[data-action=undo]').isDisabled(), undoDisabled, 'entering input mode adds no undo checkpoint');
+    await page.keyboard.type('追記'); await page.keyboard.press('Enter'); await page.keyboard.type('次行');
+    assert.equal(await text.inputValue(), `${originalText}追記\n次行`, `${kind}: typing appends and Enter inside the input inserts a newline`);
+    await text.fill(originalText);
     const presets = fixture.preferences.presets.filter(preset => preset.kind === kind), originalXY = await xy();
     const others = row.locator('.layer-card:not(.selected) [data-preset-select]');
     const otherPresets = await others.evaluateAll(menus => menus.map(menu => menu.value));
@@ -158,6 +168,29 @@ try {
       }
     }
   }
+  await row.locator('[data-kind=balloon] .layer-summary').click();
+  await row.locator('[data-kind=caption] .layer-summary').click({ modifiers: ['Shift'] });
+  assert.equal(await row.locator('.layer-card.multi-selected').count(), 2);
+  await shortcut('Enter');
+  assert.equal(await row.locator('[data-kind=caption] textarea').evaluate(input => document.activeElement === input), true, 'multiple selection edits the primary object');
+  assert.equal(await row.locator('.layer-card.multi-selected').count(), 2, 'entering input mode preserves multiple selection');
+  await row.locator('[data-action=preview-focus]').click();
+  await shortcut('Enter');
+  assert.equal(await row.locator('[data-kind=caption] textarea').evaluate(input => document.activeElement === input), true, 'Enter also works with live preview FOCUS enabled');
+  await row.locator('[data-action=preview-focus]').click();
+  for (const options of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }, { shiftKey: true }, { repeat: true }, { isComposing: true }, { keyCode: 229 }]) {
+    await canvas.focus();
+    assert.equal(await canvas.evaluate((el, options) => {
+      const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...options });
+      el.dispatchEvent(event); return event.defaultPrevented;
+    }, options), false, 'modified, repeating or IME Enter does not activate text input');
+    assert.equal(await canvas.evaluate(el => document.activeElement === el), true);
+  }
+  const actionButton = row.locator('[data-action=save-image]');
+  assert.equal(await actionButton.evaluate(el => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    el.dispatchEvent(event); return event.defaultPrevented;
+  }), false, 'Enter outside the live canvas keeps native behavior');
   const balloon = row.locator('[data-kind=balloon]'); await balloon.locator('.layer-summary').click();
   const menu = balloon.locator('[data-preset-select]');
   const state = async () => [await menu.inputValue(), await field('shape').inputValue(), await field('lineAlign').inputValue(), ...await xy()];
@@ -194,15 +227,18 @@ try {
   }
   assert.deepEqual(await state(), before, 'IME composition is ignored');
   await row.locator('[data-action=preview-full]').click(); await page.locator('#fullPreviewCanvas').waitFor({ state: 'visible' });
-  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
+  await page.locator('#fullPreviewViewport').focus();
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
   assert.deepEqual(await state(), before, 'preview modal blocks editing shortcuts');
   await page.locator('#fullPreviewClose').click();
   await row.locator('[data-action=crop-image]').click();
-  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await shortcut(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await shortcut(key);
+  assert.equal(await canvas.evaluate(el => document.activeElement === el), true, 'crop mode does not open text input');
   assert.deepEqual(await state(), before, 'crop mode blocks style shortcuts'); await page.keyboard.press('Escape');
   const empty = page.locator('.image-row').nth(1);
   await page.locator('#jump').selectOption(await empty.getAttribute('data-page-id')); await empty.locator('canvas.preview').focus();
-  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
+  assert.equal(await empty.locator('canvas.preview').evaluate(el => document.activeElement === el), true, 'Enter with no selected object does nothing');
   assert.equal(await empty.locator('.layer-card').count(), 0, 'no selection is a no-op');
   await empty.locator('[data-action=add-balloon]').click();
   const emptyCanvas = empty.locator('canvas.preview'), emptyShape = empty.locator('.position-controls [data-field=shape]');
@@ -223,5 +259,5 @@ try {
     assert.equal(await emptyShape.inputValue(), shape, `${key} works immediately after clicking the balloon in the preview`);
   }
   assert.deepEqual(errors, []);
-  console.log('F/B presets, C/U text alignment, C/R/V/M direct balloon shapes after card/preview clicks, E shape cycling, preserved settings, undo/redo, no-op repeats, input/IME/modifier/modal/crop guards and Ctrl+C passed');
+  console.log('Enter text input for all object kinds, multiple selection, live FOCUS, typing/newlines, F/B presets, C/U alignment, C/R/V/M and E balloon shapes, undo/redo, input/IME/modifier/modal/crop guards and Ctrl+C passed');
 } finally { await browser?.close(); server.kill(); }
