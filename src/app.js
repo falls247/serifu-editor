@@ -2306,19 +2306,14 @@ window.addEventListener('keydown', event => {
     if(!input||input.disabled)return;
     event.preventDefault();input.focus();input.setSelectionRange(input.value.length,input.value.length);return;
   }
-  if (!command && !event.altKey && ['c','r','v','m'].includes(key) && selected(p)?.kind==='balloon') {
-    const layer=selected(p),shape={c:'ellipse',r:'distorted-rect',v:'spiky',m:'polygon'}[key];
+  if (!command && !event.altKey && ['e','r','v','m'].includes(key) && selected(p)?.kind==='balloon') {
+    const layer=selected(p),shape={e:'ellipse',r:'distorted-rect',v:'spiky',m:'polygon'}[key];
     event.preventDefault();
     if(layer.shape===shape)return;
     edit(p,()=>{layer.shape=shape;layer.presetId=null;},false);refreshPresetMenus();return;
   }
-  if (!command && !event.altKey && ['f','b','c','u','e'].includes(key)) {
+  if (!command && !event.altKey && ['f','b','c','u'].includes(key)) {
     const layer=selected(p);if(!layer)return;
-    if(key==='e'){
-      if(layer.kind!=='balloon')return;
-      const shapes=Object.keys(BALLOON_SHAPES),shape=shapes[(shapes.indexOf(layer.shape)+1)%shapes.length];
-      event.preventDefault();edit(p,()=>{layer.shape=shape;layer.presetId=null;},false);refreshPresetMenus();return;
-    }
     if(key==='c'||key==='u'){event.preventDefault();alignLayerText(p,layer,key==='c'?'center':'top');return;}
     const presets=preferences.presets.filter(preset=>preset.kind===layer.kind);if(!presets.length)return;
     const index=presets.findIndex(preset=>preset.id===layer.presetId),step=key==='f'?1:-1;
