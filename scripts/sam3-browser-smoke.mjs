@@ -252,11 +252,15 @@ try {
   await page.mouse.move(foregroundTarget.x, foregroundTarget.y); await waitForFocus(page);
   focusedBox = await original.boundingBox();
   await page.mouse.move(foregroundTarget.x + 4, foregroundTarget.y + 6);
-  assert.deepEqual(await original.boundingBox(), focusedBox, 'moving within FOCUS holds the image still for fine point placement');
+  const movedFocusBox = await original.boundingBox();
+  const expectedForeground = { x: imageWidth * (0.24 + 4 / fitBox.width), y: imageHeight * (0.34 + 6 / fitBox.height) };
+  assert.ok(Math.abs(foregroundTarget.x + 4 - movedFocusBox.x - expectedForeground.x) < 0.1
+    && Math.abs(foregroundTarget.y + 6 - movedFocusBox.y - expectedForeground.y) < 0.1, 'FOCUS follows the fitted-image position while keeping the cursor as the zoom center');
   await page.mouse.click(foregroundTarget.x + 4, foregroundTarget.y + 6);
   await waitForInferCount(page, 2);
   const foregroundPoint = inferRequests[1].points[0];
-  assert.ok(foregroundPoint.positive && Math.abs(foregroundPoint.x - 100) <= 1 && Math.abs(foregroundPoint.y - 108) <= 1, 'fine placement maps screen pixels to original pixels within click rounding');
+  assert.ok(foregroundPoint.positive && Math.abs(foregroundPoint.x - expectedForeground.x) <= 1.5 && Math.abs(foregroundPoint.y - expectedForeground.y) <= 1.5,
+    `point placement follows the moving cursor within browser click and pixel rounding: ${JSON.stringify({ foregroundPoint, expectedForeground })}`);
   const afterPointFrame = await originalFrame.boundingBox();
   assert.ok(Math.abs(afterPointFrame.height - focusedFrame.height) < 0.1, 'zoom and point placement preserve the frame height');
   await panel.locator('[data-interaction=exclude]').click();

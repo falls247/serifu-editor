@@ -137,23 +137,34 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
 
   function scheduleFocus(event) {
     clearTimeout(focusTimer); focusTimer = null;
-    if (focusView || !draft.focusEnabled || draft.interaction === 'candidate' || event.pointerType === 'touch' || event.buttons) return;
+    if (!draft.focusEnabled || draft.interaction === 'candidate' || event.pointerType === 'touch' || event.buttons) return;
+    if (focusView) { focusAtPointer(event); return; }
     // Wait for the cursor to settle so entering across an edge does not choose the zoom anchor.
     focusTimer = setTimeout(() => { focusTimer = null; focusAtPointer(event); }, 150);
   }
 
   function focusAtPointer(event) {
-    if (!draft.focusEnabled || draft.interaction === 'candidate' || focusView || event.pointerType === 'touch' || event.buttons) return;
-    const rect = image.getBoundingClientRect();
+    if (!draft.focusEnabled || draft.interaction === 'candidate' || event.pointerType === 'touch' || event.buttons) return;
+    const frameRect = originalFrame.getBoundingClientRect(), starting = !focusView;
+    // Map every move through the fitted image, never through the previous zoom transform.
+    const rect = focusView ? {
+      left: frameRect.left + focusView.offsetX, top: frameRect.top + focusView.offsetY,
+      width: focusView.fitWidth, height: focusView.fitHeight,
+    } : image.getBoundingClientRect();
     if (!image.naturalWidth || !rect.width || !rect.height
-        || event.clientX < rect.left || event.clientX >= rect.right || event.clientY < rect.top || event.clientY >= rect.bottom) return;
+        || (starting && (event.clientX < rect.left || event.clientX >= rect.left + rect.width || event.clientY < rect.top || event.clientY >= rect.top + rect.height))) return;
     const point = previewFocusPointFromClient({ x: event.clientX, y: event.clientY }, rect, { width: image.naturalWidth, height: image.naturalHeight });
+    point.x = Math.min(image.naturalWidth - 1, Math.max(0, point.x));
+    point.y = Math.min(image.naturalHeight - 1, Math.max(0, point.y));
     const pan = previewFocusPanForAnchor({ x: event.clientX - rect.left, y: event.clientY - rect.top }, point, 100);
-    focusView = { scaleX: image.naturalWidth / rect.width, scaleY: image.naturalHeight / rect.height };
-    // Keep the source pixel under the cursor, then hold the image still for precise placement.
+    focusView ??= {
+      scaleX: image.naturalWidth / rect.width, scaleY: image.naturalHeight / rect.height,
+      fitWidth: rect.width, fitHeight: rect.height, offsetX: rect.left - frameRect.left, offsetY: rect.top - frameRect.top,
+    };
+    // Keep the source point corresponding to the cursor at the center of its zoom.
     originalStage.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${focusView.scaleX}, ${focusView.scaleY})`;
     originalFrame.classList.add('original-focus-active');
-    drawOverlay();
+    if (starting) drawOverlay();
   }
 
   function updateHelp() {
@@ -161,7 +172,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
       : draft.interaction === 'exclude' ? '元画像をクリックして背景点を追加。前景点も1つ以上必要。'
       : '候補の輪郭をクリックして確認。Shift+クリックで候補を追加選択。';
     const focusHelp = draft.focusEnabled && draft.interaction !== 'candidate'
-      ? ' FOCUS ON：カーソル位置を基準に100%表示。画像から離すと全体表示へ戻る。' : '';
+      ? ' FOCUS ON：カーソルを中心に100%表示し、マウスの動きに追従。画像から離すと全体表示へ戻る。' : '';
     query('[data-sam3-help]').textContent = (draft.lastGoodInput && !inputMatchesLastGood()
       ? '最新の入力に対応する検出結果がない。検出を実行してから確定する。' : help) + focusHelp;
   }

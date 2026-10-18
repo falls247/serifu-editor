@@ -76,13 +76,29 @@ try {
         near(focused.overlay.width, focused.image.width, 'overlay width'); near(focused.overlay.height, focused.image.height, 'overlay height');
         assert.ok(Math.max(...focused.raster) <= 4096, 'large source overlays have bounded raster dimensions');
         const delta = fraction > 0.5 ? -3 : 3;
-        await page.mouse.move(target.x + delta, target.y + delta);
-        assert.deepEqual((await geometry(row)).image, focused.image, 'fine cursor movement keeps the image fixed');
+        await row.locator('.sam3-overlay').evaluate(canvas => {
+          const ctx = canvas.getContext('2d'), clear = ctx.clearRect;
+          canvas.focusMoveRedraws = 0;
+          ctx.clearRect = function (...args) { canvas.focusMoveRedraws++; return clear.apply(this, args); };
+        });
+        await page.mouse.move(target.x + delta, target.y + delta, { steps: 4 });
+        const moved = await geometry(row);
+        const expectedPoint = {
+          x: Math.min(record.imageWidth - 1, Math.max(0, record.imageWidth * (fraction + delta / before.image.width))),
+          y: Math.min(record.imageHeight - 1, Math.max(0, record.imageHeight * (fraction + delta / before.image.height))),
+        };
+        near(target.x + delta - moved.image.x, expectedPoint.x, 'moving cursor source X');
+        near(target.y + delta - moved.image.y, expectedPoint.y, 'moving cursor source Y');
+        near(moved.image.width, record.imageWidth, 'moving FOCUS maintains 100% width');
+        near(moved.image.height, record.imageHeight, 'moving FOCUS maintains 100% height');
+        near(moved.overlay.x, moved.image.x, 'moving overlay X'); near(moved.overlay.y, moved.image.y, 'moving overlay Y');
+        assert.equal(await row.locator('.sam3-overlay').evaluate(canvas => canvas.focusMoveRedraws), 0, 'following the cursor reuses the overlay raster');
         await page.mouse.click(target.x + delta, target.y + delta);
         const text = await row.locator('.sam3-point-chip').last().innerText(), match = text.match(/−\s*(\d+),\s*(\d+)/);
         assert.ok(match, `background point chip: ${text}`);
-        near(Number(match[1]), record.imageWidth * fraction + delta, 'source point X', 1);
-        near(Number(match[2]), record.imageHeight * fraction + delta, 'source point Y', 1);
+        // Browser click coordinates and stored source points each round to integer pixels.
+        near(Number(match[1]), expectedPoint.x, 'source point X', 1.5);
+        near(Number(match[2]), expectedPoint.y, 'source point Y', 1.5);
         if (index === 0 && fraction === 0.5) await page.screenshot({ path: `artifacts/sam3-focus-${width}.png` });
         await leaveImage(page);
         const restored = await geometry(row);
