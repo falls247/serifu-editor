@@ -677,7 +677,7 @@ function updateFontSizeButtons(p) {
   for(const action of ['remember-font-size','apply-font-size']){
     const button=p.row.querySelector(`[data-action=${action}]`);if(!button)continue;
     button.disabled=busy||!layer||autoFit;
-    button.title=autoFit?'文字サイズの自動調整をOFFにすると使える':action==='apply-font-size'?`記憶した${preferences.fontSizePreset}pxを反映`:'現在の文字サイズを記憶';
+    button.title=autoFit?'文字サイズの自動調整をOFFにすると使える':action==='apply-font-size'?`記憶した${preferences.fontSizePreset}pxを反映（S）`:'現在の文字サイズを記憶';
   }
 }
 
@@ -2080,9 +2080,7 @@ $('deck').addEventListener('click', async event => {
     preferences.fontSizePreset=Math.round(l.size);const remembered=persistPreferences();dirty();updateGlobal();
     if(remembered)status(`文字サイズ ${preferences.fontSizePreset}pxを記憶した。`);
   } else if(action==='apply-font-size'&&l){
-    if(busy||l.kind==='caption'&&l.autoFit)return;
-    if(l.size!==preferences.fontSizePreset)edit(p,()=>{l.size=preferences.fontSizePreset;l.presetId=null;},false);
-    refreshPresetMenus(p);status(`文字サイズ ${preferences.fontSizePreset}pxを反映した。`);
+    applyFontSizePreset(p,l);
   } else if (action === 'save-preset' && l) {
     saveSelectedPreset();
   } else if (action === 'delete-preset' && l) {
@@ -2358,6 +2356,10 @@ window.addEventListener('keydown', event => {
     event.preventDefault();
     if(layer.shape===shape)return;
     edit(p,()=>{layer.shape=shape;layer.presetId=null;},false);refreshPresetMenus();return;
+  }
+  if (!command && !event.altKey && key==='s') {
+    if(applyFontSizePreset(p,selected(p)))event.preventDefault();
+    return;
   }
   if (!command && !event.altKey && ['f','b','c','u'].includes(key)) {
     const layer=selected(p);if(!layer)return;
@@ -2834,6 +2836,12 @@ function alignLayerText(p,layer,alignment) {
   }
   if(Object.entries(changes).every(([field,value])=>layer[field]===value))return;
   edit(p,()=>Object.assign(layer,changes,{presetId:null}),false);refreshPresetMenus();
+}
+function applyFontSizePreset(p,layer) {
+  if(!layer||busy||editLocked()||layer.kind==='caption'&&layer.autoFit)return false;
+  if(layer.size!==preferences.fontSizePreset)edit(p,()=>{layer.size=preferences.fontSizePreset;layer.presetId=null;},false);
+  refreshPresetMenus(p);status(`文字サイズ ${preferences.fontSizePreset}pxを反映した。`);
+  return true;
 }
 function applyLayerPreset(p,layer,preset) {
   edit(p,()=>applyPreset(layer,preset,p.img.width,p.img.height),false);

@@ -160,6 +160,12 @@ try {
   await row.locator('[data-kind=balloon] .layer-summary').click();
   await row.locator('[data-kind=caption] .layer-summary').click({ modifiers: ['Shift'] });
   assert.equal(await row.locator('.layer-card.multi-selected').count(), 2);
+  await field('autoFit').uncheck();
+  const originalSize = await field('size').inputValue();
+  await shortcut('s');
+  assert.equal(await field('size').inputValue(), '70', 'S applies the size to the primary object in multiple selection');
+  assert.equal(await row.locator('.layer-card.multi-selected').count(), 2, 'S preserves multiple selection');
+  await shortcut('Control+z'); assert.equal(await field('size').inputValue(), originalSize);
   await shortcut('Enter');
   assert.equal(await row.locator('[data-kind=caption] textarea').evaluate(input => document.activeElement === input), true, 'multiple selection edits the primary object');
   assert.equal(await row.locator('.layer-card.multi-selected').count(), 2, 'entering input mode preserves multiple selection');
@@ -182,24 +188,24 @@ try {
   }), false, 'Enter outside the live canvas keeps native behavior');
   const balloon = row.locator('[data-kind=balloon]'); await balloon.locator('.layer-summary').click();
   const menu = balloon.locator('[data-preset-select]');
-  const state = async () => [await menu.inputValue(), await field('shape').inputValue(), await field('lineAlign').inputValue(), ...await xy()];
+  const state = async () => [await menu.inputValue(), await field('shape').inputValue(), await field('lineAlign').inputValue(), await field('size').inputValue(), ...await xy()];
   const before = await state();
   for (const target of [balloon.locator('textarea'), field('x'), menu]) {
     await target.focus();
-    for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) {
+    for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) {
       assert.equal(await target.evaluate((el, key) => {
         const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); el.dispatchEvent(event); return event.defaultPrevented;
       }, key), false, 'editable controls keep their keyboard behavior');
     }
     assert.deepEqual(await state(), before);
   }
-  await balloon.locator('textarea').focus(); await page.keyboard.type('fbc uervm');
-  assert.match(await balloon.locator('textarea').inputValue(), /fbc uervm/); assert.deepEqual(await state(), before);
+  await balloon.locator('textarea').focus(); await page.keyboard.type('fbc uervms');
+  assert.match(await balloon.locator('textarea').inputValue(), /fbc uervms/); assert.deepEqual(await state(), before);
   await canvas.focus();
   for (const key of ['Control+f', 'Control+b', 'Control+u', 'Meta+f', 'Alt+b', 'Control+e', 'Meta+e', 'Alt+e']) {
     await page.keyboard.press(key); assert.deepEqual(await state(), before, 'modified shortcuts do not change style');
   }
-  for (const key of ['c', 'e', 'r', 'v', 'm']) {
+  for (const key of ['c', 'e', 'r', 'v', 'm', 's']) {
     for (const modifier of ['ctrlKey', 'metaKey', 'altKey']) {
       if (modifier !== 'altKey' && ['c', 'v'].includes(key)) continue;
       assert.equal(await canvas.evaluate((el, { key, modifier }) => {
@@ -211,22 +217,22 @@ try {
   }
   await page.keyboard.press('Control+c'); assert.deepEqual(await state(), before);
   assert.match(await page.locator('#status').textContent(), /コピーした/, 'Ctrl+C still copies objects');
-  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) {
+  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) {
     await canvas.evaluate((el, key) => el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, isComposing: true })), key);
   }
   assert.deepEqual(await state(), before, 'IME composition is ignored');
   await row.locator('[data-action=preview-full]').click(); await page.locator('#fullPreviewCanvas').waitFor({ state: 'visible' });
   await page.locator('#fullPreviewViewport').focus();
-  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) await page.keyboard.press(key);
   assert.deepEqual(await state(), before, 'preview modal blocks editing shortcuts');
   await page.locator('#fullPreviewClose').click();
   await row.locator('[data-action=crop-image]').click();
-  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await shortcut(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) await shortcut(key);
   assert.equal(await canvas.evaluate(el => document.activeElement === el), true, 'crop mode does not open text input');
   assert.deepEqual(await state(), before, 'crop mode blocks style shortcuts'); await page.keyboard.press('Escape');
   const empty = page.locator('.image-row').nth(1);
   await page.locator('#jump').selectOption(await empty.getAttribute('data-page-id')); await empty.locator('canvas.preview').focus();
-  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm']) await page.keyboard.press(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) await page.keyboard.press(key);
   assert.equal(await empty.locator('canvas.preview').evaluate(el => document.activeElement === el), true, 'Enter with no selected object does nothing');
   assert.equal(await empty.locator('.layer-card').count(), 0, 'no selection is a no-op');
   await empty.locator('[data-action=add-balloon]').click();
@@ -248,5 +254,5 @@ try {
     assert.equal(await emptyShape.inputValue(), shape, `${key} works immediately after clicking the balloon in the preview`);
   }
   assert.deepEqual(errors, []);
-  console.log('Enter text input for all object kinds, multiple selection, live FOCUS, typing/newlines, F/B presets, C/U alignment, E/R/V/M balloon shapes, undo/redo, input/IME/modifier/modal/crop guards and Ctrl+C passed');
+  console.log('Enter text input, S font size, multiple selection, live FOCUS, typing/newlines, F/B presets, C/U alignment, E/R/V/M shapes, undo/redo, input/IME/modifier/modal/crop guards and Ctrl+C passed');
 } finally { await browser?.close(); server.kill(); }

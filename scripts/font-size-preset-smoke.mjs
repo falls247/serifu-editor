@@ -23,6 +23,7 @@ try {
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===3&&!document.querySelector('#projectLoad').disabled);
   const rows=page.locator('.image-row'),source=rows.nth(0),target=rows.nth(1),empty=rows.nth(2);
   const field=(row,name)=>row.locator(`.position-controls [data-field=${name}]`),remember=row=>row.locator('[data-action=remember-font-size]'),apply=row=>row.locator('[data-action=apply-font-size]');
+  const shortcut=async(row,key='s')=>{await row.locator('canvas.preview').focus();await page.keyboard.press(key);};
   const select=async(row,kind)=>{
     await page.locator('#jump').selectOption(await row.getAttribute('data-page-id'));
     const card=row.locator(`[data-kind=${kind}]`);
@@ -40,11 +41,17 @@ try {
     await select(target,kind);
     if(kind==='caption'){
       assert.equal(await remember(target).isDisabled(),true);assert.equal(await apply(target).isDisabled(),true);
+      await shortcut(target);assert.equal(await field(target,'size').inputValue(),'55','S leaves auto-fit captions unchanged');
       await target.locator('.position-controls [data-field=autoFit]').uncheck();
     }
     const xy=[await field(target,'x').inputValue(),await field(target,'y').inputValue()];
-    await apply(target).click();assert.equal(await field(target,'size').inputValue(),'70');
+    const otherPresets=await target.locator('.layer-card:not(.selected) [data-preset-select]').evaluateAll(menus=>menus.map(menu=>menu.value));
+    await shortcut(target);assert.equal(await field(target,'size').inputValue(),'70',`${kind}: S applies the remembered size`);
     assert.deepEqual([await field(target,'x').inputValue(),await field(target,'y').inputValue()],xy);
+    assert.equal(await target.locator(`[data-kind=${kind}] textarea`).inputValue(),'位置を保持');
+    assert.equal(await target.locator(`[data-kind=${kind}] [data-preset-select]`).inputValue(),'','applying a size becomes a custom style');
+    assert.deepEqual(await target.locator('.layer-card:not(.selected) [data-preset-select]').evaluateAll(menus=>menus.map(menu=>menu.value)),otherPresets,'S leaves other objects unchanged');
+    await shortcut(target);
     await target.locator('[data-action=undo]').click();assert.equal(await field(target,'size').inputValue(),'55');
     await target.locator('[data-action=redo]').click();assert.equal(await field(target,'size').inputValue(),'70');
     const card=target.locator(`[data-kind=${kind}]`),preset=fixture.preferences.presets.find(p=>p.name===`旧${kind}`);
@@ -57,6 +64,10 @@ try {
   await select(source,'dialogue');await field(source,'size').fill('82');await remember(source).click();assert.equal(await memory(),82);
   await select(target,'dialogue');
   assert.match(await apply(target).getAttribute('title'),/82px/);
+  await target.locator('[data-action=preview-focus]').click();
+  await shortcut(target,'Shift+S');assert.equal(await field(target,'size').inputValue(),'82','S uses the updated memory in live FOCUS');
+  await target.locator('[data-action=undo]').click();
+  await target.locator('[data-action=preview-focus]').click();
   await select(source,'dialogue');
   page.once('dialog',dialog=>dialog.accept('位置なしの新プリセット'));await source.locator('[data-kind=dialogue] [data-action=save-preset]').click();
   const downloadProject=async format=>{
@@ -91,6 +102,6 @@ try {
     for(const box of bounds.children)assert.ok(box.right<=rowBounds.x+rowBounds.width,`size controls clipped by the image row at ${width}: ${JSON.stringify(bounds)}`);
     if(width===1440||width===390)await page.screenshot({path:`artifacts/font-size-preset-${width}.png`});
   }
-  assert.deepEqual(errors,[]);console.log('Font size memory/apply, fixed pixels across kinds/images, undo, auto-fit, reload/project/draft restore, legacy and built-in preset XY preservation, nine responsive layouts passed');
+  assert.deepEqual(errors,[]);console.log('Font size memory/apply, S shortcut across all kinds and live FOCUS, fixed pixels, undo/no-op history, auto-fit, reload/project/draft restore, preset XY preservation and responsive layouts passed');
 }catch(error){if(page){await mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/font-size-preset-failure.png'}).catch(()=>{});}throw error;}
 finally{await browser?.close();server.kill();}
