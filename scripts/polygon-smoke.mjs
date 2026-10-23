@@ -16,6 +16,7 @@ try{
   await page.waitForFunction(()=>document.querySelectorAll('.image-row').length===1&&!document.querySelector('#projectLoad').disabled);
   const source=page.locator('.image-row').first(),field=name=>source.locator(`.position-controls [data-field=${name}]`),balloon=source.locator('[data-kind=balloon]').first();
   await source.locator('[data-action=add-balloon]').click();
+  await balloon.locator('[data-action=toggle-balloon-advanced]').click();
   assert.equal(await field('polygonCount').isVisible(),false);assert.equal(await balloon.locator('[data-action=randomize-polygon-count]').isVisible(),false);
   await field('shape').selectOption('polygon');assert.equal(await field('polygonCount').isVisible(),true);assert.equal(await field('spikeCount').isVisible(),false);
   assert.equal(await field('shapeSeed').isVisible(),true);assert.equal(await field('distortion').isVisible(),true);

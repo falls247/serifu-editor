@@ -702,7 +702,8 @@ function updateControls(p) {
   const count=selectedLayers(p).length;p.row.querySelector('.selection-status').textContent=count>1?`${count}件を選択中`:'';
   const mask=p.maskEffects.find(effect=>effect.id===p.selectedMaskId);
   controls.disabled = !l&&!mask;
-  const balloon=l?.kind==='balloon',caption=l?.kind==='caption';
+  const balloon=l?.kind==='balloon',caption=l?.kind==='caption',balloonAdvanced=!!p.balloonAdvancedIds?.has(l?.id);
+  controls.dataset.balloonAdvanced=String(!balloon||balloonAdvanced);
   controls.querySelector('legend').textContent = mask?`${mask.name}：カードで位置調整`:balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   controls.querySelector('.control-grid').hidden=!!mask;
   controls.querySelector('[data-action=center]').disabled=!l;
@@ -724,7 +725,7 @@ function updateControls(p) {
   controls.querySelector('.balloon-distortion-control output').value=`${numericValue(l?.distortion??55,'distortion')}%`;
   controls.querySelector('.balloon-distortion-control').firstChild.textContent=caption||l?.shape==='spiky'?'尖り度（':'歪み度（';
   controls.querySelector('.caption-controls').hidden=!caption;
-  controls.querySelector('.text-position-controls').hidden=!balloon&&!caption;
+  controls.querySelector('.text-position-controls').hidden=(!balloon&&!caption)||(balloon&&!balloonAdvanced);
   controls.querySelector('[data-field=size]').disabled=caption&&l.autoFit;
   controls.querySelector('.balloon-tail-controls').hidden=!balloon||!l.tail;
   controls.querySelector('.balloon-position-note').hidden=!balloon;
@@ -767,6 +768,9 @@ function updateControls(p) {
       }
     }
     if(layer?.kind==='balloon'){
+      const advanced=!!p.balloonAdvancedIds?.has(layer.id),toggle=card.querySelector('[data-action=toggle-balloon-advanced]');
+      card.dataset.balloonAdvanced=String(advanced);
+      toggle.textContent=`詳細設定 ${advanced?'ON':'OFF'}`;toggle.setAttribute('aria-pressed',String(advanced));
       card.querySelector('.balloon-seed-controls').hidden=!['distorted-rect','spiky','polygon'].includes(layer.shape);
       card.querySelector('.balloon-spike-count-control').hidden=layer.shape!=='spiky';
       for(const node of card.querySelectorAll('[data-polygon-control]'))node.hidden=layer.shape!=='polygon';
@@ -1149,6 +1153,12 @@ function fitTextInput(input) {
   input.rows=Math.max(1,input.value.split('\n').length);
 }
 
+const BALLOON_CARD_ADVANCED_FIELDS=['outline','textOffsetX','textOffsetY','shadowColor','shadowBlur','shadowOffsetX','shadowOffsetY','shadowOpacity'];
+const BALLOON_POSITION_ADVANCED_FIELDS=['rotation','thickness','w','h','outline','textOffsetX','textOffsetY','padding'];
+function markBalloonAdvancedControls(root,fields){
+  for(const field of fields)root.querySelector(`[data-field=${field}]`)?.closest('label')?.setAttribute('data-balloon-advanced-control','');
+}
+
 function settingSelect(field,title,choices,value){
   const label=element('label','',title),select=element('select');select.dataset.field=field;
   for(const [key,text] of Object.entries(choices)){const option=element('option','',text);option.value=key;select.append(option);}
@@ -1511,6 +1521,7 @@ function renderCards(p,{draw=true,restoreWindow=true}={}) {
   const appendCard=(card,layer)=>{
     addNumericControls(card,p);
     addTextColorControls(card,p,layer);
+    if(layer.kind==='balloon')markBalloonAdvancedControls(card,BALLOON_CARD_ADVANCED_FIELDS);
     for(const details of card.querySelectorAll('details'))details.open=p.cardDetails.get(`${layer.id}:${details.querySelector('summary').textContent}`)??false;
     container.append(card);
   };
@@ -1524,7 +1535,11 @@ function renderCards(p,{draw=true,restoreWindow=true}={}) {
       for (const [speaker, label] of [['male', '男性'], ['female', '女性']]) {
         const b = button(`speaker-${speaker}`, label);b.classList.toggle('chosen', l.speaker === speaker);b.setAttribute('aria-pressed',String(l.speaker===speaker));roles.append(b);
       }
-      heading.append(roles);
+      if(l.kind==='balloon'){
+        const settings=element('div','speaker-settings'),advanced=button('toggle-balloon-advanced','詳細設定 OFF','吹き出しと右側の詳細項目の表示を切り替える');
+        advanced.type='button';advanced.className='balloon-advanced-toggle';advanced.setAttribute('aria-label','詳細設定');advanced.setAttribute('aria-pressed','false');
+        settings.append(roles,advanced);heading.append(settings);
+      }else heading.append(roles);
     }
     header.append(heading);
     const mini = element('div', 'card-mini-actions');
@@ -1551,8 +1566,9 @@ function renderCards(p,{draw=true,restoreWindow=true}={}) {
       shapeControls.append(randomCount,button('regenerate-shape','形状を再生成','形状seedを変更して別の歪み・尖り方にする'));card.append(shapeControls);
        const shadowLabel=element('label','tail-toggle','影を付ける'),shadowToggle=element('input');
        shadowToggle.type='checkbox';shadowToggle.dataset.field='shadowEnabled';shadowToggle.checked=l.shadowEnabled??false;
-       shadowLabel.prepend(shadowToggle);card.append(shadowLabel);
-      const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);card.append(tailLabel);
+       shadowLabel.prepend(shadowToggle);
+      const tailLabel=element('label','tail-toggle','テールを追加'),tail=element('input');tail.type='checkbox';tail.dataset.field='tail';tail.checked=l.tail;tailLabel.prepend(tail);
+      const toggles=element('div','balloon-toggles');toggles.append(shadowLabel,tailLabel);card.append(toggles);
       card.append(element('p','effect-note','25%透過＝不透明度75%。セリフ・書体・文字サイズ・方向・枠と形状は右側で調整。'));
       appendCard(card,l);continue;
     }
@@ -1641,6 +1657,7 @@ function prepareMountedPage(p,generation) {
   const row=p.row,token=p.mountToken=(p.mountToken||0)+1,original=row.querySelector('.original');
   delete p.globalUIState;
   addNumericControls(row.querySelector('.position-controls'),p);
+  markBalloonAdvancedControls(row.querySelector('.position-controls'),BALLOON_POSITION_ADVANCED_FIELDS);
   addTextColorControls(row.querySelector('.position-controls'),p);
   p.img.onload = () => {
     if(p.row!==row||p.mountToken!==token)return;
@@ -2074,6 +2091,10 @@ $('deck').addEventListener('click', async event => {
       p.layers.push(layer); p.selectedId = layer.id;
     });
     p.row.querySelector(`.layer-card[data-layer-id="${p.selectedId}"] textarea`).focus({ preventScroll: true });
+  } else if(action==='toggle-balloon-advanced'&&l?.kind==='balloon'){
+    p.balloonAdvancedIds??=new Set();
+    if(p.balloonAdvancedIds.has(l.id))p.balloonAdvancedIds.delete(l.id);else p.balloonAdvancedIds.add(l.id);
+    updateControls(p);
   } else if (action.startsWith('speaker-') && ['dialogue','balloon'].includes(l?.kind)) {
     edit(p, () => { l.speaker = action.slice(8);l.presetId=null; });
   } else if(action==='remember-font-size'&&l){

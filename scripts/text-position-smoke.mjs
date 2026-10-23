@@ -17,6 +17,7 @@ try {
   const rows=page.locator('.image-row'),source=rows.nth(0),target=rows.nth(1),field=name=>source.locator(`.position-controls [data-field=${name}]`);
   for(const kind of ['balloon','caption']){
     await source.locator(`[data-action=add-${kind}]`).click();const card=source.locator(`[data-kind=${kind}]`).first(),cardField=name=>card.locator(`[data-field=${name}]`),slider=name=>card.locator(`[data-numeric-field=${name}]`);
+    if(kind==='balloon')await card.locator('[data-action=toggle-balloon-advanced]').click();
     await card.locator('textarea').fill(kind==='balloon'?'吹き出しの本文\n上付き':'キャプションの本文\n位置調整');
     await field('x').fill('400');await field('y').fill(kind==='balloon'?'160':'450');await field('w').fill('420');await field('h').fill('230');
     for(const name of ['textOffsetX','textOffsetY']){assert.equal(await cardField(name).inputValue(),'0');assert.equal(await field(name).inputValue(),'0');assert.ok(await slider(name).isVisible());}

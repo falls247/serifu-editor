@@ -35,6 +35,7 @@ try {
   for (const kind of ['dialogue', 'sfx', 'balloon', 'caption']) {
     const card = row.locator(`[data-kind=${kind}]`), menu = card.locator('[data-preset-select]');
     if (!await card.evaluate(c => c.classList.contains('selected'))) await card.locator('.layer-summary').click();
+    if (kind === 'balloon') await card.locator('[data-action=toggle-balloon-advanced]').click();
     const text = card.locator('textarea[data-field=text]'), originalText = await text.inputValue();
     const undoDisabled = await row.locator('[data-action=undo]').isDisabled();
     await shortcut('Enter');

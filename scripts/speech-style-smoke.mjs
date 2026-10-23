@@ -28,6 +28,7 @@ try {
   page.once('dialog',dialog=>dialog.accept('セリフの指定色'));await dialogue.locator('[data-action=save-preset]').click();
   await source.locator('[data-action=add-female]').click();assert.equal(await source.locator('[data-kind=dialogue]').last().locator('[data-field=textColor]').inputValue(),'#2468aa');await source.locator('[data-action=undo]').click();
   await source.locator('[data-action=add-balloon]').click();const balloon=source.locator('[data-kind=balloon]').first();
+  await balloon.locator('[data-action=toggle-balloon-advanced]').click();
   const assertNumericPairs=async card=>{
     const pairs=await card.evaluate(card=>[...card.querySelectorAll('input[data-field][type=number],input[data-field][type=range]')].map(input=>({field:input.dataset.field,paired:!!input.closest('.numeric-setting')?.querySelector(`[data-numeric-field="${input.dataset.field}"]`)})));
     assert.ok(pairs.length>0);assert.ok(pairs.every(pair=>pair.paired),`all ${await card.getAttribute('data-kind')} card numeric controls must have sliders: ${JSON.stringify(pairs)}`);

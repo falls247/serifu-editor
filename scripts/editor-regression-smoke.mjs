@@ -40,6 +40,7 @@ try {
   await page.click('#open'); await ready(page);
   const row = page.locator('.image-row').first(), controls = row.locator('.position-controls');
   await row.locator('[data-action=add-balloon]').click();
+  await row.locator('[data-kind=balloon] [data-action=toggle-balloon-advanced]').click();
   const balloon = row.locator('[data-kind=balloon]');
   await balloon.locator('textarea').fill('吹き出しの台詞～');
   await balloon.locator('[data-action=speaker-female]').click();

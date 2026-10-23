@@ -47,8 +47,36 @@ try {
   assert.ok(Number(await field('y').inputValue())-Number(await field('h').inputValue())/2<0);
   assert.equal(await field('size').isVisible(),true);assert.equal(await page.locator('#savePreset').isDisabled(),false);
   assert.equal(await page.locator('#saveEdited').isEnabled(),true);
+  const advanced=balloon.locator('[data-action=toggle-balloon-advanced]');
+  const cardAdvanced=['outline','textOffsetX','textOffsetY','shadowColor','shadowBlur','shadowOffsetX','shadowOffsetY','shadowOpacity'];
+  const previewAdvanced=['rotation','thickness','w','h','outline','textOffsetX','textOffsetY','padding'];
+  const assertAdvancedVisibility=async visible=>{
+    assert.equal(await advanced.getAttribute('aria-pressed'),String(visible));
+    for(const name of cardAdvanced){
+      assert.equal(await balloon.locator(`[data-field=${name}]`).isVisible(),visible,`card ${name}`);
+      if(name!=='shadowColor')assert.equal(await balloon.locator(`[data-numeric-field=${name}]`).isVisible(),visible,`card slider ${name}`);
+    }
+    for(const name of previewAdvanced){
+      assert.equal(await field(name).isVisible(),visible,`preview ${name}`);
+      assert.equal(await controls.locator(`[data-numeric-field=${name}]`).isVisible(),visible,`preview slider ${name}`);
+    }
+    assert.equal(await balloon.locator('[data-field=padding]').isVisible(),true,'card padding stays available');
+    for(const name of ['x','y','size','font','vertical','shape'])assert.equal(await field(name).isVisible(),true,`${name} stays available`);
+    for(const name of ['shadowEnabled','tail'])assert.equal(await balloon.locator(`[data-field=${name}]`).isVisible(),true,`${name} stays available`);
+  };
+  await assertAdvancedVisibility(false);
+  const values=await controls.locator('[data-field]').evaluateAll(inputs=>inputs.map(input=>[input.dataset.field,input.value]));
+  const canvasBeforeToggle=await source.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL());
+  await advanced.click();await assertAdvancedVisibility(true);
+  await advanced.press('Space');await assertAdvancedVisibility(false);
+  assert.deepEqual(await controls.locator('[data-field]').evaluateAll(inputs=>inputs.map(input=>[input.dataset.field,input.value])),values,'toggle preserves all settings');
+  assert.equal(await source.locator('canvas.preview').evaluate(canvas=>canvas.toDataURL()),canvasBeforeToggle,'toggle preserves the rendered image');
+  const toggleRects=await balloon.locator('.balloon-toggles label').evaluateAll(labels=>labels.map(label=>{const r=label.getBoundingClientRect();return {top:r.top,left:r.left,right:r.right};}));
+  assert.equal(toggleRects[0].top,toggleRects[1].top,'shadow and tail stay on the same line');assert.ok(toggleRects[0].right<toggleRects[1].left);
+  await advanced.click();await assertAdvancedVisibility(true);
   await source.locator('[data-action=undo]').click();assert.equal(await page.locator('#saveEdited').isDisabled(),true,'undoing the first edit restores unedited status');
   await source.locator('[data-action=redo]').click();assert.equal(await page.locator('#saveEdited').isEnabled(),true);
+  await assertAdvancedVisibility(true);
   const balloonText=balloon.locator('[data-field=text]');assert.equal(await balloonText.inputValue(),'');
   await balloonText.fill('待って！');assert.equal(await field('size').isVisible(),true,'balloon text exposes the shared dialogue controls');
   assert.equal(await field('vertical').inputValue(),'true','new balloon text defaults to vertical writing');
