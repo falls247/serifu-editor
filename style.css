@@ -258,8 +258,13 @@ canvas.preview.cropping{cursor:crosshair}
 .mask-asset-summary{margin:0 0 8px;font:9px monospace;color:var(--muted);overflow-wrap:anywhere}
 .mask-effect-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
 .mask-effect-grid label{min-width:0;font-size:9px}
+.mask-effect-grid label[hidden]{display:none}
 .mask-effect-grid input,.mask-effect-grid select{width:100%;min-width:0;margin-top:3px;padding:6px;font-size:10px}
 .mask-effect-grid input[type=checkbox]{width:13px}
+.mask-effect-grid input[type=range]{display:block;margin:5px 0 0;padding:0;min-height:24px;accent-color:var(--lime)}
+.mask-effect-grid input:focus-visible{outline:2px solid var(--lime);outline-offset:2px}
+.mask-scale-note{margin:8px 0;color:var(--muted);font-size:10px;line-height:1.6;overflow-wrap:anywhere}
+.mask-effect-card:not(.selected) .mask-scale-note{display:none}
 .position-controls>.control-grid[hidden]{display:none}
 @media(max-width:520px){.sam3-point-tools>span{flex-basis:100%}.sam3-effect-settings{grid-template-columns:minmax(0,1fr)}.sam3-candidate-heading{align-items:flex-start}.sam3-candidate-heading>div{gap:4px}.sam3-actions [data-sam3-action=commit]{max-width:65%}}
 

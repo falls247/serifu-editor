@@ -2,6 +2,7 @@ import { assetFromEncoded, verifyMaskAsset } from './mask-codec.js';
 import { createSam3RequestNamespace, LatestSam3Request, Sam3ApiError } from './sam3-client.js';
 import { MAX_PROJECT_MASK_DECODED_BYTES } from './project-io.js';
 import { previewFocusPanForAnchor, previewFocusPointFromClient } from './preview-focus.js';
+import { maskScaleLimit } from './model.js';
 
 const PALETTE = ['#c8ee91', '#ef4b91', '#74c8ef', '#ffc66d', '#ba9bff', '#54d7b0', '#ff8c6b', '#d2dc6a'];
 const EFFECTS = [['pixelate', 'ピクセレート'], ['blur', 'ぼかし'], ['fill-black', '黒塗り'], ['fill-white', '白塗り']];
@@ -42,9 +43,37 @@ function createPanel(panel) {
 }
 
 function createMaskField(field, title, value, min, max, step = '1') {
-  const label = element('label', '', title), input = element('input');
-  input.type = 'number'; input.dataset.maskField = field; input.min = String(min); input.max = String(max); input.step = step; input.value = String(value);
-  label.append(input); return label;
+  const label = element('label', 'mask-numeric-control', title), input = element('input'), slider = element('input');
+  input.type = 'number'; input.dataset.maskField = field; input.min = String(min); input.max = String(max); input.step = step === 'any' ? '0.1' : step; input.value = String(value);
+  input.setAttribute('aria-label', title);
+  slider.type = 'range'; slider.dataset.maskRangeField = field; slider.min = String(min); slider.max = String(max); slider.step = step; slider.value = String(value);
+  slider.setAttribute('aria-label', `${title} スライダー`);
+  label.append(input, slider); return label;
+}
+
+export function syncMaskEffectControls(card, effect, asset, imageWidth, imageHeight) {
+  const limits = { blockSize: [1, 200], blurRadius: [0, 100], marginPx: [-100, 100],
+    x: [0, imageWidth - effect.w], y: [0, imageHeight - effect.h],
+    w: [1, imageWidth - effect.x], h: [1, imageHeight - effect.y],
+    scalePercent: [1, asset ? maskScaleLimit(asset, imageWidth, imageHeight) : 100] };
+  for (const control of card.querySelectorAll('[data-mask-field],[data-mask-range-field]')) {
+    const key = control.dataset.maskField ?? control.dataset.maskRangeField;
+    if (limits[key]) { control.min = String(limits[key][0]); control.max = String(limits[key][1]); }
+    if (key === 'scalePercent') {
+      control.disabled = !asset;
+      // Pixel geometry remains authoritative; percentages are only a view over it.
+      const percent = asset ? Number((effect.w / asset.bbox.width * 100).toPrecision(12)) : 100;
+      // Independently resized legacy geometry can lie outside uniform-scale bounds.
+      control.min = String(Math.min(1, percent));
+      control.max = String(Math.max(Number(control.max), percent));
+      control.value = String(percent);
+    } else if (control.type === 'checkbox') control.checked = effect[key];
+    else control.value = String(effect[key]);
+  }
+  card.querySelector('[data-mask-field=blockSize]')?.closest('label')?.toggleAttribute('hidden', effect.effect !== 'pixelate');
+  card.querySelector('[data-mask-field=blurRadius]')?.closest('label')?.toggleAttribute('hidden', effect.effect !== 'blur');
+  const note = card.querySelector('[data-mask-scale-note]');
+  if (note && asset) note.textContent = `元マスク比：幅${(effect.w / asset.bbox.width * 100).toFixed(1)}%・高さ${(effect.h / asset.bbox.height * 100).toFixed(1)}%。倍率変更は元の縦横比・中心基準。画像端では内側へ移動。`;
 }
 
 export function renderMaskEffectSummary(effect, summary) {
@@ -73,16 +102,19 @@ export function createMaskEffectCard(effect, asset, index, selected = false, ima
   blockSize.hidden = effect.effect !== 'pixelate'; blurRadius.hidden = effect.effect !== 'blur';
   grid.append(blockSize, blurRadius);
   grid.append(createMaskField('marginPx', '輪郭補正（px）', effect.marginPx, -100, 100));
+  grid.append(createMaskField('scalePercent', 'サイズ（元の幅比 %）', asset ? effect.w / asset.bbox.width * 100 : 100, 1, asset ? maskScaleLimit(asset, imageWidth, imageHeight) : 100, 'any'));
   grid.append(createMaskField('x', 'X（px）', effect.x, 0, imageWidth - 1));
   grid.append(createMaskField('y', 'Y（px）', effect.y, 0, imageHeight - 1));
   grid.append(createMaskField('w', '幅（px）', effect.w, 1, imageWidth - effect.x));
   grid.append(createMaskField('h', '高さ（px）', effect.h, 1, imageHeight - effect.y));
   card.append(grid);
+  const scaleNote = element('p', 'mask-scale-note'); scaleNote.dataset.maskScaleNote = ''; card.append(scaleNote);
   const order=element('div','layer-actions');
   for(const [action,label] of [['backmost','最背面へ'],['backward','背面へ'],['forward','前面へ'],['frontmost','最前面へ']]){
     const button=element('button','',label);button.type='button';button.dataset.maskAction=action;order.append(button);
   }
   card.append(order);
+  syncMaskEffectControls(card, effect, asset, imageWidth, imageHeight);
   return card;
 }
 

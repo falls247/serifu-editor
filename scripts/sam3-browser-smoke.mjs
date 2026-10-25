@@ -337,6 +337,47 @@ try {
   await cards.first().locator('.mask-effect-summary').click();
   assert.equal(await cards.first().locator('[data-mask-field=effect]').isVisible(),true,'selecting a compact mask expands its settings');
   assert.equal(await cards.nth(1).locator('[data-mask-field=effect]').isVisible(),false,'previous mask collapses when selection changes');
+  const firstCard = cards.first();
+  await page.evaluate(async () => {
+    const { createMaskEffectCard } = await import('./src/sam3-ui.js');
+    const card = createMaskEffectCard({ id: 'tiny', assetId: 'a', name: 'tiny', visible: true, effect: 'pixelate', blockSize: 12, blurRadius: 12, marginPx: 0, x: 0, y: 0, w: 1, h: 400 },
+      { bbox: { width: 30000, height: 500 } }, 0, true, 30000, 500);
+    const number = card.querySelector('[data-mask-field=scalePercent]'), range = card.querySelector('[data-mask-range-field=scalePercent]');
+    if (number.value !== range.value || Number(range.value) <= 0) throw Error('tiny percentage display lost existing geometry');
+  });
+  assert.equal(await firstCard.locator('input[type=range][data-mask-range-field]').count(), 8);
+  for (const field of ['blockSize', 'marginPx', 'x', 'y', 'w', 'h']) {
+    assert.equal(await firstCard.locator(`[data-mask-field=${field}]`).inputValue(), await firstCard.locator(`[data-mask-range-field=${field}]`).inputValue(), `${field} number/range agree`);
+  }
+  assert.equal(await firstCard.locator('[data-mask-range-field=blurRadius]').isHidden(), true);
+  const scaleInput = firstCard.locator('[data-mask-field=scalePercent]'), scaleRange = firstCard.locator('[data-mask-range-field=scalePercent]');
+  await scaleInput.fill('150'); await scaleInput.dispatchEvent('change');
+  assert.equal(await scaleRange.inputValue(), '150');
+  assert.deepEqual(await firstCard.locator('[data-mask-field]').evaluateAll(inputs => inputs.slice(-4).map(input => Number(input.value))), [18, 18, 75, 75]);
+  await canvas.focus(); await page.keyboard.press('Control+z');
+  assert.equal(await scaleInput.inputValue(), '100', 'one undo reverses numeric percentage edit');
+  await page.keyboard.press('Control+Shift+z');
+  assert.equal(await scaleInput.inputValue(), '150', 'redo restores percentage geometry');
+  await scaleInput.fill('100'); await scaleInput.dispatchEvent('change');
+  // Continuous slider input has one checkpoint, even across multiple geometry updates.
+  await scaleRange.evaluate(input => { for (const value of ['110', '120', '140']) { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); } input.dispatchEvent(new Event('change', { bubbles: true })); });
+  assert.equal(await scaleInput.inputValue(), '140');
+  await canvas.focus(); await page.keyboard.press('Control+z');
+  assert.equal(await scaleInput.inputValue(), '100', 'one undo reverses an entire slider gesture');
+  const blockRange = firstCard.locator('[data-mask-range-field=blockSize]');
+  await blockRange.focus(); await page.keyboard.press('ArrowRight');
+  assert.equal(await firstCard.locator('[data-mask-field=blockSize]').inputValue(), '17', 'keyboard slider updates number');
+  await firstCard.locator('[data-mask-field=blockSize]').fill('16'); await firstCard.locator('[data-mask-field=blockSize]').dispatchEvent('change');
+  await blockRange.scrollIntoViewIfNeeded();
+  const mouseRangeBox = await blockRange.boundingBox();
+  await page.mouse.move(mouseRangeBox.x + mouseRangeBox.width * .2, mouseRangeBox.y + mouseRangeBox.height / 2); await page.mouse.down();
+  await page.mouse.move(mouseRangeBox.x + mouseRangeBox.width * .4, mouseRangeBox.y + mouseRangeBox.height / 2, { steps: 4 }); await page.mouse.up();
+  assert.ok(Number(await firstCard.locator('[data-mask-field=blockSize]').inputValue()) > 16, 'mouse slider drag updates number');
+  await canvas.focus(); await page.keyboard.press('Control+z');
+  assert.equal(await firstCard.locator('[data-mask-field=blockSize]').inputValue(), '16', 'mouse drag is one undo gesture');
+  // Restore exact position for existing source-coordinate drag tests.
+  for (const field of ['x', 'y']) { await firstCard.locator(`[data-mask-field=${field}]`).fill('30'); await firstCard.locator(`[data-mask-field=${field}]`).dispatchEvent('change'); }
+  await firstCard.screenshot({ path: 'artifacts/mask-sliders-desktop.png' });
   await canvas.scrollIntoViewIfNeeded();
   let box = await canvas.boundingBox();
   await canvas.hover({position:{x:box.width*55/imageWidth,y:box.height*55/imageHeight}});
@@ -407,6 +448,10 @@ try {
   assert.equal(thumbnailComparison.samePixels, true,
     `mask thumbnail must match PNG original-pixel shrink; first difference ${thumbnailComparison.firstDifference}, max ${thumbnailComparison.maxDifference}`);
 
+  if (!await cards.first().locator('[data-mask-field=scalePercent]').isVisible()) await cards.first().locator('.mask-effect-summary').click();
+  await cards.first().locator('[data-mask-field=scalePercent]').fill('150');
+  await cards.first().locator('[data-mask-field=scalePercent]').dispatchEvent('change');
+  const savedMaskGeometry = await cards.first().locator('[data-mask-field]').evaluateAll(inputs => inputs.slice(-4).map(input => Number(input.value)));
   const projectDownloadPromise = page.waitForEvent('download');
   await page.locator('#projectSave').click();
   const projectDownload = await projectDownloadPromise, projectBytes = await readFile(await projectDownload.path());
@@ -415,6 +460,26 @@ try {
   await restoredProject.waitForFunction(() => document.querySelectorAll('.mask-effect-card').length === 4 && !document.querySelector('#projectLoad').disabled);
   assert.deepEqual(await restoredProject.locator('.mask-effect-card').evaluateAll(cards => cards.map(card => card.querySelector('[data-mask-field=effect]').value)), effectTypes);
   assert.deepEqual(await restoredProject.locator('.image-row.active canvas.preview').evaluate(node => [node.width, node.height]), [350, 250]);
+  assert.deepEqual(await restoredProject.locator('.mask-effect-card').first().locator('[data-mask-field]').evaluateAll(inputs => inputs.slice(-4).map(input => Number(input.value))), savedMaskGeometry, 'project restores scaled geometry');
+  assert.equal(await restoredProject.locator('.mask-effect-card').first().locator('[data-mask-field=scalePercent]').inputValue(), '150');
+  await restoredProject.locator('.image-row.active [data-action=preview-full]').click();
+  await restoredProject.waitForFunction(() => document.querySelector('#fullPreview')?.open && document.querySelector('#fullPreviewCanvas')?.width === 350);
+  await restoredProject.locator('#fullPreviewClose').click();
+
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const mobile = await mobileContext.newPage(); mobile.on('pageerror', error => errors.push(error.message));
+  await mobile.route('**/api/sam3/**', fulfillApi); await mobile.goto(`http://localhost:${port}`, { waitUntil: 'domcontentloaded' });
+  await mobile.locator('#projectInput').setInputFiles({ name: 'sam3.json', mimeType: 'application/json', buffer: projectBytes });
+  await mobile.waitForFunction(() => document.querySelectorAll('.mask-effect-card').length === 4 && !document.querySelector('#projectLoad').disabled);
+  const mobileCard = mobile.locator('.mask-effect-card').first();
+  if (!await mobileCard.locator('[data-mask-field=scalePercent]').isVisible()) await mobileCard.locator('.mask-effect-summary').tap();
+  const touchRange = mobileCard.locator('[data-mask-range-field=scalePercent]'); await touchRange.scrollIntoViewIfNeeded();
+  const touchBox = await touchRange.boundingBox(); await mobile.touchscreen.tap(touchBox.x + touchBox.width * .4, touchBox.y + touchBox.height / 2);
+  assert.notEqual(await mobileCard.locator('[data-mask-field=scalePercent]').inputValue(), '150', 'touch slider changes mask size');
+  assert.equal(await mobileCard.locator('[data-mask-field=w]').inputValue(), await mobileCard.locator('[data-mask-range-field=w]').inputValue());
+  assert.equal(await mobileCard.evaluate(node => node.scrollWidth <= node.clientWidth + 1), true, 'mobile card has no internal overflow');
+  await mobileCard.screenshot({ path: 'artifacts/mask-sliders-mobile.png' });
+  await mobileContext.close();
 
   const pngPromise = restoredProject.waitForEvent('download');
   await restoredProject.locator('.image-row.active [data-action=save-image]').click();

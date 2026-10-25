@@ -34,7 +34,8 @@ import { originalBlob, projectParts, projectBlob, readProject, writeParts, MAX_P
 import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
 import { FONT_CATALOG, FONT_STYLES, fontLoadQueries,registerSessionFont,hasSessionFont,missingLayerFonts,sessionFontChoices } from './fonts.js';
 import { Sam3Client } from './sam3-client.js';
-import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
+import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary, syncMaskEffectControls } from './sam3-ui.js';
+import { scaleMaskEffect } from './model.js';
 import { enhanceColorInput, syncColorInput, colorInputValue } from './colors.js';
 import { setupAppMenu } from './app-menu.js';
 
@@ -786,7 +787,7 @@ function updateControls(p) {
     card.classList.toggle('selected',selected);
     for(const button of card.querySelectorAll('.mask-effect-summary,[data-mask-action=select]'))button.setAttribute('aria-pressed',String(selected));
     const effect=p.maskEffects.find(effect=>effect.id===card.dataset.maskId);
-    if(effect)renderMaskEffectSummary(effect,card.querySelector('.mask-effect-summary'));
+    if(effect){renderMaskEffectSummary(effect,card.querySelector('.mask-effect-summary'));syncMaskEffectControls(card,effect,p.maskAssets[effect.assetId],p.img.width,p.img.height);}
   }
 }
 
@@ -1784,33 +1785,25 @@ function markMaskChanged(p) {
 function updateMaskEffectField(p,input) {
   if(!p||!input)return;
   const card=input.closest('.mask-effect-card'),effect=p.maskEffects.find(item=>item.id===card?.dataset.maskId);if(!effect)return;
-  const field=input.dataset.maskField;let value;
+  const field=input.dataset.maskField??input.dataset.maskRangeField;let value;
   if(field==='visible')value=input.checked;
   else if(field==='effect')value=input.value;
   else{
     if(input.value===''||!Number.isFinite(input.valueAsNumber))return;
-    value=Math.round(input.valueAsNumber);
+    value=field==='scalePercent'?input.valueAsNumber:Math.round(input.valueAsNumber);
     if(field==='blockSize')value=clamp(value,1,200);else if(field==='blurRadius')value=clamp(value,0,100);else if(field==='marginPx')value=clamp(value,-100,100);
     else if(field==='x')value=clamp(value,0,p.img.width-1);else if(field==='y')value=clamp(value,0,p.img.height-1);
     else if(field==='w')value=clamp(value,1,p.img.width-effect.x);else if(field==='h')value=clamp(value,1,p.img.height-effect.y);
-    else return;
+    else if(field!=='scalePercent')return;
   }
-  const next={...effect,[field]:value};
+  if(field==='scalePercent'&&!p.maskAssets[effect.assetId])return;
+  const next=field==='scalePercent'?scaleMaskEffect(effect,p.maskAssets[effect.assetId],value,p.img.width,p.img.height):{...effect,[field]:value};
   if(field==='x')next.w=Math.min(effect.w,p.img.width-value);if(field==='y')next.h=Math.min(effect.h,p.img.height-value);
   const normalized=normalizeMaskEffect(next,p.img.width,p.img.height,new Set(Object.keys(p.maskAssets)));
-  if(Object.keys(normalized).every(key=>normalized[key]===effect[key]))return;
+  if(Object.keys(normalized).every(key=>normalized[key]===effect[key])){syncMaskEffectControls(card,effect,p.maskAssets[effect.assetId],p.img.width,p.img.height);return;}
   if(!editing.has(input)){checkpoint(p);editing.add(input);}
-  Object.assign(effect,normalized);if(input.type==='number')input.value=String(normalized[field]);
-  for(const control of card.querySelectorAll('[data-mask-field]')){
-    const key=control.dataset.maskField;if(control===input)continue;
-    if(control.type==='checkbox')control.checked=effect[key];else control.value=String(effect[key]);
-    if(key==='x')control.max=String(p.img.width-effect.w);if(key==='y')control.max=String(p.img.height-effect.h);
-    if(key==='w')control.max=String(p.img.width-effect.x);if(key==='h')control.max=String(p.img.height-effect.y);
-  }
-  if(field==='effect'){
-    card.querySelector('[data-mask-field=blockSize]')?.closest('label')?.toggleAttribute('hidden',effect.effect!=='pixelate');
-    card.querySelector('[data-mask-field=blurRadius]')?.closest('label')?.toggleAttribute('hidden',effect.effect!=='blur');
-  }
+  Object.assign(effect,normalized);
+  syncMaskEffectControls(card,effect,p.maskAssets[effect.assetId],p.img.width,p.img.height);
   markMaskChanged(p);drawPage(p);updateControls(p);
 }
 
@@ -1870,7 +1863,7 @@ $('deck').addEventListener('focusout', event => {
   editing.delete(event.target);
   const p = pageFrom(event.target);
   if(p?.renderingCards)return;
-  if(event.target.matches('[data-mask-field]'))return;
+  if(event.target.matches('[data-mask-field],[data-mask-range-field]')){if(p)updateControls(p);return;}
   if(p&&event.target.matches('[data-field="text"]')){
     if(composing.has(event.target))return;
     const input=event.target,layer=p.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
@@ -1887,7 +1880,7 @@ $('deck').addEventListener('focusout', event => {
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
-  if(event.target.matches('[data-mask-field]')){updateMaskEffectField(pageFrom(event.target),event.target);return;}
+  if(event.target.matches('[data-mask-field],[data-mask-range-field]')){updateMaskEffectField(pageFrom(event.target),event.target);return;}
   if(event.target.matches('[data-crop-field]')){
     const p=pageFrom(event.target);if(!p?.cropDraft)return;
     const input=event.target;if(input.value===''||!Number.isFinite(input.valueAsNumber))return;
@@ -1986,7 +1979,7 @@ $('deck').addEventListener('change',event=>{
     });return;
   }
 
-  if(event.target.matches('[data-mask-field]')){const p=pageFrom(event.target);updateMaskEffectField(p,event.target);editing.delete(event.target);return;}
+  if(event.target.matches('[data-mask-field],[data-mask-range-field]')){const p=pageFrom(event.target);updateMaskEffectField(p,event.target);editing.delete(event.target);return;}
   editing.delete(event.target);if(event.target.matches('input[type=number][data-field],input[type=number][data-numeric-field]')){const p=pageFrom(event.target),l=p?.layers.find(l=>l.id===(event.target.closest('.layer-card')?.dataset.layerId||p.selectedId));if(l)syncControlValue(event.target,l[controlField(event.target)],p);}
 });
 
