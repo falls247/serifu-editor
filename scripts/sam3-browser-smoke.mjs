@@ -221,6 +221,10 @@ try {
   assert.equal(staleResponse.status, 409, 'mock API rejects a repeated or older sequence for the same request scope');
   assert.equal(staleResponse.body.error.code, 'SUPERSEDED');
   await panel.locator('[data-sam3-action=none]').click();
+  assert.equal(await overlay.evaluate(canvas => canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data.some((value, index) => index % 4 === 3 && value)), false, 'clear-all removes every candidate fill, edge and number');
+  assert.equal(await panel.locator('[data-sam3-action=commit]').isDisabled(), true);
+  assert.equal(await panel.locator('input[data-candidate-id]:checked').count(), 0);
+  await panel.locator('input[data-candidate-id="candidate-1"]').check();
   await overlay.scrollIntoViewIfNeeded();
   const candidateBox = await overlay.boundingBox();
   await page.mouse.click(candidateBox.x + candidateBox.width * 135 / imageWidth, candidateBox.y + candidateBox.height * 55 / imageHeight);

@@ -211,6 +211,10 @@ canvas.preview.cropping{cursor:crosshair}
 .sam3-model-path-row input{font-family:monospace;font-size:11px}
 .sam3-model-path-status{margin:0;font-size:10px;line-height:1.65;color:var(--muted);overflow-wrap:anywhere}
 .sam3-model-path-status[hidden]{display:none}
+.sam3-idle-row{display:grid;grid-template-columns:minmax(0,1fr) 65px auto;align-items:center;gap:7px}
+.sam3-idle-row label{font-size:11px;line-height:1.5}
+.sam3-idle-row input{width:100%;min-width:0;margin:0}
+.sam3-idle-status,.sam3-idle-state,.sam3-selection-count{margin:0;font-size:10px;line-height:1.65;color:var(--muted);overflow-wrap:anywhere}
 .sam3-input-tools{justify-content:space-between}
 .sam3-input-tools label{flex:1;min-width:120px}
 .sam3-input-tools output{color:var(--lime);font-family:monospace;float:right}

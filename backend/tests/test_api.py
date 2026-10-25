@@ -89,7 +89,7 @@ def test_model_path_save_persists_and_updates_engine(tmp_path: Path, monkeypatch
         )
         assert response.status_code == 200, response.text
         expected = str(tmp_path / "new sam3.pt")
-        assert response.json() == {"modelPath": expected}
+        assert response.json()["modelPath"] == expected
         assert engine.settings.model_path == Path(expected)
         assert not engine.model_loaded
         changed_health = client.get("/api/sam3/health").json()

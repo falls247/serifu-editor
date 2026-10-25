@@ -2,6 +2,7 @@
 
 - 状態：P0（モデル寿命・共有監視）を採用・実装。CPU待機は評価案のまま未採用。
 - 記録日：2026-10-18
+- 2026-10-25更新：解放条件と設定の現行仕様は[ADR-0033](0033-sam3-memory-efficient-loading.md)。以下の600秒・推論中心の記述は当時の判断記録。
 - 調査時HEAD：`88b6e110746a1c9acc59a258c6beb99c05d264b5`
 - 対応計画：[SAM3再読み込みのSOW](../SOW_20261018_sam3_reload_lifecycle.md)
 - 関連：[ADR-0023](0023-sam3-mask-effects-and-storage.md)。GPU処理の直列化、要求取消による古い結果の無効化は維持する。

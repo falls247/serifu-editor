@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-- [ADR-0033：SAM3の省メモリロード（提案）](0033-sam3-memory-efficient-loading.md)
+- [ADR-0033：SAM3のメモリマップ・直接割当てとアプリ無操作解放](0033-sam3-memory-efficient-loading.md)
 - [ADR-0034：マスクカードのスライダーと元マスク比](0034-mask-card-sliders-and-scale.md)
 
 記録日：2026-10-10（日本時間）。対象コード：`b721ad78a7c658f23b83a0da1f6ed13c950c9696`。

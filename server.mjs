@@ -7,7 +7,7 @@ assets.push('src/colors.js','src/annotation-drafts.js','src/app-menu.js','docs/i
 const files={'/':'index.html','/docs/':'docs/index.html',...Object.fromEntries(assets.map(path=>['/'+path,path]))};
 const port=Number(process.env.PORT)||5173,backendPort=Number(process.env.SAM3_API_PORT)||8765;
 const identifier='[a-zA-Z0-9_-]{1,100}';
-const routes=[[/^\/api\/sam3\/health$/,['GET']], [/^\/api\/sam3\/settings$/,['POST']], [/^\/api\/sam3\/images$/,['POST']], [/^\/api\/sam3\/infer$/,['POST']], [new RegExp(`^/api/sam3/jobs/${identifier}$`),['GET','DELETE']], [new RegExp(`^/api/sam3/images/${identifier}$`),['DELETE']]];
+const routes=[[/^\/api\/sam3\/health$/,['GET']], [/^\/api\/sam3\/activity$/,['POST']], [/^\/api\/sam3\/settings$/,['POST']], [/^\/api\/sam3\/images$/,['POST']], [/^\/api\/sam3\/infer$/,['POST']], [new RegExp(`^/api/sam3/jobs/${identifier}$`),['GET','DELETE']], [new RegExp(`^/api/sam3/images/${identifier}$`),['DELETE']]];
 const rates=new Map();
 function error(res,status,code,message,retryable=false){
   if(res.headersSent){res.destroy();return;}
@@ -37,7 +37,7 @@ async function proxy(req,res,path){
     const record=previous&&now-previous.start<60000?previous:{start:now,count:0};rates.set(key,record);
     if(++record.count>180){error(res,429,'RATE_LIMITED','要求が多すぎる。少し待って再試行',true);return;}
   }
-  const limit=path==='/api/sam3/images'?31*1024**2:256*1024,declared=req.headers['content-length'];
+  const limit=path==='/api/sam3/images'?31*1024**2:path==='/api/sam3/activity'?1024:256*1024,declared=req.headers['content-length'];
   if(declared&&(!/^\d+$/.test(declared)||Number(declared)>limit)){error(res,413,'INVALID_REQUEST','要求サイズが上限を超える');req.resume();return;}
   let bytes=0;const chunks=[];
   try{for await(const chunk of req){bytes+=chunk.length;if(bytes>limit){error(res,413,'INVALID_REQUEST','要求サイズが上限を超える');return;}chunks.push(chunk);}}

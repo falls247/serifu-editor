@@ -11,7 +11,7 @@ from typing import Any
 
 from .engine import EngineCandidate, EngineError, EngineResult
 from .image_cache import ImageCache, ImageExpiredError
-from .schemas import InferRequest
+from .schemas import ActivityRequest, InferRequest
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -83,8 +83,32 @@ class JobManager:
         self.load_started: float | None = None
         self.last_load_seconds: float | None = None
         self._updating_model_path = False
+        self._settings_lock = asyncio.Lock()
+        self.settings_revision = 0
+        self.server_epoch = uuid.uuid4().hex
+        self.activity_epoch = uuid.uuid4().hex
+        self._last_activity: float | None = None
+        self._activity_sessions: OrderedDict[str, tuple[int, float]] = OrderedDict()
 
     async def set_model_path(self, value: str) -> Path:
+        await self.update_settings(model_path=value)
+        return self.settings.model_path
+
+    async def update_settings(self, *, model_path: str | None = None, model_idle_seconds: int | None = None) -> None:
+        async with self._settings_lock:
+            if model_path is not None:
+                await self._set_model_settings(model_path, model_idle_seconds)
+            else:
+                try:
+                    await asyncio.to_thread(self.settings.save_settings, model_idle_seconds=model_idle_seconds)
+                except OSError:
+                    raise ApiException("SETTINGS_SAVE_FAILED", "解放時間を保存できない。保存先の権限を確認。", status=500, retryable=True) from None
+                self.settings = replace(self.settings, model_idle_seconds=model_idle_seconds)
+                self.engine.settings = self.settings
+            self.settings_revision += 1
+            self._last_activity = time.monotonic()
+
+    async def _set_model_settings(self, value: str, idle: int | None) -> None:
         if self._gpu_lock.locked() or self._active is not None or not self._pending.empty() or self.model_loading:
             raise ApiException(
                 "MODEL_BUSY", "モデル読込・推論が終わってから保存を再試行。",
@@ -98,7 +122,10 @@ class JobManager:
             self._updating_model_path = True
             try:
                 try:
-                    await asyncio.to_thread(self.settings.save_model_path, model_path)
+                    if idle is None:
+                        await asyncio.to_thread(self.settings.save_model_path, model_path)
+                    else:
+                        await asyncio.to_thread(self.settings.save_settings, model_path=model_path, model_idle_seconds=idle)
                 except OSError:
                     raise ApiException(
                         "SETTINGS_SAVE_FAILED", "モデルパスを保存できない。保存先の権限を確認。",
@@ -112,6 +139,8 @@ class JobManager:
                     self.engine.load_error = None
                     self.engine.load_error_message = None
                     self.model_generation = uuid.uuid4().hex
+                    self.activity_epoch = uuid.uuid4().hex
+                    self._activity_sessions.clear()
                     self._last_model_ready = None
                     self._last_inference_finished = None
                     self.load_started = None
@@ -120,9 +149,43 @@ class JobManager:
                         self.engine.load_timings = {}
                     self._model_load_task = None
                     self.candidates.clear()
+                if idle is not None:
+                    self.settings = replace(self.settings, model_idle_seconds=idle)
+                    self.engine.settings = self.settings
             finally:
                 self._updating_model_path = False
-        return model_path
+
+    def record_activity(self, request: ActivityRequest) -> bool:
+        now = time.monotonic()
+        # Short server-issued windows reject notifications delayed across sleep,
+        # reconnect, or a server/model configuration generation change.
+        if request.epoch != self.activity_epoch or not 0 <= int(now // 10) - request.window <= 2:
+            return False
+        previous = self._activity_sessions.get(request.sessionId)
+        if previous is not None and request.sequence <= previous[0]:
+            return False
+        self._activity_sessions[request.sessionId] = (request.sequence, now)
+        self._activity_sessions.move_to_end(request.sessionId)
+        while len(self._activity_sessions) > 2048:
+            self._activity_sessions.popitem(last=False)
+        observed = now - request.elapsedSeconds
+        self._last_activity = max(self._last_activity or observed, observed)
+        return True
+
+    def idle_state(self) -> dict[str, Any]:
+        now = time.monotonic()
+        times = [value for value in (self._last_model_ready, self._last_inference_finished, self._last_activity) if value is not None]
+        elapsed = max(0, now - max(times)) if times else 0
+        return {
+            "serverEpoch": self.server_epoch,
+            "settingsRevision": self.settings_revision,
+            "activityEpoch": self.activity_epoch,
+            "activityWindow": int(now // 10),
+            "modelIdleSeconds": self.settings.model_idle_seconds,
+            "idleElapsedSeconds": round(elapsed, 3),
+            "idleRemainingSeconds": round(max(0, self.settings.model_idle_seconds - elapsed), 3),
+            "idleReleaseDeferred": self.model_loading or self._active is not None or not self._pending.empty(),
+        }
 
     async def start(self) -> None:
         self._stopping = False
@@ -177,7 +240,7 @@ class JobManager:
             logger.info("SAM3 model load %s finished in %.3fs", self.load_count, self.last_load_seconds)
 
     def _idle_expired(self) -> bool:
-        times = [value for value in (self._last_model_ready, self._last_inference_finished) if value is not None]
+        times = [value for value in (self._last_model_ready, self._last_inference_finished, self._last_activity) if value is not None]
         return bool(times) and time.monotonic() - max(times) >= self.settings.model_idle_seconds
 
     def _observe_startup_load(self, task: asyncio.Task[None]) -> None:
@@ -550,25 +613,31 @@ class JobManager:
                 self.delete_image(image_id)
             self._prune_jobs()
             self._prune_candidates()
-            if (
-                self.engine.model_loaded
-                and not self.model_loading
-                and self._active is None
-                and self._pending.empty()
-                and self._idle_expired()
-            ):
-                try:
-                    async with self._gpu_lock:
-                        if (
-                            self.engine.model_loaded
-                            and self._active is None
-                            and self._pending.empty()
-                            and not self.model_loading
-                            and self._idle_expired()
-                        ):
-                            await asyncio.to_thread(self.engine.unload)
-                except Exception as exc:
-                    logger.warning("SAM3 idle unload failed (%s)", type(exc).__name__)
+            await self.unload_if_idle()
+
+    async def unload_if_idle(self) -> None:
+        generation = self.model_generation
+        if (
+            self.engine.model_loaded
+            and not self.model_loading
+            and self._active is None
+            and self._pending.empty()
+            and self._idle_expired()
+        ):
+            try:
+                async with self._gpu_lock:
+                    if (
+                        generation == self.model_generation
+                        and not self._settings_lock.locked()
+                        and self.engine.model_loaded
+                        and self._active is None
+                        and self._pending.empty()
+                        and not self.model_loading
+                        and self._idle_expired()
+                    ):
+                        await asyncio.to_thread(self.engine.unload)
+            except Exception as exc:
+                logger.warning("SAM3 idle unload failed (%s)", type(exc).__name__)
 
     def _prune_jobs(self) -> None:
         now = time.monotonic()

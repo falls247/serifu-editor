@@ -92,7 +92,8 @@ export function createSam3RequestNamespace(pageId, sessionId = globalThis.crypto
 
 export class Sam3Client extends EventTarget {
   constructor({ fetchImpl = globalThis.fetch?.bind(globalThis), baseUrl = API_ROOT, pollInterval = 500, maxWait = 10 * 60_000,
-    healthPollInterval = 10_000, healthLoadingInterval = 1000, documentImpl = globalThis.document } = {}) {
+    healthPollInterval = 10_000, healthLoadingInterval = 1000, documentImpl = globalThis.document,
+    now = () => performance.now(), activityInterval = 5000 } = {}) {
     super();
     if (typeof fetchImpl !== 'function') throw new TypeError('fetch implementation is required');
     this.fetch = fetchImpl;
@@ -111,10 +112,86 @@ export class Sam3Client extends EventTarget {
     this.healthPollInterval = healthPollInterval;
     this.healthLoadingInterval = healthLoadingInterval;
     this.document = documentImpl;
+    this.now = now;
+    this.activityInterval = activityInterval;
+    this.activitySession = globalThis.crypto.randomUUID();
+    this.activitySequence = 0;
+    this.activityPending = null;
+    this.activityTimer = null;
+    this.activityInFlight = false;
+    this.activityLastSent = -Infinity;
+    this.activityBackoffUntil = 0;
+    this.activityFailures = 0;
+    this.activityCleanup = null;
+    this.settingsEpoch = null;
+    this.settingsRevision = -1;
+    this.retiredSettingsEpochs = new Set();
     this.onVisibilityChange = () => {
       clearTimeout(this.healthTimer); this.healthTimer = null;
       if (!this.document?.hidden) void this.health({ force: true }).catch(() => {});
     };
+  }
+
+  startActivityTracking(target = this.document, windowTarget = globalThis.window) {
+    if (this.activityCleanup) return this.activityCleanup;
+    const unsubscribe = this.subscribeModelState(() => {});
+    const activity = event => { if (event.isTrusted) this.noteActivity(); };
+    const events = ['pointerdown', 'pointermove', 'keydown', 'input', 'click', 'wheel', 'touchstart', 'touchmove'];
+    const options = { capture: true, passive: true };
+    for (const name of events) target?.addEventListener(name, activity, options);
+    const flush = () => {
+      if (this.document?.hidden) { clearTimeout(this.activityTimer); this.activityTimer = null; void this.flushActivity(true); }
+    };
+    const pagehide = () => { clearTimeout(this.activityTimer); this.activityTimer = null; void this.flushActivity(true); };
+    this.document?.addEventListener('visibilitychange', flush);
+    windowTarget?.addEventListener('pagehide', pagehide);
+    this.activityCleanup = () => {
+      for (const name of events) target?.removeEventListener(name, activity, options);
+      this.document?.removeEventListener('visibilitychange', flush);
+      windowTarget?.removeEventListener('pagehide', pagehide);
+      clearTimeout(this.activityTimer); this.activityTimer = null; this.activityPending = null; this.activityCleanup = null;
+      unsubscribe();
+    };
+    return this.activityCleanup;
+  }
+
+  noteActivity() {
+    const state = this.modelState, now = this.now();
+    if (this.document?.hidden || this.modelError || !state?.activityEpoch || now < this.activityBackoffUntil) return;
+    this.activityPending = { at: now, epoch: state.activityEpoch, window: state.activityWindow, sequence: ++this.activitySequence };
+    if (!this.activityTimer && !this.activityInFlight) {
+      this.activityTimer = setTimeout(() => { this.activityTimer = null; void this.flushActivity(); },
+        Math.max(0, this.activityLastSent + this.activityInterval - now));
+      this.activityTimer.unref?.();
+    }
+  }
+
+  async flushActivity(keepalive = false) {
+    const pending = this.activityPending;
+    if (!pending || this.activityInFlight) return;
+    this.activityPending = null;
+    const now = this.now(), elapsedSeconds = (now - pending.at) / 1000;
+    if (elapsedSeconds < 0 || elapsedSeconds > 10 || pending.epoch !== this.modelState?.activityEpoch || this.modelError) return;
+    this.activityInFlight = true; this.activityLastSent = now;
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 10_000);
+    try {
+      const response = await this.fetch(`${this.baseUrl}/activity`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive, signal: controller.signal,
+        body: JSON.stringify({ sessionId: this.activitySession, sequence: pending.sequence, epoch: pending.epoch, window: pending.window, elapsedSeconds }),
+      });
+      if (!response.ok) throw await responseError(response);
+      this.activityFailures = 0;
+    } catch {
+      this.activityBackoffUntil = this.now() + Math.min(60_000, 5000 * 2 ** Math.min(++this.activityFailures, 4));
+      this.activityPending = null;
+    } finally {
+      clearTimeout(timeout); this.activityInFlight = false;
+      if (this.activityPending && !this.document?.hidden && !keepalive) {
+        this.activityTimer = setTimeout(() => { this.activityTimer = null; void this.flushActivity(); },
+          Math.max(0, this.activityLastSent + this.activityInterval - this.now()));
+        this.activityTimer.unref?.();
+      }
+    }
   }
 
   subscribeModelState(listener) {
@@ -131,7 +208,17 @@ export class Sam3Client extends EventTarget {
     };
   }
 
+  acceptSettingsVersion(data) {
+    if (!data?.serverEpoch || !Number.isInteger(data.settingsRevision)) return true;
+    if (this.retiredSettingsEpochs.has(data.serverEpoch)
+        || (data.serverEpoch === this.settingsEpoch && data.settingsRevision < this.settingsRevision)) return false;
+    if (this.settingsEpoch && this.settingsEpoch !== data.serverEpoch) this.retiredSettingsEpochs.add(this.settingsEpoch);
+    this.settingsEpoch = data.serverEpoch; this.settingsRevision = data.settingsRevision;
+    return true;
+  }
+
   publishModelState(health, error = null) {
+    if (!this.acceptSettingsVersion(health)) return;
     const changed = JSON.stringify(this.modelState) !== JSON.stringify(health)
       || this.modelError?.message !== error?.message;
     this.modelState = health; this.modelError = error;
@@ -151,22 +238,37 @@ export class Sam3Client extends EventTarget {
     this.healthTimer.unref?.();
   }
 
-  async saveModelPath(modelPath) {
+  async saveModelPath(modelPath) { return this.saveSettings({ modelPath }); }
+
+  async saveIdleMinutes(minutes) {
+    if (!Number.isInteger(minutes) || minutes < 1 || minutes > 240) throw new Sam3ApiError('解放時間は1〜240分の整数で指定', { code: 'INVALID_SETTING' });
+    return this.saveSettings({ modelIdleSeconds: minutes * 60 });
+  }
+
+  async saveSettings(settings) {
     const response = await this.fetch(`${this.baseUrl}/settings`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ modelPath }),
+      body: JSON.stringify(settings),
     });
     if (!response.ok) throw await responseError(response);
     const data = await response.json();
     if (typeof data.modelPath !== 'string' || !data.modelPath.trim()) {
       throw new Sam3ApiError('モデルパスの保存応答が不正', { code: 'INVALID_RESPONSE' });
     }
+    if ('modelIdleSeconds' in settings && data.modelIdleSeconds !== settings.modelIdleSeconds) {
+      throw new Sam3ApiError('解放時間の保存応答が不正', { code: 'INVALID_RESPONSE' });
+    }
+    if (!this.acceptSettingsVersion(data)) {
+      return this.health({ force: true });
+    }
     // A pre-save health response must never restore the previous model path.
     // Let any request finish before starting the next one, preserving one in flight.
     this.healthRevision++;
     this.healthCheckedAt = 0;
-    this.modelState = null; this.modelError = null;
-    this.dispatchEvent(new CustomEvent('model-path-saved', { detail: data.modelPath }));
+    if ('modelPath' in settings) {
+      this.modelState = null; this.modelError = null;
+      this.dispatchEvent(new CustomEvent('model-path-saved', { detail: data.modelPath }));
+    } else this.publishModelState({ ...this.modelState, ...data }, null);
     if (this.modelSubscribers.size) void this.health({ force: true }).catch(() => {});
     return data;
   }
@@ -184,6 +286,7 @@ export class Sam3Client extends EventTarget {
           const data = await response.json();
           if (!['ready', 'loading', 'unloaded', 'error'].includes(data?.status)) throw new Sam3ApiError('SAM3 health response is invalid', { code: 'INVALID_RESPONSE' });
           if (revision === this.healthRevision) {
+            if (!this.acceptSettingsVersion(data)) return { data: null, revision: -1 };
             this.healthCheckedAt = Date.now(); this.healthFailures = 0;
             this.publishModelState(data);
           }

@@ -90,6 +90,7 @@ function resumePreviewBackground() {
 $('fullPreview').addEventListener('close', resumePreviewBackground);
 let sourceDirectory = null, sourceFolderName = null, currentTask=null, fontVersion=0;
 const imagePool=new ImagePool(),pngCache=new ExportCache(),sam3Client=new Sam3Client();
+sam3Client.startActivityTracking();
 Object.defineProperty(window,'serifuLiveMetrics',{get:()=>({visibility:document.visibilityState,focused:document.hasFocus(),task:currentTask?{...currentTask.data,metrics:structuredClone(currentTask.metrics)}:null,workers:imagePool.workers.map(s=>({ready:s.ready,busy:s.busy,job:s.currentJob})),starting:!!imagePool.starting,pool:structuredClone(imagePool.metrics)})});
 const editLocked=()=>readOnly||(busy&&currentTask?.data.kind!=='画像追加');
 const viewLocked=()=>busy&&currentTask?.data.kind==='レイヤー一括操作';

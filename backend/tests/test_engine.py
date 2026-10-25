@@ -36,6 +36,23 @@ def _settings() -> Settings:
     return Settings(model_path=Path("/unused"), ui_origins=frozenset())
 
 
+def test_unload_releases_cast_cache_before_cuda_cache():
+    engine = Sam3Engine(_settings())
+    torch = FakeTorch()
+    operations = []
+    torch.clear_autocast_cache = lambda: operations.append("cast")
+    torch.cuda.empty_cache = lambda: operations.append("cuda")
+    engine._torch = torch
+    engine._model = object()
+    engine._processor = object()
+    engine.model_loaded = True
+    engine.unload()
+    assert engine._model is engine._processor is None
+    assert not engine.model_loaded
+    assert engine.status == "unloaded"
+    assert operations == ["cast", "cuda"]
+
+
 def test_inference_failure_logs_traceback_but_returns_generic_error(monkeypatch, caplog):
     engine = Sam3Engine(_settings())
     engine._torch = FakeTorch()
