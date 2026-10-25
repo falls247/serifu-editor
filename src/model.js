@@ -89,11 +89,12 @@ function normalizeTextLayer(input, version) {
   if(!['none','grunge'].includes(inkTexture)||!Number.isInteger(textureSeed)||textureSeed<0||textureSeed>4294967295)throw new Error('インク質感の設定が不正');
   const glyphSeed=input.glyphSeed??inkSeed(input.text);
   if (!Number.isInteger(glyphSeed) || glyphSeed<0 || glyphSeed>4294967295) throw new Error('文字のばらつき設定が不正');
+  if(kind==='sfx'&&input.autoFit!==undefined&&typeof input.autoFit!=='boolean')throw new Error('効果音のAutoFit設定が不正');
   return {
     id: crypto.randomUUID(), kind, speaker, text: input.text,
     x: input.x, y: input.y, w: input.w, h: input.h, size: input.size,
     rotation: input.rotation, vertical: input.vertical, lineAlign:extras.lineAlign, outline, effect, color: input.color,
-    ...(kind==='dialogue'?speechColors(input):{textOutlineColor}),
+    ...(kind==='dialogue'?speechColors(input):{textOutlineColor,autoFit:input.autoFit??false}),
     ...extras, glyphSeed, inkTexture, textureSeed, ...(kind==='sfx'&&input.lettering!=null?{lettering:normalizeLettering(input.lettering,input.text,{size:input.size,vertical:input.vertical})}:{}), presetId: typeof input.presetId==='string' ? input.presetId : null,
   };
 }
