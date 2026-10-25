@@ -759,7 +759,10 @@ function updateControls(p) {
       if(layer.lettering?.enabled&&layer.lettering.strokes.length){
         const requestedRun=Number(card.querySelector('[data-glyph-stroke-run]')?.value),run=layer.lettering.strokes.find(item=>item.runStart===requestedRun)??layer.lettering.strokes[0],widthScale=strokeWidthScale(run,layer.size);
         for(const [field,index] of [['start',0],['end',run.widths.length-1]]){
-          const input=card.querySelector(`[data-glyph-stroke-width=${field}]`);if(input&&input!==document.activeElement){input.max=String(500*widthScale);input.value=strokeWidthControlDisplay(run,index,layer.size);}
+          for(const input of card.querySelectorAll(`[data-glyph-stroke-width=${field}],[data-glyph-stroke-width-range=${field}]`)){
+            input.max=String(Math.floor((500*widthScale+1e-8)*10)/10);
+            if(input!==document.activeElement)input.value=strokeWidthControlDisplay(run,index,layer.size);
+          }
         }
         const multiplier=card.querySelector('[data-glyph-stroke-width-scale]');if(multiplier&&multiplier!==document.activeElement)multiplier.value=String(Number((run.widthMultiplier*100).toFixed(4)));
         const mode=activeGlyphEdit(p,layer),advancedWidth=card.querySelector('[data-sfx-editor=widthW]');
@@ -1424,8 +1427,14 @@ function sfxLetteringPanel(p,l){
     for(const [name,title] of [['continuous','連続線'],['font','フォント文字']]){const option=element('option','',title);option.value=name;select.append(option);}
     select.value=run.mode;modeLabel.append(select);fieldset.append(modeLabel);
     for(const [field,title,index] of [['start','始点の線幅',0],['end','終点の線幅',run.widths.length-1]]){
-      const label=element('label','',title),input=element('input');input.type='number';input.min='0';input.max='500';
-      input.step='0.1';input.dataset.glyphStrokeWidth=field;input.max=String(500*strokeWidthScale(run,l.size));input.value=strokeWidthControlDisplay(run,index,l.size);input.title='上下にドラッグして線幅を調整。上で太く、下で細く。';label.append(input);fieldset.append(label);connectStrokeNumericDrag(input,p,l,run,field,index);
+      const label=element('label','',title),wrap=element('div','numeric-setting'),input=element('input'),slider=element('input');
+      input.type='number';input.dataset.glyphStrokeWidth=field;input.title='上下にドラッグして線幅を調整。上で太く、下で細く。';
+      slider.type='range';slider.dataset.glyphStrokeWidthRange=field;slider.title='左右にドラッグして線幅を調整。右で太く、左で細く。';
+      for(const control of [input,slider]){
+        control.min='0';control.max=String(Math.floor((500*strokeWidthScale(run,l.size)+1e-8)*10)/10);control.step='0.1';control.value=strokeWidthControlDisplay(run,index,l.size);
+        control.setAttribute('aria-label',title+(control===slider?' スライダー':''));
+      }
+      wrap.append(input,slider);label.append(wrap);fieldset.append(label);connectStrokeNumericDrag(input,p,l,run,field,index);
     }
     const widthScaleLabel=element('label','','長音の太さ倍率（%）'),widthScale=element('input');widthScale.type='number';widthScale.min='1';widthScale.max='500';widthScale.step='1';widthScale.dataset.glyphStrokeWidthScale='true';widthScale.value=String(Number((run.widthMultiplier*100).toFixed(4)));widthScale.title='上下にドラッグして倍率を調整。上で増加、下で減少。';widthScaleLabel.append(widthScale);fieldset.append(widthScaleLabel);connectStrokeNumericDrag(widthScale,p,l,run,'scale');
     const label=element('label','','曲線'),shape=element('select');shape.dataset.glyphStrokeShape='true';
@@ -1881,6 +1890,16 @@ $('deck').addEventListener('focusout', event => {
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
+  if(event.target.matches('[data-glyph-stroke-width-range]')){
+    const input=event.target,p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId),mode=activeGlyphEdit(p,l);
+    if(!mode)return;
+    const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];if(!run)return;
+    const index=input.dataset.glyphStrokeWidthRange==='start'?0:run.widths.length-1,value=Number(input.value)/strokeWidthScale(run,l.size);
+    if(run.widths[index].w===value)return;
+    if(!editing.has(input)){checkpoint(p);editing.add(input);}
+    run.widths[index].w=value;
+    markChanged(p);drawPage(p);updateControls(p);return;
+  }
   if(event.target.matches('[data-mask-field],[data-mask-range-field]')){updateMaskEffectField(pageFrom(event.target),event.target);return;}
   if(event.target.matches('[data-crop-field]')){
     const p=pageFrom(event.target);if(!p?.cropDraft)return;
