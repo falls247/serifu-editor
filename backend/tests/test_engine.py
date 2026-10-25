@@ -36,6 +36,33 @@ def _settings() -> Settings:
     return Settings(model_path=Path("/unused"), ui_origins=frozenset())
 
 
+def test_inference_failure_logs_traceback_but_returns_generic_error(monkeypatch, caplog):
+    engine = Sam3Engine(_settings())
+    engine._torch = FakeTorch()
+    engine.model_loaded = True
+
+    def infer_once(**_kwargs):
+        raise RuntimeError("diagnostic runtime detail")
+
+    monkeypatch.setattr(engine, "_infer_once", infer_once)
+    with pytest.raises(EngineError) as captured:
+        engine.infer(
+            image=np.zeros((3, 4, 3), dtype=np.uint8),
+            mode="points",
+            prompt=None,
+            threshold=0.5,
+            points=[{"x": 1.0, "y": 1.0, "positive": True}],
+            refine_bbox=None,
+        )
+    assert captured.value.code == "INFERENCE_FAILED"
+    assert captured.value.retryable is True
+    assert "diagnostic runtime detail" not in captured.value.message
+    record = next(record for record in caplog.records if "SAM3 inference failed" in record.message)
+    assert record.exc_info[0] is RuntimeError
+    assert "mode=points image=4x3 points=1 thread=" in record.message
+    assert "diagnostic runtime detail" in caplog.text
+
+
 def test_cuda_oom_retries_once_and_clears_cache(monkeypatch: pytest.MonkeyPatch) -> None:
     engine = Sam3Engine(_settings())
     engine._torch = FakeTorch()

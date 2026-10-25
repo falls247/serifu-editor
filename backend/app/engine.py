@@ -282,7 +282,16 @@ class Sam3Engine:
                     if not self._is_cuda_oom(exc):
                         if isinstance(exc, EngineError):
                             raise
-                        logger.warning("SAM3 inference failed (%s)", type(exc).__name__)
+                        logger.warning(
+                            "SAM3 inference failed (%s); mode=%s image=%sx%s points=%s thread=%s",
+                            type(exc).__name__,
+                            mode,
+                            image.shape[1],
+                            image.shape[0],
+                            len(points),
+                            threading.get_ident(),
+                            exc_info=True,
+                        )
                         raise EngineError(
                             "INFERENCE_FAILED",
                             "SAM3 inference failed. Retry the latest request.",
