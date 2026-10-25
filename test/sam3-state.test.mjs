@@ -8,6 +8,106 @@ const deferred = () => {
   const promise = new Promise(done => { resolve = done; });
   return { promise, resolve };
 };
+const activityHealth = (revision = 0, seconds = 900) => ({ ...healthData(), modelIdleSeconds: seconds,
+  serverEpoch: 'server-a', settingsRevision: revision, activityEpoch: 'abc123', activityWindow: 100, idleRemainingSeconds: seconds, idleElapsedSeconds: 0 });
+
+test('activity batches only actual operations and drops stale, hidden, offline or previous-generation input', async () => {
+  const document = new EventTarget(); document.hidden = false;
+  let clock = 0, failed = false;
+  const notices = [];
+  const client = new Sam3Client({ documentImpl: document, now: () => clock, activityInterval: 5000, fetchImpl: async (url, options) => {
+    if (url.endsWith('/health')) return Response.json(activityHealth());
+    notices.push(JSON.parse(options.body));
+    if (failed) throw new Error('offline');
+    return Response.json({ accepted: true });
+  } });
+  const cleanup = client.startActivityTracking(document, new EventTarget());
+  assert.equal(client.startActivityTracking(document), cleanup, 'one listener set per app');
+  try {
+    await client.health();
+    document.dispatchEvent(new Event('input'));
+    assert.equal(client.activityPending, null, 'synthetic edits and health are not activity');
+    client.noteActivity();
+    await until(() => notices.length === 1);
+    clock = 1000;
+    for (let i = 0; i < 100; i++) client.noteActivity();
+    assert.equal(notices.length, 1);
+    clock = 4000;
+    document.hidden = true; document.dispatchEvent(new Event('visibilitychange'));
+    await until(() => notices.length === 2);
+    assert.equal(notices[1].elapsedSeconds, 3);
+    assert.deepEqual(Object.keys(notices[1]).sort(), ['elapsedSeconds', 'epoch', 'sequence', 'sessionId', 'window']);
+    client.noteActivity(); assert.equal(client.activityPending, null);
+    document.hidden = false;
+    clock = 5000; client.noteActivity(); clock = 16_000;
+    await client.flushActivity();
+    assert.equal(notices.length, 2, 'stale operations are never replayed');
+    client.noteActivity(); client.modelState.activityEpoch = 'new';
+    await client.flushActivity();
+    assert.equal(notices.length, 2, 'prior generation does not renew lifetime');
+    failed = true; client.noteActivity(); await client.flushActivity();
+    await until(() => !client.activityInFlight);
+    client.noteActivity();
+    assert.equal(client.activityPending, null, 'failures back off and discard input');
+    clock = 60_000; client.modelError = new Error('offline'); client.noteActivity();
+    assert.equal(client.activityPending, null);
+  } finally { cleanup(); }
+  assert.equal(client.activityTimer, null);
+  assert.equal(client.healthTimer, null);
+  assert.equal(client.modelSubscribers.size, 0);
+});
+
+test('saving idle time invalidates delayed health and publishes applied settings to every panel', async () => {
+  const delayed = deferred(), received = [];
+  let healthCalls = 0;
+  const client = new Sam3Client({ fetchImpl: async url => {
+    if (url.endsWith('/settings')) return Response.json({ modelPath: '/models/sam3.pt', ...activityHealth(2, 60) });
+    healthCalls++;
+    return Response.json(healthCalls === 1 ? await delayed.promise : activityHealth(2, 60));
+  } });
+  client.publishModelState(activityHealth(1));
+  const unsub = client.subscribeModelState(({ health }) => received.push(health?.modelIdleSeconds));
+  try {
+    const old = client.health({ force: true });
+    await until(() => healthCalls === 1);
+    await client.saveIdleMinutes(1);
+    delayed.resolve(activityHealth(1));
+    assert.equal((await old).modelIdleSeconds, 60);
+    assert.equal(received.at(-1), 60);
+    assert.deepEqual(received, [900, 60]);
+    for (const value of [0, 241, 1.5, NaN, '1']) await assert.rejects(client.saveIdleMinutes(value));
+  } finally { unsub(); }
+});
+
+test('out-of-order settings responses cannot restore an older applied revision', async () => {
+  const first = deferred();
+  let saves = 0;
+  const client = new Sam3Client({ fetchImpl: async url => {
+    if (url.endsWith('/settings')) return Response.json(++saves === 1 ? await first.promise : activityHealth(2, 120));
+    return Response.json(activityHealth(2, 120));
+  } });
+  client.publishModelState(activityHealth());
+  const old = client.saveIdleMinutes(1);
+  await until(() => saves === 1);
+  await client.saveIdleMinutes(2);
+  first.resolve(activityHealth(1, 60));
+  assert.equal((await old).modelIdleSeconds, 120);
+  assert.equal(client.modelState.modelIdleSeconds, 120);
+  assert.equal(client.settingsRevision, 2);
+});
+
+test('a response from a retired server cannot replace settings after restart', async () => {
+  const old = deferred();
+  const current = { ...activityHealth(0, 120), serverEpoch: 'server-b' };
+  const client = new Sam3Client({ fetchImpl: async url => Response.json(url.endsWith('/settings') ? await old.promise : current) });
+  client.publishModelState(activityHealth(10));
+  const save = client.saveIdleMinutes(1);
+  client.publishModelState(current);
+  old.resolve(activityHealth(11, 60));
+  assert.equal((await save).modelIdleSeconds, 120);
+  assert.equal(client.modelState.serverEpoch, 'server-b');
+  assert.equal(client.modelState.settingsRevision, 0);
+});
 async function until(predicate) {
   const deadline = Date.now() + 2000;
   while (!predicate()) {

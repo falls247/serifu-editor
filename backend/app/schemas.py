@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 
 RequestId = Annotated[
@@ -105,10 +105,25 @@ class HealthResponse(StrictModel):
     loadElapsedSeconds: float | None = None
     lastLoadSeconds: float | None = None
     loadTimings: dict[str, float] = Field(default_factory=dict)
+    settingsRevision: int = 0
+    serverEpoch: str = ""
+    activityEpoch: str = ""
+    activityWindow: int = 0
+    modelIdleSeconds: int = 900
+    idleElapsedSeconds: float = 0
+    idleRemainingSeconds: float = 900
+    idleReleaseDeferred: bool = False
 
 
 class ModelSettingsRequest(StrictModel):
-    modelPath: str = Field(min_length=1, max_length=4096)
+    modelPath: str | None = Field(default=None, min_length=1, max_length=4096)
+    modelIdleSeconds: int | None = Field(default=None, strict=True, ge=60, le=14400, multiple_of=60)
+
+    @model_validator(mode="after")
+    def validate_update(self) -> ModelSettingsRequest:
+        if not self.model_fields_set or any(getattr(self, key) is None for key in self.model_fields_set):
+            raise ValueError("provide at least one non-null setting")
+        return self
 
     @field_validator("modelPath")
     @classmethod
@@ -117,6 +132,14 @@ class ModelSettingsRequest(StrictModel):
         if not value or any(character in value for character in ("\x00", "\n", "\r")):
             raise ValueError("model path is invalid")
         return value
+
+
+class ActivityRequest(StrictModel):
+    sessionId: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    sequence: int = Field(strict=True, ge=1, le=9007199254740991)
+    epoch: str = Field(min_length=1, max_length=64, pattern=r"^[a-f0-9]+$")
+    window: int = Field(strict=True, ge=0)
+    elapsedSeconds: float = Field(ge=0, le=10, allow_inf_nan=False)
 
 
 class ImageResponse(StrictModel):

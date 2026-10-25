@@ -11,16 +11,24 @@ from pathlib import Path
 MODEL_SETTINGS_FILE = Path(__file__).resolve().parents[1] / ".local" / "sam3-settings.json"
 
 
-def saved_model_path(settings_file: Path) -> str | None:
+def saved_settings(settings_file: Path, *, for_update: bool = False) -> dict:
     try:
-        value = json.loads(settings_file.read_text(encoding="utf-8")).get("modelPath")
-        if isinstance(value, str) and value.strip() and "\x00" not in value:
+        value = json.loads(settings_file.read_text(encoding="utf-8"))
+        if isinstance(value, dict):
             return value
+        raise ValueError("settings must be an object")
     except FileNotFoundError:
         pass
-    except (OSError, ValueError, AttributeError):
+    except (OSError, ValueError, AttributeError) as exc:
+        if for_update:
+            raise OSError("Existing settings could not be read; refusing partial overwrite") from exc
         logging.getLogger(__name__).warning("SAM3 saved model settings could not be read")
-    return None
+    return {}
+
+
+def saved_model_path(settings_file: Path) -> str | None:
+    value = saved_settings(settings_file).get("modelPath")
+    return value if isinstance(value, str) and value.strip() and not any(c in value for c in "\x00\n\r") else None
 
 
 def _int_env(name: str, default: int, *, minimum: int = 1) -> int:
@@ -75,7 +83,7 @@ class Settings:
     max_response_bytes: int = 16 * 1024 * 1024
     max_candidate_pixels: int = 128 * 1024 * 1024
     inference_timeout_seconds: float = 180.0
-    model_idle_seconds: int = 600
+    model_idle_seconds: int = 900
     maintenance_interval_seconds: int = 10
     mock_mode: bool = False
 
@@ -84,7 +92,15 @@ class Settings:
             raise ValueError("api_port must be between 1 and 65535")
 
     def save_model_path(self, model_path: Path) -> None:
+        self.save_settings(model_path=model_path)
+
+    def save_settings(self, *, model_path: Path | None = None, model_idle_seconds: int | None = None) -> None:
         settings_file = self.model_settings_file
+        values = saved_settings(settings_file, for_update=True)
+        if model_path is not None:
+            values["modelPath"] = str(model_path)
+        if model_idle_seconds is not None:
+            values["modelIdleSeconds"] = model_idle_seconds
         settings_file.parent.mkdir(parents=True, exist_ok=True)
         temporary: Path | None = None
         try:
@@ -92,7 +108,7 @@ class Settings:
                 mode="w", encoding="utf-8", dir=settings_file.parent, delete=False
             ) as output:
                 temporary = Path(output.name)
-                json.dump({"modelPath": str(model_path)}, output, ensure_ascii=False)
+                json.dump(values, output, ensure_ascii=False)
                 output.write("\n")
             temporary.replace(settings_file)
         finally:
@@ -102,6 +118,9 @@ class Settings:
     @classmethod
     def from_env(cls) -> Settings:
         settings_file = Path(os.getenv("SAM3_SETTINGS_FILE", str(MODEL_SETTINGS_FILE))).expanduser()
+        idle = saved_settings(settings_file).get("modelIdleSeconds")
+        if type(idle) is not int or idle < 60 or idle > 14400 or idle % 60:
+            idle = _int_env("SAM3_MODEL_IDLE_SECONDS", 900)
         origins = os.getenv(
             "UI_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
         )
@@ -139,7 +158,7 @@ class Settings:
             inference_timeout_seconds=_float_env(
                 "SAM3_INFERENCE_TIMEOUT_SECONDS", 180.0
             ),
-            model_idle_seconds=_int_env("SAM3_MODEL_IDLE_SECONDS", 600),
+            model_idle_seconds=idle,
             maintenance_interval_seconds=_int_env(
                 "SAM3_MAINTENANCE_INTERVAL_SECONDS", 10
             ),

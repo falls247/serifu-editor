@@ -2,6 +2,7 @@ import { assetFromEncoded, verifyMaskAsset } from './mask-codec.js';
 import { createSam3RequestNamespace, LatestSam3Request, Sam3ApiError } from './sam3-client.js';
 import { MAX_PROJECT_MASK_DECODED_BYTES } from './project-io.js';
 import { previewFocusPanForAnchor, previewFocusPointFromClient } from './preview-focus.js';
+import { maskScaleLimit } from './model.js';
 
 const PALETTE = ['#c8ee91', '#ef4b91', '#74c8ef', '#ffc66d', '#ba9bff', '#54d7b0', '#ff8c6b', '#d2dc6a'];
 const EFFECTS = [['pixelate', 'ピクセレート'], ['blur', 'ぼかし'], ['fill-black', '黒塗り'], ['fill-white', '白塗り']];
@@ -25,12 +26,17 @@ function createPanel(panel) {
     <header class="sam3-panel-header"><div><span class="sam3-kicker">LOCAL SEGMENTATION</span><strong>SAM3 マスク</strong></div><div class="sam3-health-controls"><button type="button" data-sam3-action="health">接続確認</button><p class="sam3-connection" data-sam3-connection role="status">ローカル推論APIに接続中…</p></div></header>
     <div class="sam3-model-path-row"><label for="${modelPathId}">SAM3モデルパス</label><input id="${modelPathId}" data-sam3-model-path type="text" maxlength="4096" placeholder="/home/user/dev/models/vision/sam3.pt" autocomplete="off" spellcheck="false"><button type="button" data-sam3-action="save-model-path" disabled>保存</button></div>
     <p class="sam3-model-path-status" data-sam3-model-path-status role="status">モデルパスを取得中…</p>
+    <div class="sam3-idle-row"><label for="sam3-idle-${panelId}">無操作でモデルを解放するまで（分）</label><input id="sam3-idle-${panelId}" data-sam3-idle-minutes type="number" min="1" max="240" step="1" inputmode="numeric"><button type="button" data-sam3-action="save-idle" disabled>保存</button></div>
+    <p class="sam3-idle-status" data-sam3-idle-status role="status">解放時間を取得中…</p>
+    <p class="sam3-idle-state" data-sam3-idle-state role="status"></p>
+    <p class="sam3-help">このアプリの文字編集・キー・ポインタ・タッチ操作を対象に計時。解放後の検出は再読込み待ちが発生する。長く設定するとGPUメモリを長く占有する。</p>
     <div class="sam3-prompt-row"><label for="${promptId}">テキスト検出</label><input id="${promptId}" data-sam3-prompt maxlength="500" placeholder="例：赤い傘を持つ人物" autocomplete="off"><button type="button" class="primary" data-sam3-action="detect">検出</button></div>
     <div class="sam3-input-tools"><label>信頼度 <output data-sam3-threshold-value>0.50</output><input data-sam3-threshold type="range" min="0" max="1" step="0.05" value="0.5"></label><span>この画像：<span data-sam3-request-status role="status">待機中</span></span></div>
     <div class="sam3-point-tools" role="group" aria-label="元画像での操作"><span>元画像クリック</span><button type="button" data-interaction="candidate" aria-pressed="true">候補選択</button><button type="button" data-interaction="include" aria-pressed="false">＋ 前景点</button><button type="button" data-interaction="exclude" aria-pressed="false">− 背景点</button><button type="button" data-sam3-action="clear-points">点を全消去</button></div>
     <p class="sam3-help" data-sam3-help>候補選択でマスクを確認。前景・背景点は複数追加でき、入力ごとに最新結果を待つ。</p>
     <div class="sam3-points" data-sam3-points aria-label="指定ポイント"></div>
     <div class="sam3-candidate-heading"><strong>検出候補</strong><div><button type="button" data-sam3-action="all">全選択</button><button type="button" data-sam3-action="none">全解除</button><label class="sam3-display-toggle"><input data-sam3-display type="checkbox" checked>重ねて表示</label></div></div>
+    <p class="sam3-selection-count" data-sam3-selection-count role="status">選択中 0件</p>
     <div class="sam3-candidates" data-sam3-candidates><p class="sam3-empty">検出結果はまだない。</p></div>
     <div class="sam3-effect-settings"><label>選択候補の効果<select data-sam3-effect></select></label><label data-sam3-block-wrap>ブロック幅（px）<input data-sam3-block type="number" min="1" max="200" step="1" value="12"></label><label data-sam3-blur-wrap hidden>ぼかし半径（px）<input data-sam3-blur type="number" min="0" max="100" step="1" value="12"></label></div>
     <p class="sam3-warning sam3-response-warning" data-sam3-warning role="status" hidden></p>
@@ -42,9 +48,37 @@ function createPanel(panel) {
 }
 
 function createMaskField(field, title, value, min, max, step = '1') {
-  const label = element('label', '', title), input = element('input');
-  input.type = 'number'; input.dataset.maskField = field; input.min = String(min); input.max = String(max); input.step = step; input.value = String(value);
-  label.append(input); return label;
+  const label = element('label', 'mask-numeric-control', title), input = element('input'), slider = element('input');
+  input.type = 'number'; input.dataset.maskField = field; input.min = String(min); input.max = String(max); input.step = step === 'any' ? '0.1' : step; input.value = String(value);
+  input.setAttribute('aria-label', title);
+  slider.type = 'range'; slider.dataset.maskRangeField = field; slider.min = String(min); slider.max = String(max); slider.step = step; slider.value = String(value);
+  slider.setAttribute('aria-label', `${title} スライダー`);
+  label.append(input, slider); return label;
+}
+
+export function syncMaskEffectControls(card, effect, asset, imageWidth, imageHeight) {
+  const limits = { blockSize: [1, 200], blurRadius: [0, 100], marginPx: [-100, 100],
+    x: [0, imageWidth - effect.w], y: [0, imageHeight - effect.h],
+    w: [1, imageWidth - effect.x], h: [1, imageHeight - effect.y],
+    scalePercent: [1, asset ? maskScaleLimit(asset, imageWidth, imageHeight) : 100] };
+  for (const control of card.querySelectorAll('[data-mask-field],[data-mask-range-field]')) {
+    const key = control.dataset.maskField ?? control.dataset.maskRangeField;
+    if (limits[key]) { control.min = String(limits[key][0]); control.max = String(limits[key][1]); }
+    if (key === 'scalePercent') {
+      control.disabled = !asset;
+      // Pixel geometry remains authoritative; percentages are only a view over it.
+      const percent = asset ? Number((effect.w / asset.bbox.width * 100).toPrecision(12)) : 100;
+      // Independently resized legacy geometry can lie outside uniform-scale bounds.
+      control.min = String(Math.min(1, percent));
+      control.max = String(Math.max(Number(control.max), percent));
+      control.value = String(percent);
+    } else if (control.type === 'checkbox') control.checked = effect[key];
+    else control.value = String(effect[key]);
+  }
+  card.querySelector('[data-mask-field=blockSize]')?.closest('label')?.toggleAttribute('hidden', effect.effect !== 'pixelate');
+  card.querySelector('[data-mask-field=blurRadius]')?.closest('label')?.toggleAttribute('hidden', effect.effect !== 'blur');
+  const note = card.querySelector('[data-mask-scale-note]');
+  if (note && asset) note.textContent = `元マスク比：幅${(effect.w / asset.bbox.width * 100).toFixed(1)}%・高さ${(effect.h / asset.bbox.height * 100).toFixed(1)}%。倍率変更は元の縦横比・中心基準。画像端では内側へ移動。`;
 }
 
 export function renderMaskEffectSummary(effect, summary) {
@@ -73,16 +107,19 @@ export function createMaskEffectCard(effect, asset, index, selected = false, ima
   blockSize.hidden = effect.effect !== 'pixelate'; blurRadius.hidden = effect.effect !== 'blur';
   grid.append(blockSize, blurRadius);
   grid.append(createMaskField('marginPx', '輪郭補正（px）', effect.marginPx, -100, 100));
+  grid.append(createMaskField('scalePercent', 'サイズ（元の幅比 %）', asset ? effect.w / asset.bbox.width * 100 : 100, 1, asset ? maskScaleLimit(asset, imageWidth, imageHeight) : 100, 'any'));
   grid.append(createMaskField('x', 'X（px）', effect.x, 0, imageWidth - 1));
   grid.append(createMaskField('y', 'Y（px）', effect.y, 0, imageHeight - 1));
   grid.append(createMaskField('w', '幅（px）', effect.w, 1, imageWidth - effect.x));
   grid.append(createMaskField('h', '高さ（px）', effect.h, 1, imageHeight - effect.y));
   card.append(grid);
+  const scaleNote = element('p', 'mask-scale-note'); scaleNote.dataset.maskScaleNote = ''; card.append(scaleNote);
   const order=element('div','layer-actions');
   for(const [action,label] of [['backmost','最背面へ'],['backward','背面へ'],['forward','前面へ'],['frontmost','最前面へ']]){
     const button=element('button','',label);button.type='button';button.dataset.maskAction=action;order.append(button);
   }
   card.append(order);
+  syncMaskEffectControls(card, effect, asset, imageWidth, imageHeight);
   return card;
 }
 
@@ -125,6 +162,41 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   const modelPathInput = query('[data-sam3-model-path]'), modelPathStatus = query('[data-sam3-model-path-status]');
   let savedModelPath = null, modelPathDirty = false, savingModelPath = false, healthSequence = 0;
   let modelPathNotice = '';
+  const idleInput = query('[data-sam3-idle-minutes]'), idleStatus = query('[data-sam3-idle-status]');
+  let savedIdleSeconds = null, idleDirty = false, idleSaving = false, idleNotice = '', apiAvailable = false;
+
+  function updateIdleControls() {
+    const minutes = idleInput.valueAsNumber;
+    query('[data-sam3-action=save-idle]').disabled = !apiAvailable || idleSaving || !idleDirty
+      || !Number.isInteger(minutes) || minutes < 1 || minutes > 240;
+    idleInput.disabled = !apiAvailable || idleSaving;
+    const applied = savedIdleSeconds === null ? '' : `適用中 ${savedIdleSeconds / 60}分（${savedIdleSeconds}秒）`;
+    idleStatus.textContent = !apiAvailable ? 'ローカル推論APIが利用できないため設定変更不可。'
+      : idleSaving ? '保存中…' : [idleNotice || (idleDirty ? '未保存 · 保存で適用（1〜240分の整数）' : '保存済み'), applied].filter(Boolean).join(' · ');
+  }
+
+  function receiveIdle(health) {
+    if (Number.isInteger(health.modelIdleSeconds)) {
+      savedIdleSeconds = health.modelIdleSeconds;
+      if (!idleDirty) idleInput.value = String(savedIdleSeconds / 60);
+      idleDirty = idleInput.valueAsNumber * 60 !== savedIdleSeconds;
+    }
+    query('[data-sam3-idle-state]').textContent = health.status === 'unloaded' ? 'モデル解放済み · 次の検出で再読込み'
+      : health.idleReleaseDeferred || health.status === 'loading' ? 'モデル読込・推論・待機ジョブ中は解放を保留。完了後から計時。'
+      : Number.isFinite(health.idleRemainingSeconds) ? `最終操作・処理完了から ${Math.floor(health.idleElapsedSeconds || 0)}秒 · 解放まで約${Math.ceil(health.idleRemainingSeconds / 60)}分（定期確認時に解放）` : '';
+    updateIdleControls();
+  }
+
+  async function saveIdle() {
+    if (query('[data-sam3-action=save-idle]').disabled) return;
+    idleSaving = true; idleNotice = ''; updateIdleControls();
+    try {
+      const result = await client.saveIdleMinutes(idleInput.valueAsNumber);
+      if (disposed) return;
+      idleDirty = false; receiveIdle(result); idleNotice = '保存済み';
+    } catch (error) { if (!disposed) idleNotice = `保存に失敗: ${error.message}`; }
+    finally { if (!disposed) { idleSaving = false; updateIdleControls(); } }
+  }
 
   function resetFocus() {
     clearTimeout(focusTimer); focusTimer = null;
@@ -264,8 +336,10 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
 
   function updateControls() {
     updateModelPathControls();
+    updateIdleControls();
     const selected = selectedCandidates(draft), canCommit = selected.length > 0 && inputMatchesLastGood() && !requestRunning();
     query('[data-sam3-action=commit]').disabled = !canCommit;
+    query('[data-sam3-selection-count]').textContent = `選択中 ${selected.length}件`;
     query('[data-sam3-action=detect]').disabled = !['ready', 'error'].includes(draft.connection) || requestRunning() || !String(draft.prompt || '').trim() || !image.naturalWidth;
     query('[data-sam3-threshold-value]').value = Number(draft.threshold).toFixed(2);
     query('[data-sam3-block-wrap]').hidden = draft.effect !== 'pixelate';
@@ -275,6 +349,8 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function setConnection(health) {
+    apiAvailable = true;
+    receiveIdle(health);
     receiveModelPath(health.modelPath);
     if (savedModelPath === null && !modelPathDirty && !savingModelPath && !modelPathNotice) modelPathNotice = 'モデルパスを取得できない';
     updateModelPathStatus();
@@ -294,6 +370,8 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function showConnectionError(error) {
+    apiAvailable = false;
+    updateIdleControls();
     draft.connection = 'unavailable';
     if (savedModelPath === null) { modelPathNotice = 'モデルパスを取得できない。ローカルAPIへの接続を確認。'; updateModelPathStatus(); }
     const node = query('[data-sam3-connection]');
@@ -328,7 +406,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     const ctx = overlay.getContext('2d'); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, overlay.width, overlay.height);
     if (!image.naturalWidth || !image.naturalHeight) return;
     const scaleX = backingWidth / image.naturalWidth, scaleY = backingHeight / image.naturalHeight;
-    for (let index = 0; draft.displayCandidates !== false && index < draft.candidates.length; index++) {
+    for (let index = 0; draft.displayCandidates !== false && !draft.candidatesCleared && index < draft.candidates.length; index++) {
       const candidate = draft.candidates[index], { bbox, decoded } = candidate.mask;
       if (!decoded?.length) continue;
       const x = Math.round(bbox.x * scaleX), y = Math.round(bbox.y * scaleY);
@@ -362,6 +440,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function hitCandidate(event) {
+    if (draft.candidatesCleared) return null;
     const rect = overlay.getBoundingClientRect();
     const x = Math.floor((event.clientX - rect.left) * image.naturalWidth / rect.width), y = Math.floor((event.clientY - rect.top) * image.naturalHeight / rect.height);
     for (let index = draft.candidates.length - 1; index >= 0; index--) if (maskAt(draft.candidates[index], x, y)) return draft.candidates[index];
@@ -370,7 +449,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
 
   function updateOverlayEvents() {
     overlay.style.pointerEvents = draft.interaction === 'candidate'
-      ? (draft.displayCandidates !== false && draft.candidates.length ? 'auto' : 'none') : 'auto';
+      ? (draft.displayCandidates !== false && !draft.candidatesCleared && draft.candidates.length ? 'auto' : 'none') : 'auto';
     overlay.style.cursor = draft.interaction === 'candidate' ? (hoverId ? 'pointer' : 'default') : 'crosshair';
   }
 
@@ -424,6 +503,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }
 
   function chooseCandidate(id, checked, additive = false) {
+    if (checked) draft.candidatesCleared = false;
     for (const candidate of draft.candidates) {
       if (candidate.id === id) candidate.selected = checked;
       else if (!additive && checked) candidate.selected = false;
@@ -491,7 +571,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   async function run(input) {
     if (!['ready', 'error'].includes(draft.connection)) { showError(new Error('ローカルSAM3 APIが利用できない')); return; }
     hideError();
-    const snapshot = structuredClone(input), request = requestState.begin(snapshot);
+    const snapshot = structuredClone(input), request = requestState.begin(snapshot), clearRevision = draft.clearRevision || 0;
     draft.requestSeq = request.requestSeq; draft.mode = snapshot.mode; draft.lastInput = snapshot; draft.status = 'uploading'; draft.warnings = [];
     renderWarnings();
     updateControls(); setStatus('uploading');
@@ -512,6 +592,10 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
       if (!request.isCurrent()) return;
       draft.candidates = await parseCandidates(result, snapshot, request.isCurrent);
       if (!request.isCurrent()) return;
+      const clearedDuringRequest = clearRevision !== (draft.clearRevision || 0);
+      draft.candidatesCleared = clearedDuringRequest;
+      hoverId = null;
+      if (clearedDuringRequest) draft.candidates.forEach(candidate => { candidate.selected = false; });
       draft.warnings = Array.isArray(result.warnings)
         ? result.warnings.filter(warning => typeof warning === 'string' && warning.trim()).slice(0, 5).map(warning => warning.trim().slice(0, 400)) : [];
       draft.status = 'ready'; draft.lastGoodInput = snapshot; draft.imageId = page.id; draft.error = null;
@@ -566,6 +650,10 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
   }, { signal });
 
   root.addEventListener('input', event => {
+    if (event.target === idleInput) {
+      idleDirty = idleInput.valueAsNumber * 60 !== savedIdleSeconds;
+      idleNotice = ''; updateIdleControls(); return;
+    }
     if (event.target === modelPathInput) {
       modelPathDirty = modelPathInput.value.trim() !== savedModelPath;
       modelPathNotice = '';
@@ -599,9 +687,12 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     if (!action) return;
     if (action === 'health') { void checkHealth(true, true); return; }
     if (action === 'save-model-path') { void saveModelPath(); return; }
+    if (action === 'save-idle') { void saveIdle(); return; }
     if (action === 'detect') { inferText(); return; }
     if (action === 'clear-points') { draft.points = []; renderPoints(); drawOverlay(); updateControls(); return; }
     if (action === 'all' || action === 'none') {
+      draft.candidatesCleared = action === 'none'; hoverId = null;
+      if (action === 'none') draft.clearRevision = (draft.clearRevision || 0) + 1;
       draft.candidates.forEach(candidate => { candidate.selected = action === 'all'; }); updateCandidateSelection(); updateControls(); onPreview(draft); drawOverlay(); return;
     }
     if (action === 'cancel') { discard(); return; }
@@ -627,6 +718,7 @@ export function createSam3UI({ page, panel, overlay, image, client, getOriginalB
     clearTimeout(thresholdTimer); requestState.cancel();
     draft.status = 'idle'; draft.mode = 'text'; draft.points = []; draft.candidates = [];
     draft.lastInput = null; draft.lastGoodInput = null; draft.imageId = null; draft.error = null; draft.warnings = []; hoverId = null;
+    draft.candidatesCleared = false;
     hideError(); render({preview}); if (notify) onCancel();
   }
 

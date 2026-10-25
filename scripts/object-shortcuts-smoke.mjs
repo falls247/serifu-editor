@@ -189,24 +189,25 @@ try {
   }), false, 'Enter outside the live canvas keeps native behavior');
   const balloon = row.locator('[data-kind=balloon]'); await balloon.locator('.layer-summary').click();
   const menu = balloon.locator('[data-preset-select]');
-  const state = async () => [await menu.inputValue(), await field('shape').inputValue(), await field('lineAlign').inputValue(), await field('size').inputValue(), ...await xy()];
+  await row.locator('.position-controls [data-action=backmost]').click();
+  const state = async () => [await menu.inputValue(), await field('shape').inputValue(), await field('lineAlign').inputValue(), await field('size').inputValue(), ...await xy(), await row.locator('.layer-card').evaluateAll(cards=>cards.map(card=>card.dataset.kind).join(','))];
   const before = await state();
   for (const target of [balloon.locator('textarea'), field('x'), menu]) {
     await target.focus();
-    for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) {
+    for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's', 'h']) {
       assert.equal(await target.evaluate((el, key) => {
         const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }); el.dispatchEvent(event); return event.defaultPrevented;
       }, key), false, 'editable controls keep their keyboard behavior');
     }
     assert.deepEqual(await state(), before);
   }
-  await balloon.locator('textarea').focus(); await page.keyboard.type('fbc uervms');
-  assert.match(await balloon.locator('textarea').inputValue(), /fbc uervms/); assert.deepEqual(await state(), before);
+  await balloon.locator('textarea').focus(); await page.keyboard.type('fbc uervmsh');
+  assert.match(await balloon.locator('textarea').inputValue(), /fbc uervmsh/); assert.deepEqual(await state(), before);
   await canvas.focus();
   for (const key of ['Control+f', 'Control+b', 'Control+u', 'Meta+f', 'Alt+b', 'Control+e', 'Meta+e', 'Alt+e']) {
     await page.keyboard.press(key); assert.deepEqual(await state(), before, 'modified shortcuts do not change style');
   }
-  for (const key of ['c', 'e', 'r', 'v', 'm', 's']) {
+  for (const key of ['c', 'e', 'r', 'v', 'm', 's', 'h']) {
     for (const modifier of ['ctrlKey', 'metaKey', 'altKey']) {
       if (modifier !== 'altKey' && ['c', 'v'].includes(key)) continue;
       assert.equal(await canvas.evaluate((el, { key, modifier }) => {
@@ -218,22 +219,29 @@ try {
   }
   await page.keyboard.press('Control+c'); assert.deepEqual(await state(), before);
   assert.match(await page.locator('#status').textContent(), /コピーした/, 'Ctrl+C still copies objects');
-  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) {
+  for (const options of [{ keyCode: 229 }, { repeat: true }]) {
+    assert.equal(await canvas.evaluate((el, options) => {
+      const event = new KeyboardEvent('keydown', { key: 'h', bubbles: true, cancelable: true, ...options });
+      el.dispatchEvent(event); return event.defaultPrevented;
+    }, options), false, 'H ignores IME conversion and key repeats');
+    assert.deepEqual(await state(), before);
+  }
+  for (const key of ['f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's', 'h']) {
     await canvas.evaluate((el, key) => el.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, isComposing: true })), key);
   }
   assert.deepEqual(await state(), before, 'IME composition is ignored');
   await row.locator('[data-action=preview-full]').click(); await page.locator('#fullPreviewCanvas').waitFor({ state: 'visible' });
   await page.locator('#fullPreviewViewport').focus();
-  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) await page.keyboard.press(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's', 'h']) await page.keyboard.press(key);
   assert.deepEqual(await state(), before, 'preview modal blocks editing shortcuts');
   await page.locator('#fullPreviewClose').click();
   await row.locator('[data-action=crop-image]').click();
-  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) await shortcut(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's', 'h']) await shortcut(key);
   assert.equal(await canvas.evaluate(el => document.activeElement === el), true, 'crop mode does not open text input');
   assert.deepEqual(await state(), before, 'crop mode blocks style shortcuts'); await page.keyboard.press('Escape');
   const empty = page.locator('.image-row').nth(1);
   await page.locator('#jump').selectOption(await empty.getAttribute('data-page-id')); await empty.locator('canvas.preview').focus();
-  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's']) await page.keyboard.press(key);
+  for (const key of ['Enter', 'f', 'b', 'c', 'u', 'e', 'r', 'v', 'm', 's', 'h']) await page.keyboard.press(key);
   assert.equal(await empty.locator('canvas.preview').evaluate(el => document.activeElement === el), true, 'Enter with no selected object does nothing');
   assert.equal(await empty.locator('.layer-card').count(), 0, 'no selection is a no-op');
   await empty.locator('[data-action=add-balloon]').click();
@@ -255,5 +263,5 @@ try {
     assert.equal(await emptyShape.inputValue(), shape, `${key} works immediately after clicking the balloon in the preview`);
   }
   assert.deepEqual(errors, []);
-  console.log('Enter text input, S font size, multiple selection, live FOCUS, typing/newlines, F/B presets, C/U alignment, E/R/V/M shapes, undo/redo, input/IME/modifier/modal/crop guards and Ctrl+C passed');
+  console.log('Enter text input, S font size, H frontmost guards, multiple selection, live FOCUS, typing/newlines, F/B presets, C/U alignment, E/R/V/M shapes, undo/redo, input/IME/modifier/modal/crop guards and Ctrl+C passed');
 } finally { await browser?.close(); server.kill(); }

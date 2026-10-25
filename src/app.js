@@ -34,7 +34,8 @@ import { originalBlob, projectParts, projectBlob, readProject, writeParts, MAX_P
 import { safeFilenamePart, filenameTimestamp, projectFileName, uploadedFolderName, projectFolderName } from './project-filenames.js';
 import { FONT_CATALOG, FONT_STYLES, fontLoadQueries,registerSessionFont,hasSessionFont,missingLayerFonts,sessionFontChoices } from './fonts.js';
 import { Sam3Client } from './sam3-client.js';
-import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary } from './sam3-ui.js';
+import { createSam3UI, createMaskEffectCard, renderMaskEffectSummary, syncMaskEffectControls } from './sam3-ui.js';
+import { scaleMaskEffect } from './model.js';
 import { enhanceColorInput, syncColorInput, colorInputValue } from './colors.js';
 import { setupAppMenu } from './app-menu.js';
 
@@ -89,6 +90,7 @@ function resumePreviewBackground() {
 $('fullPreview').addEventListener('close', resumePreviewBackground);
 let sourceDirectory = null, sourceFolderName = null, currentTask=null, fontVersion=0;
 const imagePool=new ImagePool(),pngCache=new ExportCache(),sam3Client=new Sam3Client();
+sam3Client.startActivityTracking();
 Object.defineProperty(window,'serifuLiveMetrics',{get:()=>({visibility:document.visibilityState,focused:document.hasFocus(),task:currentTask?{...currentTask.data,metrics:structuredClone(currentTask.metrics)}:null,workers:imagePool.workers.map(s=>({ready:s.ready,busy:s.busy,job:s.currentJob})),starting:!!imagePool.starting,pool:structuredClone(imagePool.metrics)})});
 const editLocked=()=>readOnly||(busy&&currentTask?.data.kind!=='画像追加');
 const viewLocked=()=>busy&&currentTask?.data.kind==='レイヤー一括操作';
@@ -757,7 +759,10 @@ function updateControls(p) {
       if(layer.lettering?.enabled&&layer.lettering.strokes.length){
         const requestedRun=Number(card.querySelector('[data-glyph-stroke-run]')?.value),run=layer.lettering.strokes.find(item=>item.runStart===requestedRun)??layer.lettering.strokes[0],widthScale=strokeWidthScale(run,layer.size);
         for(const [field,index] of [['start',0],['end',run.widths.length-1]]){
-          const input=card.querySelector(`[data-glyph-stroke-width=${field}]`);if(input&&input!==document.activeElement){input.max=String(500*widthScale);input.value=strokeWidthControlDisplay(run,index,layer.size);}
+          for(const input of card.querySelectorAll(`[data-glyph-stroke-width=${field}],[data-glyph-stroke-width-range=${field}]`)){
+            input.max=String(Math.floor((500*widthScale+1e-8)*10)/10);
+            if(input!==document.activeElement)input.value=strokeWidthControlDisplay(run,index,layer.size);
+          }
         }
         const multiplier=card.querySelector('[data-glyph-stroke-width-scale]');if(multiplier&&multiplier!==document.activeElement)multiplier.value=String(Number((run.widthMultiplier*100).toFixed(4)));
         const mode=activeGlyphEdit(p,layer),advancedWidth=card.querySelector('[data-sfx-editor=widthW]');
@@ -786,7 +791,7 @@ function updateControls(p) {
     card.classList.toggle('selected',selected);
     for(const button of card.querySelectorAll('.mask-effect-summary,[data-mask-action=select]'))button.setAttribute('aria-pressed',String(selected));
     const effect=p.maskEffects.find(effect=>effect.id===card.dataset.maskId);
-    if(effect)renderMaskEffectSummary(effect,card.querySelector('.mask-effect-summary'));
+    if(effect){renderMaskEffectSummary(effect,card.querySelector('.mask-effect-summary'));syncMaskEffectControls(card,effect,p.maskAssets[effect.assetId],p.img.width,p.img.height);}
   }
 }
 
@@ -1422,8 +1427,14 @@ function sfxLetteringPanel(p,l){
     for(const [name,title] of [['continuous','連続線'],['font','フォント文字']]){const option=element('option','',title);option.value=name;select.append(option);}
     select.value=run.mode;modeLabel.append(select);fieldset.append(modeLabel);
     for(const [field,title,index] of [['start','始点の線幅',0],['end','終点の線幅',run.widths.length-1]]){
-      const label=element('label','',title),input=element('input');input.type='number';input.min='0';input.max='500';
-      input.step='0.1';input.dataset.glyphStrokeWidth=field;input.max=String(500*strokeWidthScale(run,l.size));input.value=strokeWidthControlDisplay(run,index,l.size);input.title='上下にドラッグして線幅を調整。上で太く、下で細く。';label.append(input);fieldset.append(label);connectStrokeNumericDrag(input,p,l,run,field,index);
+      const label=element('label','',title),wrap=element('div','numeric-setting'),input=element('input'),slider=element('input');
+      input.type='number';input.dataset.glyphStrokeWidth=field;input.title='上下にドラッグして線幅を調整。上で太く、下で細く。';
+      slider.type='range';slider.dataset.glyphStrokeWidthRange=field;slider.title='左右にドラッグして線幅を調整。右で太く、左で細く。';
+      for(const control of [input,slider]){
+        control.min='0';control.max=String(Math.floor((500*strokeWidthScale(run,l.size)+1e-8)*10)/10);control.step='0.1';control.value=strokeWidthControlDisplay(run,index,l.size);
+        control.setAttribute('aria-label',title+(control===slider?' スライダー':''));
+      }
+      wrap.append(input,slider);label.append(wrap);fieldset.append(label);connectStrokeNumericDrag(input,p,l,run,field,index);
     }
     const widthScaleLabel=element('label','','長音の太さ倍率（%）'),widthScale=element('input');widthScale.type='number';widthScale.min='1';widthScale.max='500';widthScale.step='1';widthScale.dataset.glyphStrokeWidthScale='true';widthScale.value=String(Number((run.widthMultiplier*100).toFixed(4)));widthScale.title='上下にドラッグして倍率を調整。上で増加、下で減少。';widthScaleLabel.append(widthScale);fieldset.append(widthScaleLabel);connectStrokeNumericDrag(widthScale,p,l,run,'scale');
     const label=element('label','','曲線'),shape=element('select');shape.dataset.glyphStrokeShape='true';
@@ -1784,33 +1795,25 @@ function markMaskChanged(p) {
 function updateMaskEffectField(p,input) {
   if(!p||!input)return;
   const card=input.closest('.mask-effect-card'),effect=p.maskEffects.find(item=>item.id===card?.dataset.maskId);if(!effect)return;
-  const field=input.dataset.maskField;let value;
+  const field=input.dataset.maskField??input.dataset.maskRangeField;let value;
   if(field==='visible')value=input.checked;
   else if(field==='effect')value=input.value;
   else{
     if(input.value===''||!Number.isFinite(input.valueAsNumber))return;
-    value=Math.round(input.valueAsNumber);
+    value=field==='scalePercent'?input.valueAsNumber:Math.round(input.valueAsNumber);
     if(field==='blockSize')value=clamp(value,1,200);else if(field==='blurRadius')value=clamp(value,0,100);else if(field==='marginPx')value=clamp(value,-100,100);
     else if(field==='x')value=clamp(value,0,p.img.width-1);else if(field==='y')value=clamp(value,0,p.img.height-1);
     else if(field==='w')value=clamp(value,1,p.img.width-effect.x);else if(field==='h')value=clamp(value,1,p.img.height-effect.y);
-    else return;
+    else if(field!=='scalePercent')return;
   }
-  const next={...effect,[field]:value};
+  if(field==='scalePercent'&&!p.maskAssets[effect.assetId])return;
+  const next=field==='scalePercent'?scaleMaskEffect(effect,p.maskAssets[effect.assetId],value,p.img.width,p.img.height):{...effect,[field]:value};
   if(field==='x')next.w=Math.min(effect.w,p.img.width-value);if(field==='y')next.h=Math.min(effect.h,p.img.height-value);
   const normalized=normalizeMaskEffect(next,p.img.width,p.img.height,new Set(Object.keys(p.maskAssets)));
-  if(Object.keys(normalized).every(key=>normalized[key]===effect[key]))return;
+  if(Object.keys(normalized).every(key=>normalized[key]===effect[key])){syncMaskEffectControls(card,effect,p.maskAssets[effect.assetId],p.img.width,p.img.height);return;}
   if(!editing.has(input)){checkpoint(p);editing.add(input);}
-  Object.assign(effect,normalized);if(input.type==='number')input.value=String(normalized[field]);
-  for(const control of card.querySelectorAll('[data-mask-field]')){
-    const key=control.dataset.maskField;if(control===input)continue;
-    if(control.type==='checkbox')control.checked=effect[key];else control.value=String(effect[key]);
-    if(key==='x')control.max=String(p.img.width-effect.w);if(key==='y')control.max=String(p.img.height-effect.h);
-    if(key==='w')control.max=String(p.img.width-effect.x);if(key==='h')control.max=String(p.img.height-effect.y);
-  }
-  if(field==='effect'){
-    card.querySelector('[data-mask-field=blockSize]')?.closest('label')?.toggleAttribute('hidden',effect.effect!=='pixelate');
-    card.querySelector('[data-mask-field=blurRadius]')?.closest('label')?.toggleAttribute('hidden',effect.effect!=='blur');
-  }
+  Object.assign(effect,normalized);
+  syncMaskEffectControls(card,effect,p.maskAssets[effect.assetId],p.img.width,p.img.height);
   markMaskChanged(p);drawPage(p);updateControls(p);
 }
 
@@ -1870,7 +1873,7 @@ $('deck').addEventListener('focusout', event => {
   editing.delete(event.target);
   const p = pageFrom(event.target);
   if(p?.renderingCards)return;
-  if(event.target.matches('[data-mask-field]'))return;
+  if(event.target.matches('[data-mask-field],[data-mask-range-field]')){if(p)updateControls(p);return;}
   if(p&&event.target.matches('[data-field="text"]')){
     if(composing.has(event.target))return;
     const input=event.target,layer=p.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId);
@@ -1887,7 +1890,17 @@ $('deck').addEventListener('focusout', event => {
 });
 $('deck').addEventListener('input', event => {
   if (editLocked()) return;
-  if(event.target.matches('[data-mask-field]')){updateMaskEffectField(pageFrom(event.target),event.target);return;}
+  if(event.target.matches('[data-glyph-stroke-width-range]')){
+    const input=event.target,p=pageFrom(input),l=p?.layers.find(l=>l.id===input.closest('.layer-card')?.dataset.layerId),mode=activeGlyphEdit(p,l);
+    if(!mode)return;
+    const run=l.lettering.strokes.find(s=>s.runStart===mode.strokeRun)??l.lettering.strokes[0];if(!run)return;
+    const index=input.dataset.glyphStrokeWidthRange==='start'?0:run.widths.length-1,value=Number(input.value)/strokeWidthScale(run,l.size);
+    if(run.widths[index].w===value)return;
+    if(!editing.has(input)){checkpoint(p);editing.add(input);}
+    run.widths[index].w=value;
+    markChanged(p);drawPage(p);updateControls(p);return;
+  }
+  if(event.target.matches('[data-mask-field],[data-mask-range-field]')){updateMaskEffectField(pageFrom(event.target),event.target);return;}
   if(event.target.matches('[data-crop-field]')){
     const p=pageFrom(event.target);if(!p?.cropDraft)return;
     const input=event.target;if(input.value===''||!Number.isFinite(input.valueAsNumber))return;
@@ -1986,7 +1999,7 @@ $('deck').addEventListener('change',event=>{
     });return;
   }
 
-  if(event.target.matches('[data-mask-field]')){const p=pageFrom(event.target);updateMaskEffectField(p,event.target);editing.delete(event.target);return;}
+  if(event.target.matches('[data-mask-field],[data-mask-range-field]')){const p=pageFrom(event.target);updateMaskEffectField(p,event.target);editing.delete(event.target);return;}
   editing.delete(event.target);if(event.target.matches('input[type=number][data-field],input[type=number][data-numeric-field]')){const p=pageFrom(event.target),l=p?.layers.find(l=>l.id===(event.target.closest('.layer-card')?.dataset.layerId||p.selectedId));if(l)syncControlValue(event.target,l[controlField(event.target)],p);}
 });
 
@@ -2382,6 +2395,10 @@ window.addEventListener('keydown', event => {
   if (!command && !event.altKey && key==='s') {
     if(applyFontSizePreset(p,selected(p)))event.preventDefault();
     return;
+  }
+  if (!command && !event.altKey && key==='h') {
+    if(event.repeat||event.keyCode===229||drag||p.glyphDrag||(!selected(p)&&!p.selectedMaskId))return;
+    event.preventDefault();moveObjects(p,'frontmost');return;
   }
   if (!command && !event.altKey && ['f','b','c','u'].includes(key)) {
     const layer=selected(p);if(!layer)return;

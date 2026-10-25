@@ -102,6 +102,21 @@ export const hasEdits = page => page.layers.length > 0 || !!page.imageEdit || (p
 
 export const MASK_EFFECT_TYPES = Object.freeze(['pixelate', 'blur', 'fill-black', 'fill-white']);
 
+export function maskScaleLimit(asset, imageWidth, imageHeight) {
+  return Math.min(imageWidth / asset.bbox.width, imageHeight / asset.bbox.height,
+    Math.sqrt(100_000_000 / (asset.bbox.width * asset.bbox.height))) * 100;
+}
+
+export function scaleMaskEffect(effect, asset, percent, imageWidth, imageHeight) {
+  if (!Number.isFinite(percent)) throw new Error('マスクの倍率が不正');
+  const scale = clamp(percent, 1, maskScaleLimit(asset, imageWidth, imageHeight)) / 100;
+  const w = Math.max(1, Math.min(imageWidth, Math.round(asset.bbox.width * scale)));
+  const h = Math.max(1, Math.min(imageHeight, Math.round(asset.bbox.height * scale), Math.floor(100_000_000 / w)));
+  const x = clamp(Math.round(effect.x + (effect.w - w) / 2), 0, imageWidth - w);
+  const y = clamp(Math.round(effect.y + (effect.h - h) / 2), 0, imageHeight - h);
+  return { ...effect, x, y, w, h };
+}
+
 export function defaultMaskEffect(asset, { id = crypto.randomUUID(), effect = 'pixelate', createdOrder = 0, name } = {}) {
   if (!asset?.id || !asset.bbox) throw new Error('マスク素材が不正');
   return {

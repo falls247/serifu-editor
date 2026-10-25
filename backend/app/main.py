@@ -18,7 +18,7 @@ from .engine import EngineError, MockSam3Engine, Sam3Engine
 from .image_cache import ImageCache, ImageCacheFullError
 from .image_io import InvalidImage, decode_image
 from .jobs import ApiException, JobManager
-from .schemas import HealthError, HealthResponse, InferRequest, ModelSettingsRequest
+from .schemas import ActivityRequest, HealthError, HealthResponse, InferRequest, ModelSettingsRequest
 from .settings import Settings
 
 logger = logging.getLogger("serifu.sam3")
@@ -156,7 +156,7 @@ class RequestSizeMiddleware:
         limit = (
             self.settings.max_upload_bytes + 1024 * 1024
             if path == "/api/sam3/images"
-            else 256 * 1024
+            else 1024 if path == "/api/sam3/activity" else 256 * 1024
         )
         is_image_upload = path == "/api/sam3/images"
         too_large_code = "INVALID_IMAGE" if is_image_upload else "REQUEST_TOO_LARGE"
@@ -331,12 +331,17 @@ def create_app(
             loadElapsedSeconds=manager.load_elapsed_seconds,
             lastLoadSeconds=manager.last_load_seconds,
             loadTimings=dict(getattr(engine, "load_timings", {})),
+            **manager.idle_state(),
         )
 
     @app.post("/api/sam3/settings")
-    async def save_model_settings(request: ModelSettingsRequest) -> dict[str, str]:
-        model_path = await manager.set_model_path(request.modelPath)
-        return {"modelPath": str(model_path)}
+    async def save_model_settings(request: ModelSettingsRequest) -> dict[str, Any]:
+        await manager.update_settings(model_path=request.modelPath, model_idle_seconds=request.modelIdleSeconds)
+        return {"modelPath": str(manager.settings.model_path), **manager.idle_state()}
+
+    @app.post("/api/sam3/activity")
+    async def activity(request: ActivityRequest) -> dict[str, bool]:
+        return {"accepted": manager.record_activity(request)}
 
     @app.post("/api/sam3/images", status_code=201)
     async def upload_image(request: Request) -> dict[str, Any]:

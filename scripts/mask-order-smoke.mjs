@@ -39,7 +39,9 @@ try{
   assert.equal(await mask('A').locator('.mask-effect-grid').isVisible(),true);assert.equal(await row.locator('.layer-card.selected').count(),0);
   assert.equal(await row.locator('.position-controls>.control-grid').first().isVisible(),false,'text controls hide while a mask is selected');
   await act('forward');assert.deepEqual(await order(),['B','A','caption','dialogue']);
-  await act('frontmost');assert.deepEqual(await order(),['B','caption','dialogue','A']);assert.deepEqual(await pixel(),[0,0,0,255]);
+  await canvas.focus();await page.keyboard.press('h');assert.deepEqual(await order(),['B','caption','dialogue','A']);assert.deepEqual(await pixel(),[0,0,0,255],'H moves a selected mask in front of text');
+  await page.keyboard.press('Control+z');assert.deepEqual(await order(),['B','A','caption','dialogue']);
+  await page.keyboard.press('Control+Shift+z');assert.deepEqual(await order(),['B','caption','dialogue','A']);
   assert.deepEqual(await pixel(185,125),[255,0,0,255],'holes in the front mask retain lower objects');
   await mask('A').locator('[data-mask-field=effect]').selectOption('blur');
   await mask('A').locator('[data-mask-field=blurRadius]').fill('0');await mask('A').locator('[data-mask-field=blurRadius]').dispatchEvent('change');

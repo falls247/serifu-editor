@@ -41,4 +41,6 @@ npm run dev
 
 http://localhost:5173 を開く。UI（5173）と推論API（8765）を同時に起動し、`Ctrl+C`で両方を終了する。モデルの場所は`SAM3_MODEL_PATH`、UIポートは`PORT`、APIポートは`SAM3_API_PORT`で変更できる。
 
+モデルはアプリ無操作で既定15分後に解放する。解放時間はSAM3カードで1〜240分を保存できる。起動時は保存済みの有効な値、`SAM3_MODEL_IDLE_SECONDS`（秒）、既定900秒の順に適用する。既存の秒単位設定は維持し、UIで次に保存したときから分単位になる。モデルパスと解放時間は`backend/.local/sam3-settings.json`（`SAM3_SETTINGS_FILE`で変更可）に保存する。
+
 公開版では新規検出を使えない。保存済みマスクの編集・PNG保存は利用できる。

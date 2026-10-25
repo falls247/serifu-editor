@@ -6,6 +6,7 @@ import logging
 import math
 import threading
 import time
+import traceback
 from dataclasses import dataclass
 from typing import Any
 
@@ -13,6 +14,7 @@ import numpy as np
 from PIL import Image
 
 from .mask_codec import EncodedMask, encode_mask
+from .model_loader import load_model
 from .settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -98,7 +100,6 @@ class Sam3Engine:
                 import torch
                 from sam3.model.data_misc import interpolate
                 from sam3.model.sam3_image_processor import Sam3Processor
-                from sam3.model_builder import build_sam3_image_model
             except Exception as exc:
                 self.status = "error"
                 self.load_error = "MODEL_LOAD_FAILED"
@@ -215,13 +216,7 @@ class Sam3Engine:
 
             try:
                 stage_started = time.monotonic()
-                model = build_sam3_image_model(
-                    checkpoint_path=str(self.settings.model_path),
-                    load_from_HF=False,
-                    enable_inst_interactivity=True,
-                    device="cuda",
-                    eval_mode=True,
-                )
+                model = load_model(str(self.settings.model_path), timings=self.load_timings)
                 self.load_timings = {**self.load_timings, "builderSeconds": round(time.monotonic() - stage_started, 3)}
                 stage_started = time.monotonic()
                 model.eval()
@@ -239,7 +234,9 @@ class Sam3Engine:
                 self.load_error_message = (
                     "SAM3 model initialization failed. Check checkpoint compatibility and GPU memory."
                 )
-                logger.warning("SAM3 model load failed (%s)", type(exc).__name__)
+                logger.exception("SAM3 model load failed (%s)", type(exc).__name__)
+                traceback.clear_frames(exc.__traceback__)
+                model = processor = None
                 self._release_references()
                 raise EngineError(
                     "MODEL_LOAD_FAILED",
@@ -282,7 +279,16 @@ class Sam3Engine:
                     if not self._is_cuda_oom(exc):
                         if isinstance(exc, EngineError):
                             raise
-                        logger.warning("SAM3 inference failed (%s)", type(exc).__name__)
+                        logger.warning(
+                            "SAM3 inference failed (%s); mode=%s image=%sx%s points=%s thread=%s",
+                            type(exc).__name__,
+                            mode,
+                            image.shape[1],
+                            image.shape[0],
+                            len(points),
+                            threading.get_ident(),
+                            exc_info=True,
+                        )
                         raise EngineError(
                             "INFERENCE_FAILED",
                             "SAM3 inference failed. Retry the latest request.",
@@ -433,6 +439,10 @@ class Sam3Engine:
     def _release_references(self) -> None:
         self._processor = None
         self._model = None
+        # Pinned tracker enters a persistent autocast context. Its cast-weight
+        # cache can retain GPU tensors after the model itself is gone.
+        if self._torch is not None and hasattr(self._torch, "clear_autocast_cache"):
+            self._torch.clear_autocast_cache()
         gc.collect()
         if self._torch is not None:
             try:

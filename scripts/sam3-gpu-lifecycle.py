@@ -1,4 +1,4 @@
-"""起動済みローカルAPIで実GPUの10分解放・再ロードを検証する。"""
+"""起動済みローカルAPIで実GPUの無操作解放・再ロードを検証する。"""
 from __future__ import annotations
 
 import argparse
@@ -141,12 +141,13 @@ def main() -> None:
           points=points + [{'x': 20, 'y': 20, 'positive': False}])
     loaded_memory = gpu_memory_mib()
     idle_started = time.monotonic()
+    configured_idle = request('/health')['modelIdleSeconds']
     last_progress = idle_started
-    while time.monotonic() - idle_started < 660:
+    while time.monotonic() - idle_started < configured_idle + 60:
         health = request('/health')
         idle_seconds = time.monotonic() - idle_started
         if health['status'] == 'unloaded' and not health['modelLoaded']:
-            if idle_seconds < 590:
+            if idle_seconds < configured_idle - 10:
                 raise AssertionError(f'Model unloaded too early: {idle_seconds}')
             released_memory = gpu_memory_mib()
             report['idle'] = {'seconds': round(idle_seconds, 3),
@@ -158,11 +159,11 @@ def main() -> None:
             print(json.dumps(report['idle']), flush=True)
             break
         if idle_seconds - (last_progress - idle_started) >= 60:
-            print(f'Idle {idle_seconds:.0f}s / 600s, model {health["status"]}', flush=True)
+            print(f'Idle {idle_seconds:.0f}s / {configured_idle}s, model {health["status"]}', flush=True)
             last_progress = time.monotonic()
         time.sleep(5)
     else:
-        raise TimeoutError('Model did not unload after 600-second idle')
+        raise TimeoutError(f'Model did not unload after {configured_idle}-second idle')
 
     try:
         infer(image_id, 4, 'points', points=points)

@@ -4,6 +4,7 @@ import os
 import asyncio
 import json
 import time
+import weakref
 from dataclasses import replace
 
 import numpy as np
@@ -12,7 +13,7 @@ import pytest
 from app.engine import Sam3Engine
 from app.image_cache import ImageCache
 from app.jobs import JobManager
-from app.schemas import InferRequest
+from app.schemas import ActivityRequest, InferRequest
 from app.settings import Settings
 
 
@@ -36,10 +37,18 @@ def test_real_cancelled_reload_reused_by_next_image() -> None:
         await manager.start()
         try:
             await manager._startup_load_task
+            model_ref = weakref.ref(engine._model)
             first_seconds = manager.last_load_seconds
             first_timings = dict(engine.load_timings)
             manager._last_model_ready = manager._last_inference_finished = time.monotonic() - 2
+            state = manager.idle_state()
+            manager.record_activity(ActivityRequest(sessionId="gpu-tab", sequence=1,
+                epoch=state["activityEpoch"], window=state["activityWindow"], elapsedSeconds=0))
+            await manager.unload_if_idle()
+            assert engine.model_loaded, "app activity did not retain the real GPU model"
+            manager._last_activity = time.monotonic() - 2
             await until(lambda: not engine.model_loaded)
+            assert model_ref() is None, "unloaded model is still referenced"
             image = np.zeros((256, 256, 3), dtype=np.uint8)
             image[64:192, 64:192] = 255
             cached, _ = cache.add(image)
@@ -64,6 +73,9 @@ def test_real_cancelled_reload_reused_by_next_image() -> None:
                               "nextImageCandidates": len(next_job.candidates)}, ensure_ascii=False), flush=True)
         finally:
             await manager.stop()
+            # CUDA libraries keep ~9.125 MiB of native workspace after inference;
+            # diagnostics found no remaining Python CUDA tensors or model refs.
+            assert engine._torch.cuda.memory_allocated() < 16 * 1024**2, "unload retained model-sized GPU allocation"
 
     asyncio.run(exercise())
 
@@ -123,3 +135,4 @@ def test_real_model_text_points_and_refine_smoke() -> None:
         assert refined.candidates[0].score >= 0.0
     finally:
         engine.unload()
+        assert engine._torch.cuda.memory_allocated() < 16 * 1024**2, "unload retained model-sized GPU allocation"

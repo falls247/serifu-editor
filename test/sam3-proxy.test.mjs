@@ -25,6 +25,11 @@ test('SAM3 proxy limits hosts, origins, routes and bodies while preserving API f
     assert.equal(received.at(-1).body,'{"requestId":"page:1"}');assert.equal(received.at(-1).headers.host,`127.0.0.1:${backendPort}`);
     assert.equal((await request(port,'/api/sam3/settings','POST',{Origin:`http://127.0.0.1:${port}`,'Content-Type':'application/json'},'{"modelPath":"/models/sam3.pt"}')).status,200);
     assert.equal(received.at(-1).url,'/api/sam3/settings');assert.equal(received.at(-1).body,'{"modelPath":"/models/sam3.pt"}');
+    assert.equal((await request(port,'/api/sam3/activity','POST',{Origin:`http://127.0.0.1:${port}`,'Content-Type':'application/json'},'{}')).status,200);
+    assert.equal(received.at(-1).url,'/api/sam3/activity');
+    assert.equal((await request(port,'/api/sam3/activity','GET')).status,405);
+    assert.equal((await request(port,'/api/sam3/activity','POST',{Origin:'https://evil.example'},'{}')).status,403);
+    assert.equal((await request(port,'/api/sam3/activity','POST',{},'x'.repeat(1025))).status,413);
     assert.equal((await request(port,'/api/sam3/settings','POST',{Origin:'https://evil.example'},'{}')).status,403);
     assert.equal((await request(port,'/api/sam3/images/image','DELETE')).status,200,'Origin-less CLI allowed');
     assert.equal((await request(port,'/api/sam3/jobs/expired')).status,410);
