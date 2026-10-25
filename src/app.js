@@ -2376,6 +2376,10 @@ window.addEventListener('keydown', event => {
     if(applyFontSizePreset(p,selected(p)))event.preventDefault();
     return;
   }
+  if (!command && !event.altKey && key==='h') {
+    if(event.repeat||event.keyCode===229||drag||p.glyphDrag||(!selected(p)&&!p.selectedMaskId))return;
+    event.preventDefault();moveObjects(p,'frontmost');return;
+  }
   if (!command && !event.altKey && ['f','b','c','u'].includes(key)) {
     const layer=selected(p);if(!layer)return;
     if(key==='c'||key==='u'){event.preventDefault();alignLayerText(p,layer,key==='c'?'center':'top');return;}

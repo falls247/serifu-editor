@@ -31,6 +31,7 @@ try{
   const order=()=>row.locator('.layer-card').evaluateAll(cards=>cards.map(card=>card.dataset.kind));
   const select=(kind,options)=>card(kind).locator('.layer-summary:visible,.kind-label:visible').first().click(options);
   const act=action=>row.locator(`.position-controls [data-action=${action}]`).click();
+  const shortcut=async key=>{await canvas.focus();await page.keyboard.press(key);};
   const redCount=()=>canvas.evaluate(canvas=>{const data=canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;let count=0;for(let i=0;i<data.length;i+=4)if(data[i]===255&&data[i+1]===0&&data[i+2]===0)count++;return count;});
   assert.deepEqual(await order(),['sfx','balloon','dialogue','caption'],'legacy effective order is migrated');
   assert.equal(await row.locator('[data-field=sfxOrder]').count(),0);
@@ -53,6 +54,25 @@ try{
   await select('sfx',{modifiers:['Shift']});await act('backmost');
   assert.deepEqual(await order(),['balloon','sfx','dialogue','caption']);assert.equal(await row.locator('.multi-selected').count(),2);
   await row.locator('[data-action=undo]').click();assert.deepEqual(await order(),['balloon','dialogue','caption','sfx']);
+  for(const kind of ['dialogue','sfx','balloon','caption']){
+    const initial=await order();await select(kind);await act('backmost');
+    const before=await order(),expected=[...before.filter(item=>item!==kind),kind];
+    await shortcut('h');assert.deepEqual(await order(),expected,`${kind}: H moves the selected object to the front`);
+    assert.equal(await card(kind).evaluate(node=>node.classList.contains('selected')),true,'H preserves selection');
+    await shortcut('h');await shortcut('Control+z');assert.deepEqual(await order(),before,'repeating H at the front adds no history');
+    await shortcut('Control+Shift+z');assert.deepEqual(await order(),expected,'redo restores the frontmost order');
+    await shortcut('Control+z');
+    if(initial[0]!==kind)await shortcut('Control+z');
+  }
+  await select('balloon');await select('sfx',{modifiers:['Shift']});
+  const beforeGroup=await order(),group=beforeGroup.filter(kind=>['balloon','sfx'].includes(kind));
+  await row.locator('[data-action=preview-focus]').click();
+  await shortcut('Shift+H');
+  assert.deepEqual(await order(),[...beforeGroup.filter(kind=>!group.includes(kind)),...group],'H preserves relative order of multiple objects in live FOCUS');
+  assert.equal(await row.locator('.layer-card.multi-selected').count(),2,'H preserves multiple selection');
+  await shortcut('Control+z');assert.deepEqual(await order(),beforeGroup);
+  await row.locator('[data-action=preview-focus]').click();
+  await select('sfx');await act('frontmost');
   // Save through the UI, then compare PNG output with the common renderer without selection handles.
   await page.selectOption('#projectFormat','json');let downloading=page.waitForEvent('download');await page.click('#projectSave');
   const project=JSON.parse(await readFile(await (await downloading).path(),'utf8'));
