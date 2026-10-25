@@ -5,6 +5,7 @@ import asyncio
 import json
 import time
 import weakref
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import numpy as np
@@ -86,6 +87,8 @@ def test_real_cancelled_reload_reused_by_next_image() -> None:
     reason="set SAM3_RUN_GPU_TESTS=1 to load the local multi-gigabyte checkpoint",
 )
 def test_real_model_text_points_and_refine_smoke() -> None:
+    import torch
+
     settings = Settings.from_env()
     if not settings.model_path.is_file():
         pytest.skip("SAM3_MODEL_PATH does not point to an existing checkpoint")
@@ -94,8 +97,9 @@ def test_real_model_text_points_and_refine_smoke() -> None:
     image = np.zeros((288, 288, 3), dtype=np.uint8)
     yy, xx = np.ogrid[:288, :288]
     image[(xx - 144) ** 2 + (yy - 144) ** 2 < 55**2] = 255
-    try:
-        engine.load()
+    def exercise_modes():
+        # The loader's persistent autocast must not be needed by this worker.
+        assert not torch.is_autocast_enabled("cuda")
         text_result = engine.infer(
             image=image,
             mode="text",
@@ -133,6 +137,14 @@ def test_real_model_text_points_and_refine_smoke() -> None:
         )
         assert len(refined.candidates) == 1
         assert refined.candidates[0].score >= 0.0
-    finally:
-        engine.unload()
-        assert engine._torch.cuda.memory_allocated() < 16 * 1024**2, "unload retained model-sized GPU allocation"
+        assert not torch.is_autocast_enabled("cuda")
+
+    with ThreadPoolExecutor(max_workers=1) as worker:
+        try:
+            for _ in range(2):
+                engine.load()
+                worker.submit(exercise_modes).result()
+                engine.unload()
+                assert torch.cuda.memory_allocated() < 16 * 1024**2, "unload retained model-sized GPU allocation"
+        finally:
+            engine.unload()

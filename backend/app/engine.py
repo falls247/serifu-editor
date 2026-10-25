@@ -326,7 +326,9 @@ class Sam3Engine:
             raise EngineError("MODEL_LOAD_FAILED", "SAM3 model is not loaded.")
 
         pil_image = Image.fromarray(image)
-        with torch.inference_mode():
+        # Autocast is thread-local; load/reload and inference can run on different
+        # workers. SAM3's fused MLP emits BF16 even with FP32 model weights.
+        with torch.inference_mode(), torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             processor.confidence_threshold = threshold
             state = processor.set_image(pil_image)
             if mode == "text":

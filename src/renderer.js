@@ -22,7 +22,7 @@ export function newLayer(kind, width, height, speaker = 'male') {
   if(kind==='caption')return newCaption(width,height);
   const id=crypto.randomUUID();
   return {
-    id, kind, speaker,
+    id, kind, speaker, ...(kind==='sfx'?{autoFit:false}:{}),
     text: kind === 'sfx' ? 'ドーン！' : '',
     lineAlign:'top',
     x: width * .5, y: height * .4,
@@ -99,9 +99,10 @@ function ornament(ctx, l) {
 
 export const WARP_CHOICES = Object.freeze({ wave: '波打ち', bulge: '膨張', taper: '先細り' });
 const glyphCache = new Map();
+const sfxFitCache = new Map();
 let cachePixels = 0,cacheHits=0,cacheMisses=0,cacheEvictions=0,uncachedGlyphs=0;
 export function glyphCacheStats(){return Object.freeze({entries:glyphCache.size,pixels:cachePixels,limitPixels:5000000,hits:cacheHits,misses:cacheMisses,evictions:cacheEvictions,uncached:uncachedGlyphs});}
-export function clearGlyphCache() { glyphCache.clear(); cachePixels = 0; cacheHits=cacheMisses=cacheEvictions=uncachedGlyphs=0; clearLayoutCache(); clearFontCache(); }
+export function clearGlyphCache() { glyphCache.clear(); sfxFitCache.clear(); cachePixels = 0; cacheHits=cacheMisses=cacheEvictions=uncachedGlyphs=0; clearLayoutCache(); clearFontCache(); }
 function storeGlyph(key,value){
   glyphCache.set(key,value);cachePixels+=value.width*value.height;
   while(cachePixels>5000000&&glyphCache.size>1){const first=glyphCache.keys().next().value,old=glyphCache.get(first);cachePixels-=old.width*old.height;glyphCache.delete(first);cacheEvictions++;}
@@ -193,6 +194,7 @@ export function glyphFontSize(layer,index) {
 
 // Pack variable-size letters using their own advances; shrinking letters do not leave full-size gaps.
 export function textGlyphs(ctx,layer) {
+  if(layer.kind==='sfx'&&layer.autoFit)layer=sfxNaturalLayer(layer);
   ctx.save();
   try {
     if(layer.kind==='sfx'&&((layer.kerningMode==='optical'&&layer.kerningStrength>0)||layer.rotationJitter||layer.verticalJitter||layer.spacingJitter||layer.glyphOverlap))return opticalTextGlyphs(ctx,layer,glyphFontSize);
@@ -477,14 +479,55 @@ function includeEditedSfx(bounds,ctx,layer){
   inflateBounds(bounds,pad);
 }
 
+// Fit the painted text, including outlines and trails, independently of the box.
+// Keep editable glyph/stroke coordinates in their original space.
+function sfxNaturalLayer(layer){
+  const extent=Math.max(30,layer.size*(graphemes(layer.text).length+2)*8);
+  const box=layer.lettering?.enabled?layer.lettering.baseBox:null;
+  return {...layer,autoFit:false,w:box?.w??extent,h:box?.h??extent,
+    lineAlign:layer.lettering?.enabled?layer.lineAlign:'center'};
+}
+function paintSfxText(ctx,layer){
+  if(layer.lettering?.enabled)paintEditedSfx(ctx,layer);else paintText(ctx,layer);
+}
+export function sfxAutoFitTransform(ctx,layer){
+  const identity={scaleX:1,scaleY:1,x:0,y:0};
+  if(layer.kind!=='sfx'||!layer.autoFit||!layer.text.trim())return identity;
+  const natural=sfxNaturalLayer(layer),key=JSON.stringify({...natural,id:null,x:0,y:0,rotation:0,presetId:null,layoutOrder:0});
+  let bounds=sfxFitCache.get(key);
+  if(!bounds){
+    const area=layerBounds(ctx,{...natural,rotation:0},{includeBox:false}),width=Math.ceil(area.maxX-area.minX),height=Math.ceil(area.maxY-area.minY);
+    if(!(width>0&&height>0))return identity;
+    const quality=Math.min(1,Math.sqrt(1000000/(width*height)),4096/width,4096/height);
+    const canvas=createSurface(ctx,Math.max(1,Math.ceil(width*quality)),Math.max(1,Math.ceil(height*quality))),c=canvas.getContext('2d',{willReadFrequently:true});
+    c.scale(quality,quality);c.translate(-area.minX,-area.minY);paintSfxText(c,natural);
+    const pixels=c.getImageData(0,0,canvas.width,canvas.height).data;
+    let minX=canvas.width,minY=canvas.height,maxX=-1,maxY=-1;
+    for(let y=0;y<canvas.height;y++)for(let x=0;x<canvas.width;x++)if(pixels[(y*canvas.width+x)*4+3]){minX=Math.min(minX,x);minY=Math.min(minY,y);maxX=Math.max(maxX,x);maxY=Math.max(maxY,y);}
+    canvas.width=canvas.height=1;
+    bounds=maxX<minX?null:{minX:area.minX+minX/quality,minY:area.minY+minY/quality,maxX:area.minX+(maxX+1)/quality,maxY:area.minY+(maxY+1)/quality};
+    if(!bounds)return identity;
+    if(sfxFitCache.size>=32)sfxFitCache.delete(sfxFitCache.keys().next().value);
+    sfxFitCache.set(key,bounds);
+  }
+  const scaleX=layer.w/(bounds.maxX-bounds.minX),scaleY=layer.h/(bounds.maxY-bounds.minY);
+  return {scaleX,scaleY,x:-(bounds.minX+bounds.maxX)/2*scaleX,y:-(bounds.minY+bounds.maxY)/2*scaleY};
+}
+export function sfxTextPoint(ctx,layer,x,y){
+  const point=localPoint(layer,x,y),fit=sfxAutoFitTransform(ctx,layer);
+  return {x:(point.x-fit.x)/fit.scaleX,y:(point.y-fit.y)/fit.scaleY};
+}
+
 // Returns painted content bounds relative to the layer origin, after its rotation.
 // Selection handles stay out of this measurement; the selection box itself remains included.
-export function layerBounds(ctx,layer){
+export function layerBounds(ctx,layer,{includeBox=true}={}){
   ctx.save();
   try{
     const bounds=emptyBounds();
-    includeRect(bounds,0,0,layer.w,layer.h);
-    if(layer.kind==='balloon'){
+    if(includeBox)includeRect(bounds,0,0,layer.w,layer.h);
+    if(layer.kind==='sfx'&&layer.autoFit){
+      includeRect(bounds,0,0,layer.w,layer.h);
+    }else if(layer.kind==='balloon'){
       const outline=balloonOutline(layer);includePoints(bounds,outline);
       const borderPad=layer.borderStyle==='brush'||layer.borderStyle==='dry-brush'?(layer.borderWidth??0)*4+3:(layer.borderWidth??0)/2+2;
       inflateBounds(bounds,borderPad);
@@ -574,7 +617,12 @@ export function draw(ctx, img, layers, selected = null, scale = 1, selectionScal
       if(l.text)paintText(ctx,l);
     }
     else if(l.kind==='caption')paintCaption(ctx,l);
-    else {ornament(ctx, l); if(l.kind==='sfx'&&l.lettering?.enabled)paintEditedSfx(ctx,l);else paintText(ctx, l);}
+    else {
+      ornament(ctx,l);
+      if(l.kind==='sfx'&&l.autoFit){
+        const fit=sfxAutoFitTransform(ctx,l);ctx.translate(fit.x,fit.y);ctx.scale(fit.scaleX,fit.scaleY);paintSfxText(ctx,sfxNaturalLayer(l));
+      }else if(l.kind==='sfx'&&l.lettering?.enabled)paintEditedSfx(ctx,l);else paintText(ctx,l);
+    }
     ctx.restore();
   }
   const ids = Array.isArray(selected) ? selected : [selected];

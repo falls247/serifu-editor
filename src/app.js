@@ -6,7 +6,7 @@ import { sfxVisibleIndices } from './sfx-lettering-model.js';
 import {projectFileMatchesSnapshot,projectConflictChoice} from './project-conflict.js';
 import {validProjectId} from './project-identity.js';
 import {createSfxTemplate,applySfxTemplate,mergeSfxTemplates,encodeSfxTemplates,decodeSfxTemplates,SFX_TEMPLATE_KEY,validateStrokePresets} from './sfx-lettering-templates.js';
-import { textGlyphs,sfxScene,sfxItemHit,layerBounds } from './renderer.js';
+import { textGlyphs,sfxScene,sfxItemHit,layerBounds,sfxAutoFitTransform,sfxTextPoint } from './renderer.js';
 import { draftFileName,parseAnnotationDraft,createDraftLayers,layoutDraftLayers } from './annotation-drafts.js';
 import { startLettering, defaultGlyph, replaceLetteringText, duplicateLetteringGlyphs, removeLetteringGlyphs } from './sfx-lettering-model.js';
 import { newLayer, draw, hit, handleAt, localPoint, clamp, EFFECTS, WARP_CHOICES, clearGlyphCache, paintOrder, dialogueColor } from './renderer.js';
@@ -372,8 +372,9 @@ function drawPage(p) {
     ctx.save();ctx.setTransform(scale,0,0,scale,0,0);
     if(imageEdit)ctx.transform(...imageMatrix(p.img.width,p.img.height,imageEdit));
     ctx.translate(current.x,current.y);ctx.rotate(current.rotation*Math.PI/180);
-    drawLetteringOverlay(ctx,current,glyphMode,scene,Math.max(.01,displayScale),p.glyphDrag);ctx.restore();
-    const overflow=scene.items.some(item=>{const b=item.bounds;return [{x:b.minX,y:b.minY},{x:b.maxX,y:b.maxY},{x:b.minX,y:b.maxY},{x:b.maxX,y:b.minY}].some(point=>{const angle=current.rotation*Math.PI/180,x=current.x+point.x*Math.cos(angle)-point.y*Math.sin(angle),y=current.y+point.x*Math.sin(angle)+point.y*Math.cos(angle);const crop=p.imageEdit?.crop??{x:0,y:0,width:p.img.width,height:p.img.height};return x<crop.x||y<crop.y||x>crop.x+crop.width||y>crop.y+crop.height;});});
+    const fit=sfxAutoFitTransform(ctx,current);ctx.translate(fit.x,fit.y);ctx.scale(fit.scaleX,fit.scaleY);
+    drawLetteringOverlay(ctx,current,glyphMode,scene,Math.max(.01,displayScale*Math.min(fit.scaleX,fit.scaleY)),p.glyphDrag);ctx.restore();
+    const overflow=scene.items.some(item=>{const b=item.bounds;return [{x:b.minX,y:b.minY},{x:b.maxX,y:b.maxY},{x:b.minX,y:b.maxY},{x:b.maxX,y:b.minY}].some(point=>{const px=point.x*fit.scaleX+fit.x,py=point.y*fit.scaleY+fit.y,angle=current.rotation*Math.PI/180,x=current.x+px*Math.cos(angle)-py*Math.sin(angle),y=current.y+px*Math.sin(angle)+py*Math.cos(angle);const crop=p.imageEdit?.crop??{x:0,y:0,width:p.img.width,height:p.img.height};return x<crop.x||y<crop.y||x>crop.x+crop.width||y>crop.y+crop.height;});});
     const warning=p.row?.querySelector('.sfx-overflow');if(warning){warning.hidden=!overflow;warning.textContent='画像外の文字・線はPNGでクリップされる。編集データと画像原寸は維持。';}
   }
 
@@ -709,6 +710,8 @@ function updateControls(p) {
   controls.querySelector('legend').textContent = mask?`${mask.name}：カードで位置調整`:balloon?`吹き出し・${l.speaker==='female'?'女性':'男性'}：${l.text||'（セリフ未入力）'}`:l ? `${caption?'キャプション':l.kind === 'sfx' ? '効果音' : l.speaker === 'female' ? '女性セリフ' : '男性セリフ'}：${l.text || '（未入力）'}` : '文字・吹き出し・キャプションを選択して位置調整';
   controls.querySelector('.control-grid').hidden=!!mask;
   controls.querySelector('[data-action=center]').disabled=!l;
+  const autoFitButton=controls.querySelector('[data-action=sfx-autofit]');
+  autoFitButton.hidden=l?.kind!=='sfx';autoFitButton.setAttribute('aria-pressed',String(!!l?.autoFit));
   for(const node of controls.querySelectorAll('[data-text-control]'))node.hidden=!l;
   controls.querySelector('.multiline-align-control').hidden=!l||!['dialogue','balloon'].includes(l.kind);
   for(const node of controls.querySelectorAll('[data-ink-control]'))node.hidden=!l||caption;
@@ -1777,8 +1780,8 @@ function movePageAfter(p){
   movePageTo(p,after>index?after-1:after,'move-after');
 }
 
-function markChanged(p) {
-  const letter=selected(p);if(letter?.lettering?.enabled){const scene=sceneFor(p,letter);letter.w=clamp(Math.max(letter.w,...scene.items.map(i=>Math.max(Math.abs(i.bounds.minX),Math.abs(i.bounds.maxX))*2+8)),30,30000);letter.h=clamp(Math.max(letter.h,...scene.items.map(i=>Math.max(Math.abs(i.bounds.minY),Math.abs(i.bounds.maxY))*2+8)),30,30000);}
+function markChanged(p,{expandLettering=true}={}) {
+  const letter=selected(p);if(expandLettering&&letter?.lettering?.enabled&&!letter.autoFit){const scene=sceneFor(p,letter);letter.w=clamp(Math.max(letter.w,...scene.items.map(i=>Math.max(Math.abs(i.bounds.minX),Math.abs(i.bounds.maxX))*2+8)),30,30000);letter.h=clamp(Math.max(letter.h,...scene.items.map(i=>Math.max(Math.abs(i.bounds.minY),Math.abs(i.bounds.maxY))*2+8)),30,30000);}
   dirty(); p.done = false;p.edited=hasEdits(p);syncSelection(p);scheduleThumbnailRefresh(p);updateGlobal();
 }
 
@@ -1847,10 +1850,10 @@ function commitSam3Candidates(p,candidates,settings) {
   }catch(error){status(`マスク加工を確定できなかった: ${error.message}`);}
 }
 
-function edit(p, fn, rebuild = true) {
+function edit(p, fn, rebuild = true, options = {}) {
   if (editLocked()) return;
   checkpoint(p); fn();
-  markChanged(p);
+  markChanged(p,options);
   if (rebuild) renderCards(p);else updateControls(p);
   drawPage(p);
 }
@@ -2140,6 +2143,8 @@ $('deck').addEventListener('click', async event => {
     moveObjects(p,action);
   } else if (action === 'center' && l) {
     edit(p, () => { l.x = p.img.width / 2; l.y = p.img.height / 2;l.presetId=null; }, false);refreshPresetMenus();
+  } else if(action==='sfx-autofit'&&l?.kind==='sfx'){
+    edit(p,()=>{l.autoFit=!l.autoFit;l.presetId=null;},true,{expandLettering:false});
   } else if (['undo', 'redo'].includes(action)) {
     cancelCrop(p);if (restore(p, action)) { dirty(); scheduleThumbnailRefresh(p);renderCards(p); drawPage(p); updateGlobal(); }
   } else if(action==='duplicate-image'){
@@ -2250,7 +2255,7 @@ function connectCanvas(p) {
     selectObject(p,l.id);activate(p);
     if(!activeGlyphEdit(p,l))p.row.querySelector(`[data-layer-id="${l.id}"] [data-action=sfx-glyph-enter]`)?.click();
     const mode=activeGlyphEdit(p,l);if(!mode)return;
-    const point=localPoint(l,pos.x,pos.y),scene=sceneFor(p,l);
+    const point=sfxTextPoint(p.canvas.getContext('2d'),l,pos.x,pos.y),scene=sceneFor(p,l);
     const item=scene.items.filter(item=>sfxItemHit(item,point)).at(-1);
     if(item?.type!=='stroke')return;
     event.preventDefault();
@@ -2263,7 +2268,7 @@ function connectCanvas(p) {
   p.canvas.addEventListener('pointerdown', event => {
     if(editLocked()||event.button!==0||drag)return;
     const letter=selected(p),mode=activeGlyphEdit(p,letter);
-    if(mode){event.preventDefault();mode.touch=event.pointerType==='touch';activate(p);beginLetteringGesture(p,letter,mode,event,localPoint(letter,...Object.values(coords(event,p))),p.canvas.getBoundingClientRect().width/imageSize(p.img.width,p.img.height,p.imageEdit).width,{render:()=>drawPage(p),magnify:()=>toggleMagnifier(p,p.row.querySelector('[data-action=preview-magnifier]')||p.canvas),focusZoom:(value,options)=>setPreviewFocusZoom(p,value,options),focusPoint:client=>previewFocusPointAtClient(p,client)});return;}
+    if(mode){event.preventDefault();mode.touch=event.pointerType==='touch';activate(p);const ctx=p.canvas.getContext('2d'),fit=sfxAutoFitTransform(ctx,letter);beginLetteringGesture(p,letter,mode,event,sfxTextPoint(ctx,letter,...Object.values(coords(event,p))),p.canvas.getBoundingClientRect().width/imageSize(p.img.width,p.img.height,p.imageEdit).width*Math.min(fit.scaleX,fit.scaleY),{render:()=>drawPage(p),magnify:()=>toggleMagnifier(p,p.row.querySelector('[data-action=preview-magnifier]')||p.canvas),focusZoom:(value,options)=>setPreviewFocusZoom(p,value,options),focusPoint:client=>previewFocusPointAtClient(p,client)});return;}
     if(!event.isPrimary)return;
     if(p.cropDraft){
       event.preventDefault();activate(p);p.canvas.focus({preventScroll:true});
@@ -2293,7 +2298,7 @@ function connectCanvas(p) {
   });
   p.canvas.addEventListener('pointermove', event => {
     const letter=selected(p),mode=activeGlyphEdit(p,letter);
-    if(mode&&moveLetteringGesture(p,letter,mode,event,localPoint(letter,...Object.values(coords(event,p))),{checkpoint:()=>checkpoint(p),render:()=>drawPage(p),focusZoom:(value,options)=>setPreviewFocusZoom(p,value,options)}))return;
+    if(mode&&moveLetteringGesture(p,letter,mode,event,sfxTextPoint(p.canvas.getContext('2d'),letter,...Object.values(coords(event,p))),{checkpoint:()=>checkpoint(p),render:()=>drawPage(p),focusZoom:(value,options)=>setPreviewFocusZoom(p,value,options)}))return;
     if(p.cropDraft){
       if(editLocked())return;
       const pointer=p.cropPointer,pos=previewCoords(event,p);
@@ -2313,7 +2318,7 @@ function connectCanvas(p) {
       updates={x:placement.x,y:placement.y};axis=placement.axis;
     } else if (drag.mode === 'resize') {
       const local = localPoint(l, pos.x, pos.y), w = clamp(Math.round(local.x * 2), 30, 30000), h = clamp(Math.round(local.y * 2), 30, 30000);
-      updates = l.kind==='caption'?{w,h}:l.kind==='balloon'?{w,h,tailX:clamp(drag.start.tailX*w/drag.start.w,...BALLOON_LIMITS.tailX),tailY:clamp(drag.start.tailY*h/drag.start.h,...BALLOON_LIMITS.tailY),tailWidth:clamp(drag.start.tailWidth*Math.min(w/drag.start.w,h/drag.start.h),...BALLOON_LIMITS.tailWidth)}:{ w, h, size: clamp(Math.round(drag.start.size * Math.min(w / drag.start.w, h / drag.start.h)), 8, 500) };
+      updates = l.kind==='caption'||l.kind==='sfx'&&l.autoFit?{w,h}:l.kind==='balloon'?{w,h,tailX:clamp(drag.start.tailX*w/drag.start.w,...BALLOON_LIMITS.tailX),tailY:clamp(drag.start.tailY*h/drag.start.h,...BALLOON_LIMITS.tailY),tailWidth:clamp(drag.start.tailWidth*Math.min(w/drag.start.w,h/drag.start.h),...BALLOON_LIMITS.tailWidth)}:{ w, h, size: clamp(Math.round(drag.start.size * Math.min(w / drag.start.w, h / drag.start.h)), 8, 500) };
     } else if(drag.mode==='tail'){
       const local=localPoint(l,pos.x,pos.y);updates={tailX:clamp(Math.round(local.x),...BALLOON_LIMITS.tailX),tailY:clamp(Math.round(local.y),...BALLOON_LIMITS.tailY),tailAngle:Math.round(Math.atan2(local.y/l.h,local.x/l.w)*180/Math.PI)};
     } else {
