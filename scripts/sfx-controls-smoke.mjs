@@ -73,8 +73,12 @@ try{
   });
   assert.ok(rendering.missing.filter(g=>g.font==='chikara').length===2);assert.ok(rendering.hearts.every(g=>g.ink>30&&g.diff===0));
   assert.match(rendering.captionFonts[0].font,/MangaChikaraYowaku/);for(const g of rendering.captionFonts.slice(1))assert.match(g.font,/MangaGekifude/);assert.ok(rendering.outlinePixels>100);
+  await position.locator('[data-field=rotation]').fill('23');
   page.once('dialog',dialog=>dialog.accept('色付き輪郭'));await card.locator('[data-action=save-preset]').click();const preset=await card.locator('[data-preset-select]').inputValue();
+  await position.locator('[data-field=rotation]').fill('-27');
+  await card.locator('[data-preset-select]').selectOption('sfx-tension');assert.equal(await position.locator('[data-field=rotation]').inputValue(),'-27');
   await card.locator('[data-field=textOutlineColor]').fill('#224466');await card.locator('[data-field=textOutlineColor]').blur();await card.locator('[data-preset-select]').selectOption(preset);assert.equal(await card.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');assert.equal(await number('outline').inputValue(),'8');assert.equal(await placement.getAttribute('open'),'');
+  assert.equal(await position.locator('[data-field=rotation]').inputValue(),'-27');
   await card.locator('[data-action=duplicate]').click();const duplicate=row.locator('[data-kind=sfx]').last();assert.equal(await duplicate.locator('[data-field=textOutlineColor]').inputValue(),'#a63870');await duplicate.locator('[data-action=drop-layer]').click();
   await page.selectOption('#projectFormat','json');let downloading=page.waitForEvent('download');await page.click('#projectSave');let download=await downloading;const project=JSON.parse(await readFile(await download.path(),'utf8'));
   assert.equal(project.pages[0].layers[0].textOutlineColor,'#a63870');assert.ok(Math.abs(project.pages[0].layers[0].outline-8)<1e-9);await page.waitForFunction(()=>!document.querySelector('#projectLoad').disabled);
