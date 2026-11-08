@@ -19,7 +19,6 @@ import { normalizeImageEdit, imageSize, imageMatrix, imagePoint, rotateImage, cr
 import { openFullPreview, previewIsOpen } from './preview-modal.js';
 import { toggleMagnifier, refreshMagnifier, closeMagnifier } from './preview-magnifier.js';
 import { normalizePreviewFocusZoom, previewFocusPanForPoint, previewFocusPointAtCenter, previewFocusPointFromClient, previewFocusPanForAnchor, previewFocusScale } from './preview-focus.js';
-import { exportName } from './renderer.js';
 import { pageExportName, textExport } from './export.js';
 import { PREFS_KEY, defaultPreferences, normalizePreferences, createPreset, applyPreset, PRESET_KINDS, MAX_USER_PRESETS } from './presets.js';
 import { getDraftMeta, getDraftImages, getDraftMasks, clearDraft as forgetDraft } from './storage.js';
@@ -2617,7 +2616,7 @@ async function imageBlob(p,task){
   checkAbort(task?.signal);pngCache.put(key,blob,p.id);return blob;
 }
 async function saveImage(p,task) {
-  const snapshot={...p,layers:structuredClone(p.layers)},name=exportName(p.name,pages.indexOf(p));await prepareExportFonts([snapshot],task);task.stage('PNG生成',1);const blob=await imageBlob(snapshot,task);checkAbort(task.signal);download(blob,name);task.result(name,true,blob.size);status(`「${name}」のダウンロードを開始した`);
+  const snapshot={...p,layers:structuredClone(p.layers)},name=pageExportName(p.name,pages.indexOf(p),pages.length);await prepareExportFonts([snapshot],task);task.stage('PNG生成',1);const blob=await imageBlob(snapshot,task);checkAbort(task.signal);download(blob,name);task.result(name,true,blob.size);status(`「${name}」のダウンロードを開始した`);
 }
 async function saveImages(task,editedOnly=false,picked) {
   if(!picked)return saveImagesZip(task,editedOnly);
