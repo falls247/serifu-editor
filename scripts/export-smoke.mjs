@@ -87,6 +87,13 @@ try {
   await c.locator('[data-action=complete]').click();
   assert.equal(await b.evaluate(node => node.classList.contains('active')), true);
   await b.locator('[data-action=copy-next]').isDisabled().then(value => assert.equal(value, true));
+  const saveImage = async (row, expected) => {
+    const downloading = page.waitForEvent('download');
+    await row.locator('[data-action=save-image]').click();
+    assert.equal((await downloading).suggestedFilename(), expected);
+    await ready();
+  };
+  await saveImage(b, 'p2_b.png');
 
   await mkdir('artifacts', { recursive: true });
   async function textDownload(target, expected) {
@@ -134,6 +141,7 @@ try {
   });
   await page.click('#open'); await ready();
   assert.equal(await rows.count(), 10);
+  await saveImage(b, 'p02_b.png');
   await page.evaluate(() => window.pickDestination = true);
   await page.click('#saveEdited'); await ready();
   assert.deepEqual(await page.evaluate(() => Object.keys(window.outputs[3].files)), ['p01_c.png', 'p03_a.png', 'serifu-project.json']);

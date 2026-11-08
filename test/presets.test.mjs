@@ -27,6 +27,21 @@ test('custom presets and selected defaults round-trip without losing autosave in
   const restored=normalizePreferences(JSON.parse(JSON.stringify(prefs)));assert.equal(restored.defaults.sfx,preset.id);assert.equal(restored.autosave.minutes,.5);
   const applied=applyPreset(newLayer('sfx',1000,750),restored.presets.find(p=>p.id===preset.id),1000,750);assert.equal(applied.blur,4);assert.equal(applied.distortion,70);
 });
+test('効果音プリセットは保存元の回転を引き継がず、既存データや組み込みでも適用先の回転を保つ',()=>{
+  const source={...newLayer('sfx',1000,750),rotation:42,color:'#123456'};
+  const preset=createPreset('効果音',source,1000,750);
+  assert.equal(Object.hasOwn(preset.style,'rotation'),false);
+  const legacy=structuredClone(preset);legacy.style.rotation=42;
+  const prefs=defaultPreferences();prefs.presets.push(legacy);
+  const restored=normalizePreferences(JSON.parse(JSON.stringify(prefs))).presets.find(p=>p.id===legacy.id);
+  for(const candidate of [preset,restored,...prefs.presets.filter(p=>p.kind==='sfx'&&p.builtin)]){
+    const target={...newLayer('sfx',1000,750),rotation:-31};
+    applyPreset(target,candidate,1000,750);assert.equal(target.rotation,-31);
+    if(!candidate.builtin)assert.equal(target.color,'#123456');
+  }
+  const dialogue=createPreset('セリフ',{...newLayer('dialogue',1000,750),rotation:42},1000,750);
+  const target=newLayer('dialogue',1000,750);applyPreset(target,dialogue,1000,750);assert.equal(target.rotation,42);
+});
 test('font size memory defaults to 70px and normalizes saved settings without requiring legacy fields',()=>{
   assert.equal(defaultPreferences().fontSizePreset,70);
   assert.equal(normalizePreferences({version:1}).fontSizePreset,70);
